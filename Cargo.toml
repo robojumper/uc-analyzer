@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "uc_files",
+    "uc_parser",
+    "uc_session",
+]
