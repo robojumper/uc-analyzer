@@ -1,28 +1,29 @@
-use std::{collections::VecDeque, str::FromStr};
+use std::str::FromStr;
 
-use crate::Identifier;
+use uc_def::Identifier;
 
-pub struct SpanExp {
+use crate::NumberLiteral;
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct ExpSpan {
     pub exp_start: usize,
     pub exp_end: usize,
 }
 
 #[derive(Clone, Debug)]
 pub struct Token {
-    pub span: SpanExp,
+    pub span: ExpSpan,
     pub kind: TokenKind,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum TokenKind {
     /// A block or EOL comment
     Comment,
-    /// A (struct)defaultproperties or (struct)cpptext block
-    ForeignBlock(Keyword, Option<SpanExp>),
     /// An unknown start of a token
     Error(char),
     /// A token that hit EOF or an invalid character before being terminated
-    Incomplete(Box<TokenKind>, IncompleteReason),
+    Incomplete(IncompleteReason),
     /// An opening delimiter
     Open(Delim),
     /// A closing delimiter
@@ -33,33 +34,41 @@ pub enum TokenKind {
     Sig(Sigil),
     /// A keyword
     Kw(Keyword),
+    /// The `#`
+    Directive,
     /// An identifier
-    Identifier(Identifier),
+    Identifier,
     /// An integer, hex, or floating point literal
     Number(NumberSyntax),
     /// A string literal
-    String(String),
+    String,
     /// A name literal
-    Name(String),
+    Name,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum IncompleteReason {
     Eol,
     InvalidChar,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Delim {
+    /// `[`
     LBrack,
+    /// `]`
     RBrack,
+    /// `(`
     LParen,
+    /// `)`
     RParen,
+    /// `{`
     LBrace,
+    /// `}`
     RBrace,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Sigil {
     Add,
     AddAdd,
@@ -100,31 +109,65 @@ pub enum Sigil {
     TildeEq,
 }
 
-#[derive(Copy, Clone, Debug, strum::EnumString)]
+impl Sigil {
+    pub fn is_overloadable_op(&self) -> bool {
+        use Sigil::*;
+        match self {
+            Add | AddAdd | AddAssign | And | AndAnd | At | AtAssign | Bang | BangEq | Div
+            | DivAssign | Dollar | DollarAssign | Eq | EqEq | Gt | GtEq | GtGt | GtGtGt | Lt
+            | LtEq | LtLt | Mod | Mul | MulAssign | Or | OrOr | Pow | Sub | SubAssign | SubSub
+            | Tilde | TildeEq => true,
+            Colon | Comma | Dot | Tern => false,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, strum::EnumString, Eq, PartialEq, Hash)]
 #[strum(serialize_all = "lowercase")]
 pub enum Keyword {
     Abstract,
+    Array,
     Class,
     Config,
+    Const,
     CppText,
+    DataBinding,
+    Default,
     DefaultProperties,
+    Delegate,
     DependsOn,
     EditConst,
     EditorOnly,
     Enum,
     Event,
     Extends,
+    Final,
+    Function,
+    Immutable,
+    Interface,
     Localized,
     Native,
+    NoExport,
+    Operator,
     Placeable,
+    PostOperator,
+    PreOperator,
+    Private,
+    PrivateWrite,
+    Protected,
+    ProtectedWrite,
+    Public,
+    Replication,
+    Static,
     Struct,
     StructCppText,
     StructDefaultProperties,
     Transient,
     Var,
+    Within,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum NumberSyntax {
     Int,
     Float,
@@ -132,10 +175,9 @@ pub enum NumberSyntax {
     Wild,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Lexer<'a> {
     source: Source<'a>,
-    peeked: VecDeque<Token>,
 }
 
 fn is_uc_whitespace(c: char) -> bool {
@@ -146,16 +188,11 @@ impl<'a> Lexer<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
             source: Source::new(text),
-            peeked: VecDeque::new(),
         }
     }
 
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<Token> {
-        if let Some(token) = self.peeked.pop_front() {
-            return Some(token);
-        }
-
         let (c, pos) = loop {
             let pos = self.source.pos();
             let c = match self.source.next() {
@@ -256,11 +293,11 @@ impl<'a> Lexer<'a> {
                 }
                 (c, _) => match c {
                     '(' => Open(LParen),
-                    ')' => Open(RParen),
+                    ')' => Close(RParen),
                     '[' => Open(LBrack),
-                    ']' => Open(RBrack),
+                    ']' => Close(RBrack),
                     '{' => Open(LBrace),
-                    '}' => Open(RBrace),
+                    '}' => Close(RBrace),
                     '.' => Sig(Dot),
                     ',' => Sig(Comma),
                     ':' => Sig(Colon),
@@ -281,14 +318,14 @@ impl<'a> Lexer<'a> {
                     '!' => Sig(Bang),
                     '=' => Sig(Eq),
                     '?' => Sig(Tern),
-                    '`' => return Some(self.parse_macro_call(pos)),
+                    '#' => Directive,
                     'a'..='z' | 'A'..='Z' | '_' => return Some(self.parse_ident(pos)),
                     '\'' => return Some(self.parse_name(pos)),
                     '\"' => return Some(self.parse_string(pos)),
                     any => {
                         return Some(Token {
                             kind: TokenKind::Error(any),
-                            span: SpanExp {
+                            span: ExpSpan {
                                 exp_start: pos,
                                 exp_end: self.source.pos(),
                             },
@@ -300,91 +337,54 @@ impl<'a> Lexer<'a> {
 
         Some(Token {
             kind,
-            span: SpanExp {
+            span: ExpSpan {
                 exp_start: pos,
                 exp_end: self.source.pos(),
             },
         })
     }
 
-    fn parse_foreign_block(&mut self, first: usize, kw: Keyword) -> Token {
-        while self.source.peek().map(is_uc_whitespace).unwrap_or(false) {
-            self.source.next();
-        }
-
-        let start_pos;
-        let end_pos;
-
-        match self.source.peek() {
-            Some('{') => {
-                self.source.next();
-                start_pos = self.source.pos();
-            }
-            Some(_) => {
-                return Token {
-                    kind: TokenKind::Incomplete(
-                        Box::new(TokenKind::ForeignBlock(kw, None)),
-                        IncompleteReason::InvalidChar,
-                    ),
-                    span: SpanExp {
-                        exp_start: first,
-                        exp_end: self.source.pos(),
-                    },
-                }
-            }
-            None => {
-                return Token {
-                    kind: TokenKind::Incomplete(
-                        Box::new(TokenKind::ForeignBlock(kw, None)),
-                        IncompleteReason::Eol,
-                    ),
-                    span: SpanExp {
-                        exp_start: first,
-                        exp_end: self.source.pos(),
-                    },
-                }
-            }
-        }
+    /// Eats the {...} from a defaultproperties block, or the <Tooltip=...>
+    /// from a variable declaration. Returns Err(Incomplete) if incomplete.
+    pub fn ignore_foreign_block(&mut self, opener: TokenKind) -> Result<(), Token> {
+        let (recurser, closer) = match opener {
+            TokenKind::Open(Delim::LBrace) => (Some('{'), Some('}')),
+            TokenKind::Sig(Sigil::Lt) => (None, Some('>')),
+            _ => panic!(
+                "TokenKind {:?} is not a valid opener for foreign block",
+                opener
+            ),
+        };
 
         let mut brace_count = 1;
+        let first = self.source.pos();
+
         loop {
             if brace_count == 0 {
-                end_pos = self.source.pos();
                 break;
             }
 
-            match self.source.next() {
-                Some('{') => brace_count += 1,
-                Some('}') => brace_count -= 1,
-                Some(_) => {}
-                None => {
-                    return Token {
-                        kind: TokenKind::Incomplete(
-                            Box::new(TokenKind::ForeignBlock(kw, None)),
-                            IncompleteReason::Eol,
-                        ),
-                        span: SpanExp {
-                            exp_start: first,
-                            exp_end: self.source.pos(),
-                        },
-                    }
-                }
+            let next = if let Some(next) = self.source.next() {
+                next
+            } else {
+                return Err(Token {
+                    span: ExpSpan {
+                        exp_start: first,
+                        exp_end: self.source.pos(),
+                    },
+                    kind: TokenKind::Incomplete(IncompleteReason::Eol),
+                });
+            };
+
+            if recurser.map(|c| c == next).unwrap_or(false) {
+                brace_count += 1;
+            }
+
+            if closer.map(|c| c == next).unwrap_or(false) {
+                brace_count -= 1;
             }
         }
-
-        Token {
-            kind: TokenKind::ForeignBlock(
-                kw,
-                Some(SpanExp {
-                    exp_start: start_pos,
-                    exp_end: end_pos,
-                }),
-            ),
-            span: SpanExp {
-                exp_start: first,
-                exp_end: self.source.pos(),
-            },
-        }
+        Ok(())
     }
 
     fn parse_ident(&mut self, first: usize) -> Token {
@@ -395,29 +395,13 @@ impl<'a> Lexer<'a> {
             self.source.next();
         }
 
-        let span = SpanExp {
+        let span = ExpSpan {
             exp_start: first,
             exp_end: self.source.pos(),
         };
-        let text = &self.source.text[span.start..span.end];
+        let text = &self.source.text[span.exp_start..span.exp_end];
 
         match Keyword::from_str(text) {
-            Ok(
-                kw
-                @
-                (Keyword::CppText
-                | Keyword::StructCppText
-                | Keyword::DefaultProperties
-                | Keyword::StructDefaultProperties),
-            ) => {
-                // Eat a block recognized by a balanced set of curly braces.
-                // Doing this in the lexer might not be 100% proper but since
-                // these blocks can contain properties or C++ syntax,
-                // any consumer of the lexer output would have to
-                // contain the same logic to avoid lexer errors due to weird
-                // tokens (#, \, )
-                self.parse_foreign_block(first, kw)
-            }
             Ok(kw) => Token {
                 kind: TokenKind::Kw(kw),
                 span,
@@ -429,12 +413,34 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    pub fn extract_ident(&self, token: &Token) -> Identifier {
+        assert_eq!(token.kind, TokenKind::Identifier);
+        Identifier::from_str(&self.source.text[token.span.exp_start..token.span.exp_end]).unwrap()
+    }
+
+    pub fn extract_number(&self, token: &Token) -> Result<NumberLiteral, String> {
+        match token.kind {
+            TokenKind::Number(NumberSyntax::Int | NumberSyntax::Hex) => Ok(NumberLiteral::Int(
+                self.source.text[token.span.exp_start..token.span.exp_end]
+                    .parse::<i32>()
+                    .map_err(|e| e.to_string())?,
+            )),
+            TokenKind::Number(NumberSyntax::Float) => Ok(NumberLiteral::Float(
+                self.source.text[token.span.exp_start..token.span.exp_end]
+                    .parse::<f32>()
+                    .map_err(|e| e.to_string())?,
+            )),
+            TokenKind::Number(NumberSyntax::Wild) => Err("unrecognized number format".to_owned()),
+            _ => panic!("not a number: {:?}", token),
+        }
+    }
+
     fn parse_eol_comment(&mut self, first: usize) -> Token {
         while !matches!(self.source.peek(), Some('\r' | '\n') | None) {
             self.source.next();
         }
 
-        let span = SpanExp {
+        let span = ExpSpan {
             exp_start: first,
             exp_end: self.source.pos(),
         };
@@ -445,21 +451,38 @@ impl<'a> Lexer<'a> {
     }
 
     fn parse_block_comment(&mut self, first: usize) -> Token {
+        let mut level = 1;
         loop {
             match self.source.next() {
                 Some('*') => match self.source.peek() {
                     Some('/') => {
                         self.source.next();
-                        break;
+                        level -= 1;
+                        if level == 0 {
+                            break;
+                        }
                     }
                     Some(_) => continue,
                     None => {
                         return Token {
-                            kind: TokenKind::Incomplete(
-                                Box::new(TokenKind::Comment),
-                                IncompleteReason::Eol,
-                            ),
-                            span: SpanExp {
+                            kind: TokenKind::Incomplete(IncompleteReason::Eol),
+                            span: ExpSpan {
+                                exp_start: first,
+                                exp_end: self.source.pos(),
+                            },
+                        }
+                    }
+                },
+                Some('/') => match self.source.peek() {
+                    Some('*') => {
+                        self.source.next();
+                        level += 1;
+                    }
+                    Some(_) => continue,
+                    None => {
+                        return Token {
+                            kind: TokenKind::Incomplete(IncompleteReason::Eol),
+                            span: ExpSpan {
                                 exp_start: first,
                                 exp_end: self.source.pos(),
                             },
@@ -469,11 +492,8 @@ impl<'a> Lexer<'a> {
                 Some(_) => continue,
                 None => {
                     return Token {
-                        kind: TokenKind::Incomplete(
-                            Box::new(TokenKind::Comment),
-                            IncompleteReason::Eol,
-                        ),
-                        span: SpanExp {
+                        kind: TokenKind::Incomplete(IncompleteReason::Eol),
+                        span: ExpSpan {
                             exp_start: first,
                             exp_end: self.source.pos(),
                         },
@@ -484,7 +504,7 @@ impl<'a> Lexer<'a> {
 
         Token {
             kind: TokenKind::Comment,
-            span: SpanExp {
+            span: ExpSpan {
                 exp_start: first,
                 exp_end: self.source.pos(),
             },
@@ -502,7 +522,7 @@ impl<'a> Lexer<'a> {
             self.source.next();
         }
 
-        let span = SpanExp {
+        let span = ExpSpan {
             exp_start: first,
             exp_end: self.source.pos(),
         };
@@ -530,14 +550,12 @@ impl<'a> Lexer<'a> {
                 self.source.next();
                 TokenKind::Name
             }
-            Some(_) => {
-                TokenKind::Incomplete(Box::new(TokenKind::Name), IncompleteReason::InvalidChar)
-            }
-            None => TokenKind::Incomplete(Box::new(TokenKind::Name), IncompleteReason::Eol),
+            Some(_) => TokenKind::Incomplete(IncompleteReason::InvalidChar),
+            None => TokenKind::Incomplete(IncompleteReason::Eol),
         };
         Token {
             kind,
-            span: SpanExp {
+            span: ExpSpan {
                 exp_start: first,
                 exp_end: self.source.pos(),
             },
@@ -551,7 +569,7 @@ impl<'a> Lexer<'a> {
                     self.source.next();
                     return Token {
                         kind: TokenKind::String,
-                        span: SpanExp {
+                        span: ExpSpan {
                             exp_start: first,
                             exp_end: self.source.pos(),
                         },
@@ -562,11 +580,8 @@ impl<'a> Lexer<'a> {
                     match self.source.peek() {
                         Some('\r' | '\n') | None => {
                             return Token {
-                                kind: TokenKind::Incomplete(
-                                    Box::new(TokenKind::String),
-                                    IncompleteReason::Eol,
-                                ),
-                                span: SpanExp {
+                                kind: TokenKind::Incomplete(IncompleteReason::Eol),
+                                span: ExpSpan {
                                     exp_start: first,
                                     exp_end: self.source.pos(),
                                 },
@@ -582,11 +597,8 @@ impl<'a> Lexer<'a> {
                 }
                 None => {
                     return Token {
-                        kind: TokenKind::Incomplete(
-                            Box::new(TokenKind::String),
-                            IncompleteReason::Eol,
-                        ),
-                        span: SpanExp {
+                        kind: TokenKind::Incomplete(IncompleteReason::Eol),
+                        span: ExpSpan {
                             exp_start: first,
                             exp_end: self.source.pos(),
                         },
@@ -597,7 +609,7 @@ impl<'a> Lexer<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Source<'a> {
     text: &'a str,
     chars: std::str::Chars<'a>,

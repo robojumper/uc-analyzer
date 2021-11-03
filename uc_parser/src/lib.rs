@@ -2,10 +2,10 @@
 //! `make -intermediate`.
 
 pub mod lexer;
+pub mod parser;
+
 //pub mod preprocessor;
 //mod arc_owned_chars;
-
-use std::fmt::Display;
 
 use uc_files::Files;
 
@@ -16,17 +16,8 @@ pub struct Span<F: Files> {
     pub end: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct Identifier(unicase::Ascii<String>);
-
-impl Display for Identifier {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl AsRef<str> for Identifier {
-    fn as_ref(&self) -> &str {
-        self.0.as_ref()
-    }
+#[derive(Clone, Copy, Debug)]
+pub enum NumberLiteral {
+    Int(i32),
+    Float(f32),
 }
