@@ -28,8 +28,10 @@ pub enum TokenKind {
     Open(Delim),
     /// A closing delimiter
     Close(Delim),
-    /// The statement delimiter `;`
+    /// The statement and item delimiter `;`
     Semi,
+    /// The variant, arg, name delimiter `,`
+    Comma,
     /// A sigil consisting of 1-3 characters
     Sig(Sigil),
     /// A keyword
@@ -44,6 +46,8 @@ pub enum TokenKind {
     String,
     /// A name literal
     Name,
+    /// A bool literal
+    Bool(bool),
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -68,7 +72,7 @@ pub enum Delim {
     RBrace,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, strum::AsRefStr)]
 pub enum Sigil {
     Add,
     AddAdd,
@@ -80,7 +84,6 @@ pub enum Sigil {
     Bang,
     BangEq,
     Colon,
-    Comma,
     Div,
     DivAssign,
     Dollar,
@@ -97,10 +100,12 @@ pub enum Sigil {
     LtLt,
     Mod,
     Mul,
+    MulMul,
     MulAssign,
     Or,
     OrOr,
     Pow,
+    PowPow,
     Tern,
     Sub,
     SubAssign,
@@ -115,19 +120,20 @@ impl Sigil {
         match self {
             Add | AddAdd | AddAssign | And | AndAnd | At | AtAssign | Bang | BangEq | Div
             | DivAssign | Dollar | DollarAssign | Eq | EqEq | Gt | GtEq | GtGt | GtGtGt | Lt
-            | LtEq | LtLt | Mod | Mul | MulAssign | Or | OrOr | Pow | Sub | SubAssign | SubSub
-            | Tilde | TildeEq => true,
-            Colon | Comma | Dot | Tern => false,
+            | LtEq | LtLt | Mod | Mul | MulAssign | MulMul | Or | OrOr | Pow | PowPow | Sub
+            | SubAssign | SubSub | Tilde | TildeEq => true,
+            Colon | Dot | Tern => false,
         }
     }
 }
 
-#[derive(Copy, Clone, Debug, strum::EnumString, Eq, PartialEq, Hash)]
-#[strum(serialize_all = "lowercase")]
+#[derive(Copy, Clone, Debug, strum::EnumString, strum::AsRefStr, Eq, PartialEq, Hash)]
+#[strum(ascii_case_insensitive)]
 pub enum Keyword {
     Abstract,
     Array,
     Class,
+    Coerce,
     Config,
     Const,
     CppText,
@@ -149,6 +155,8 @@ pub enum Keyword {
     Native,
     NoExport,
     Operator,
+    Optional,
+    Out,
     Placeable,
     PostOperator,
     PreOperator,
@@ -157,7 +165,10 @@ pub enum Keyword {
     Protected,
     ProtectedWrite,
     Public,
+    Ref,
     Replication,
+    Simulated,
+    Skip,
     Static,
     Struct,
     StructCppText,
@@ -165,6 +176,12 @@ pub enum Keyword {
     Transient,
     Var,
     Within,
+}
+
+impl Keyword {
+    pub fn is_weak(&self) -> bool {
+        matches!(self, Keyword::Class | Keyword::Interface | Keyword::Event)
+    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -286,6 +303,14 @@ impl<'a> Lexer<'a> {
                     self.source.next();
                     Sig(TildeEq)
                 }
+                ('^', Some('^')) => {
+                    self.source.next();
+                    Sig(PowPow)
+                }
+                ('*', Some('*')) => {
+                    self.source.next();
+                    Sig(MulMul)
+                }
                 ('/', Some('/')) => return Some(self.parse_eol_comment(pos)),
                 ('/', Some('*')) => return Some(self.parse_block_comment(pos)),
                 ('0'..='9', _) | ('+' | '-', Some('0'..='9')) => {
@@ -299,7 +324,7 @@ impl<'a> Lexer<'a> {
                     '{' => Open(LBrace),
                     '}' => Close(RBrace),
                     '.' => Sig(Dot),
-                    ',' => Sig(Comma),
+                    ',' => Comma,
                     ':' => Sig(Colon),
                     ';' => Semi,
                     '+' => Sig(Add),
@@ -401,16 +426,18 @@ impl<'a> Lexer<'a> {
         };
         let text = &self.source.text[span.exp_start..span.exp_end];
 
-        match Keyword::from_str(text) {
-            Ok(kw) => Token {
-                kind: TokenKind::Kw(kw),
-                span,
-            },
-            Err(_) => Token {
-                kind: TokenKind::Identifier,
-                span,
-            },
-        }
+        let kind = if text.eq_ignore_ascii_case("true") {
+            TokenKind::Bool(true)
+        } else if text.eq_ignore_ascii_case("false") {
+            TokenKind::Bool(false)
+        } else {
+            match Keyword::from_str(text) {
+                Ok(kw) => TokenKind::Kw(kw),
+                Err(_) => TokenKind::Identifier,
+            }
+        };
+
+        Token { kind, span }
     }
 
     pub fn extract_ident(&self, token: &Token) -> Identifier {

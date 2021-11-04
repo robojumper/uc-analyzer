@@ -1,3 +1,5 @@
+#![feature(stdio_locked)]
+
 use std::fs::read_to_string;
 use std::io;
 
@@ -43,7 +45,9 @@ fn main() {
         };
 
         let lexer = lexer::Lexer::new(&contents);
-        let hir = parser::parse(lexer);
-        dbg!(&hir);
+        let (hir, errs) = parser::parse(lexer);
+        dbg!(&errs);
+        let mut out = std::io::stdout_locked();
+        uc_def::pretty::format_hir(&hir, &mut out, uc_def::pretty::IdentifierFormat).unwrap();
     }
 }

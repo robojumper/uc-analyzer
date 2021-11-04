@@ -4,11 +4,12 @@
 use bitflags::bitflags;
 use once_cell::sync::Lazy;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, str::FromStr};
 
 use uc_def::{
-    ClassDef, ClassFlags, ClassHeader, ConstDef, ConstVal, DelegateDef, DimCount, EnumDef, FuncDef,
-    Hir, Identifier, PropFlags, StructDef, Ty, VarDef, VarInstance,
+    ClassDef, ClassFlags, ClassHeader, ConstDef, ConstVal, DelegateDef, DimCount, EnumDef, FuncArg,
+    FuncBody, FuncDef, FuncFlags, FuncSig, Hir, Identifier, PropFlags, StructDef, Ty, VarDef,
+    VarInstance,
 };
 
 use crate::{
@@ -80,6 +81,10 @@ static VAR_MODIFIERS: Lazy<ModifierConfig> = Lazy::new(|| {
         Keyword::Config,
         DeclFollowups::IdentModifiers(ModifierCount::ALLOW_NONE | ModifierCount::ALLOW_ONE),
     );
+    modifiers.insert(
+        Keyword::Localized,
+        DeclFollowups::Nothing,
+    );
     modifiers.insert(Keyword::Const, DeclFollowups::Nothing);
     modifiers.insert(Keyword::EditConst, DeclFollowups::Nothing);
 
@@ -92,6 +97,19 @@ static VAR_MODIFIERS: Lazy<ModifierConfig> = Lazy::new(|| {
     modifiers.insert(Keyword::Protected, DeclFollowups::OptForeignBlock);
     modifiers.insert(Keyword::PrivateWrite, DeclFollowups::OptForeignBlock);
     modifiers.insert(Keyword::ProtectedWrite, DeclFollowups::OptForeignBlock);
+
+    ModifierConfig { modifiers }
+});
+
+static ARG_MODIFIERS: Lazy<ModifierConfig> = Lazy::new(|| {
+    let mut modifiers = HashMap::new();
+
+    modifiers.insert(Keyword::Coerce, DeclFollowups::Nothing);
+    modifiers.insert(Keyword::Const, DeclFollowups::Nothing);
+    modifiers.insert(Keyword::Optional, DeclFollowups::Nothing);
+    modifiers.insert(Keyword::Skip, DeclFollowups::Nothing);
+    modifiers.insert(Keyword::Out, DeclFollowups::Nothing);
+    modifiers.insert(Keyword::Ref, DeclFollowups::Nothing);
 
     ModifierConfig { modifiers }
 });
@@ -123,6 +141,9 @@ static FUNC_MODIFIERS: Lazy<ModifierConfig> = Lazy::new(|| {
 
     modifiers.insert(Keyword::Static, DeclFollowups::Nothing);
     modifiers.insert(Keyword::Final, DeclFollowups::Nothing);
+    modifiers.insert(Keyword::Simulated, DeclFollowups::Nothing);
+
+    modifiers.insert(Keyword::Coerce, DeclFollowups::Nothing);
 
     ModifierConfig { modifiers }
 });
@@ -173,6 +194,21 @@ impl<'a> Parser<'a> {
     fn expect_ident(&mut self) -> Result<Identifier, String> {
         self.expect(Tk::Identifier)
             .map(|t| self.lex.extract_ident(&t))
+    }
+
+    fn expect_ident_weak(&mut self) -> Result<Identifier, String> {
+        let tok = self.next_any()?;
+        match tok.kind {
+            Tk::Identifier => Ok(self.lex.extract_ident(&tok)),
+            Tk::Kw(kw) => {
+                if kw.is_weak() {
+                    Ok(Identifier::from_str(kw.as_ref()).unwrap())
+                } else {
+                    Err(format!("keyword {:?} is strong keyword", kw))
+                }
+            }
+            _ => Err(self.fmt_unexpected(&tok)),
+        }
     }
 
     fn expect_number(&mut self) -> Result<NumberLiteral, String> {
@@ -275,18 +311,23 @@ impl<'a> Parser<'a> {
         Ok(ClassDef { kind: def, name })
     }
 
+    fn parse_const_val(&mut self) -> Result<ConstVal, String> {
+        let tok = self.next_any()?;
+        match tok.kind {
+            Tk::Name => Ok(ConstVal::Name),
+            Tk::String => Ok(ConstVal::String),
+            Tk::Number(NumberSyntax::Int | NumberSyntax::Hex) => Ok(ConstVal::Int),
+            Tk::Number(NumberSyntax::Float) => Ok(ConstVal::Float),
+            Tk::Bool(_) => Ok(ConstVal::Bool),
+            Tk::Identifier => Ok(ConstVal::ValueReference),
+            _ => Err(format!("expected const value, got {:?}", tok)),
+        }
+    }
+
     fn parse_const(&mut self) -> Result<ConstDef, String> {
         let name = self.expect_ident()?;
         self.expect(Tk::Sig(Sigil::Eq))?;
-
-        let val = match self.next_any()?.kind {
-            Tk::Name => ConstVal::Name,
-            Tk::String => ConstVal::String,
-            Tk::Number(NumberSyntax::Int | NumberSyntax::Hex) => ConstVal::Int,
-            Tk::Number(NumberSyntax::Float) => ConstVal::Float,
-            _ => return Err("expected const value".to_owned()),
-        };
-
+        let val = self.parse_const_val()?;
         self.expect(Tk::Semi)?;
 
         Ok(ConstDef { name, val })
@@ -324,21 +365,18 @@ impl<'a> Parser<'a> {
         self.parse_parts_until(Tk::Sig(Sigil::Gt))
     }
 
-    fn parse_var(&mut self) -> Result<VarDef<Identifier>, String> {
-        if self.eat(Tk::Open(Delim::LParen)) {
-            self.eat(Tk::Identifier);
-            self.expect(Tk::Close(Delim::RParen))?;
-        }
+    fn parse_ty(&mut self, first_tok: Option<Token>) -> Result<Ty<Identifier>, String> {
+        let ty_tok = match first_tok {
+            Some(t) => t,
+            _ => self.next_any()?,
+        };
 
-        self.ignore_kws(&*VAR_MODIFIERS)?;
-        let ty_tok = self.next_any()?;
-
-        let ty = match &ty_tok.kind {
+        match &ty_tok.kind {
             Tk::Kw(Keyword::Array) => {
                 self.expect(Tk::Sig(Sigil::Lt))?;
                 let id = self.expect_ident()?;
                 self.expect(Tk::Sig(Sigil::Gt))?;
-                Ty::Array(id)
+                Ok(Ty::Array(id))
             }
             Tk::Kw(Keyword::Class) => {
                 let class = if self.eat(Tk::Sig(Sigil::Lt)) {
@@ -348,26 +386,35 @@ impl<'a> Parser<'a> {
                 } else {
                     None
                 };
-                Ty::Class(class)
+                Ok(Ty::Class(class))
             }
-            Tk::Kw(Keyword::Delegate) => Ty::Delegate(self.parse_angle_type()?),
-            Tk::Identifier => Ty::Simple(self.lex.extract_ident(&ty_tok)),
-            _ => {
-                return Err(format!("expected type after modifiers, got {:?}", ty_tok));
+            Tk::Kw(Keyword::Delegate) => Ok(Ty::Delegate(self.parse_angle_type()?)),
+            Tk::Identifier => Ok(Ty::Simple(self.lex.extract_ident(&ty_tok))),
+            Tk::Kw(kw) if kw.is_weak() => {
+                Ok(Ty::Simple(Identifier::from_str(kw.as_ref()).unwrap()))
             }
-        };
+            _ => Err(format!("expected type after modifiers, got {:?}", ty_tok)),
+        }
+    }
+
+    fn parse_var(&mut self) -> Result<VarDef<Identifier>, String> {
+        if self.eat(Tk::Open(Delim::LParen)) {
+            self.eat(Tk::Identifier);
+            self.expect(Tk::Close(Delim::RParen))?;
+        }
+
+        self.ignore_kws(&*VAR_MODIFIERS)?;
+        let ty = self.parse_ty(None)?;
 
         let mut names = vec![];
 
         loop {
-            let var_name = self.expect_ident()?;
+            let var_name = self.expect_ident_weak()?;
             let count = if self.eat(Tk::Open(Delim::LBrack)) {
                 match self.peek_any()?.kind {
                     Tk::Number(_) => {
                         let cnt_lit = self.expect_number()?;
-                        let cnt = if let NumberLiteral::Int(cnt) = cnt_lit {
-                            cnt
-                        } else {
+                        let NumberLiteral::Int(cnt) = cnt_lit else {
                             return Err("not an integer".to_owned());
                         };
                         self.expect(Tk::Close(Delim::RBrack))?;
@@ -403,7 +450,7 @@ impl<'a> Parser<'a> {
                 count,
             });
 
-            if !self.eat(Tk::Sig(Sigil::Comma)) {
+            if !self.eat(Tk::Comma) {
                 break;
             }
         }
@@ -428,7 +475,7 @@ impl<'a> Parser<'a> {
                 break;
             }
             if comma {
-                self.expect(Tk::Sig(Sigil::Comma))?;
+                self.expect(Tk::Comma)?;
             }
             if self.eat(Tk::Close(Delim::RBrace)) {
                 break;
@@ -497,6 +544,77 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_function(&mut self, first: Token) -> Result<FuncDef<Identifier>, String> {
+        let Tk::Kw(kw) = first.kind else { panic!("parse_function needs the first function kw") };
+        let followups = FUNC_MODIFIERS
+            .modifiers
+            .get(&kw)
+            .expect("not a valid function keyword");
+        self.ignore_followups(followups)?;
+        self.ignore_kws(&*FUNC_MODIFIERS)?;
+
+        let ty_or_name = self.next_any()?;
+        let (ret_ty, name) = match (ty_or_name.kind, self.peek_any()?.kind) {
+            (Tk::Identifier, Tk::Open(Delim::LParen)) => {
+                (None, self.lex.extract_ident(&ty_or_name))
+            }
+            _ => (Some(self.parse_ty(Some(ty_or_name))?), {
+                let name_tok = self.next_any()?;
+                match name_tok.kind {
+                    Tk::Identifier => self.lex.extract_ident(&name_tok),
+                    Tk::Sig(s) if s.is_overloadable_op() => {
+                        Identifier::from_str(&format!("__op_{}", s.as_ref())).unwrap()
+                    }
+                    _ => return Err(format!("expected function name, got {:?}", name_tok)),
+                }
+            }),
+        };
+
+        self.expect(Tk::Open(Delim::LParen))?;
+        let mut comma = false;
+        let mut args = vec![];
+        loop {
+            if self.eat(Tk::Close(Delim::RParen)) {
+                break;
+            }
+            if comma {
+                self.expect(Tk::Comma)?;
+            }
+
+            self.ignore_kws(&*ARG_MODIFIERS)?;
+            let ty = self.parse_ty(None)?;
+            let name = self.expect_ident_weak()?;
+
+            let val = if self.eat(Tk::Sig(Sigil::Eq)) {
+                Some(self.parse_const_val()?)
+            } else {
+                None
+            };
+
+            args.push(FuncArg { ty, name, val });
+
+            comma = true;
+        }
+
+        let body = if self.eat(Tk::Semi) {
+            None
+        } else if self.eat(Tk::Open(Delim::LBrace)) {
+            // TODO: Body
+            self.ignore_foreign_block(Tk::Open(Delim::LBrace))?;
+            Some(FuncBody { locals: vec![] })
+        } else {
+            return Err("expected ; or {".to_owned());
+        };
+
+        Ok(FuncDef {
+            name,
+            overrides: None,
+            flags: FuncFlags::empty(),
+            sig: FuncSig { ret_ty, args },
+            body,
+        })
+    }
+
     fn ignore_directive(&mut self) -> Result<(), String> {
         let directive_name = self.expect_ident()?;
         if directive_name.as_ref().eq_ignore_ascii_case("error") {
@@ -527,30 +645,27 @@ impl<'a> Parser<'a> {
             DeclFollowups::IdentModifiers(mods) | DeclFollowups::NumberModifiers(mods) => {
                 match self.peek() {
                     Some(Token {
-                        kind: Tk::Open(Delim::LBrace),
+                        kind: Tk::Open(Delim::LParen),
                         ..
                     }) => {
                         if mods.intersects(ModifierCount::ALLOW_PAREN) {
                             self.next();
                             let mut comma = false;
                             loop {
-                                match self.peek() {
-                                    Some(Token {
-                                        kind: Tk::Close(Delim::RBrace),
-                                        ..
-                                    }) => {
-                                        self.next();
-                                        break Ok(());
-                                    }
-                                    Some(_) | None => {}
+                                if self.eat(Tk::Close(Delim::RParen)) {
+                                    break Ok(());
                                 }
                                 if comma {
-                                    self.expect(Tk::Sig(Sigil::Comma))?;
+                                    self.expect(Tk::Comma)?;
                                 }
-                                if let DeclFollowups::IdentModifiers(_) = followups {
-                                    self.expect_ident()?;
-                                } else {
-                                    self.expect_number()?;
+                                match followups {
+                                    DeclFollowups::IdentModifiers(_) => {
+                                        self.expect_ident()?;
+                                    }
+                                    &DeclFollowups::NumberModifiers(_) => {
+                                        self.expect_number()?;
+                                    }
+                                    _ => unreachable!("checked in outer match"),
                                 }
                                 comma = true;
                             }
@@ -558,11 +673,11 @@ impl<'a> Parser<'a> {
                             Ok(())
                         }
                     }
-                    Some(_) | None => {
-                        if mods.contains(ModifierCount::ALLOW_EMPTY) {
+                    t @ (Some(_) | None) => {
+                        if mods.contains(ModifierCount::ALLOW_NONE) {
                             Ok(())
                         } else {
-                            Err("missing followups".to_owned())
+                            Err(format!("missing followups: {:?}, got {:?}", followups, t))
                         }
                     }
                 }
@@ -602,7 +717,9 @@ impl<'a> Parser<'a> {
                         self.ignore_foreign_block(brace.kind)?;
                         continue;
                     }
-                    Tk::Kw(kw) if FUNC_MODIFIERS.modifiers.contains_key(&kw) => Ok(Some(self.parse_function()?)),
+                    Tk::Kw(kw) if FUNC_MODIFIERS.modifiers.contains_key(&kw) => {
+                        Ok(Some(TopLevelItem::Func(self.parse_function(tok)?)))
+                    }
                     Tk::Directive => {
                         self.ignore_directive()?;
                         continue;
@@ -631,13 +748,39 @@ impl<'a> Parser<'a> {
     }
 }
 
-pub fn parse(lex: Lexer) -> Hir<Identifier> {
+pub fn parse(lex: Lexer) -> (Hir<Identifier>, Vec<String>) {
     let mut parser = Parser::new(lex);
-    let x = parser.parse_class_def();
-    println!("{:#?}", &x);
+    let header = parser.parse_class_def().unwrap();
     let items = parser.parse_items();
-    println!("{:#?}", &items);
-    println!("{:#?}", &parser.errs);
 
-    todo!();
+    let mut structs = vec![];
+    let mut enums = vec![];
+    let mut consts = vec![];
+    let mut vars = vec![];
+    let mut delegate_defs = vec![];
+    let mut funcs = vec![];
+
+    for i in items {
+        match i {
+            TopLevelItem::Const(c) => consts.push(c),
+            TopLevelItem::Var(v) => vars.push(v),
+            TopLevelItem::Struct(s) => structs.push(s),
+            TopLevelItem::Enum(e) => enums.push(e),
+            TopLevelItem::Delegate(d) => delegate_defs.push(d),
+            TopLevelItem::Func(f) => funcs.push(f),
+        }
+    }
+
+    (
+        Hir {
+            header,
+            structs,
+            enums,
+            consts,
+            vars,
+            delegate_defs,
+            funcs,
+        },
+        parser.errs,
+    )
 }

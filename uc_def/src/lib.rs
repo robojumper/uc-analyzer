@@ -2,6 +2,8 @@ use std::{fmt::Display, str::FromStr};
 
 use bitflags::bitflags;
 
+pub mod pretty;
+
 bitflags! {
     pub struct ClassFlags: u32 {
         const NATIVE = 1 << 0;
@@ -55,10 +57,10 @@ impl AsRef<str> for Identifier {
 #[derive(Debug)]
 pub struct Hir<T> {
     pub header: ClassDef<T>,
-    pub vars: Vec<VarDef<T>>,
     pub structs: Vec<StructDef<T>>,
-    pub consts: Vec<ConstDef>,
     pub enums: Vec<EnumDef>,
+    pub consts: Vec<ConstDef>,
+    pub vars: Vec<VarDef<T>>,
     pub delegate_defs: Vec<DelegateDef<T>>,
     pub funcs: Vec<FuncDef<T>>,
 }
@@ -105,10 +107,13 @@ pub struct ConstDef {
 
 #[derive(Debug)]
 pub enum ConstVal {
+    Bool,
     Int,
     String,
     Name,
     Float,
+    /// Enum value? Other const?
+    ValueReference,
 }
 
 #[derive(Debug)]
@@ -154,15 +159,15 @@ pub struct FuncDef<T> {
 
 #[derive(Debug)]
 pub struct FuncSig<T> {
-    pub ret_ty: Option<T>,
+    pub ret_ty: Option<Ty<T>>,
     pub args: Vec<FuncArg<T>>,
 }
 
 #[derive(Debug)]
 pub struct FuncArg<T> {
-    pub ty: T,
+    pub ty: Ty<T>,
     pub name: Identifier,
-    pub out: bool,
+    pub val: Option<ConstVal>,
 }
 
 #[derive(Debug)]
