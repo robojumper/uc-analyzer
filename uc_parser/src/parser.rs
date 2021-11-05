@@ -1,10 +1,8 @@
 //! The UnrealScript parser, parsing lexemes to an unresolved
 //! High level Intermediate Represenation.
+use std::str::FromStr;
 
-use bitflags::bitflags;
-use once_cell::sync::Lazy;
-
-use std::{collections::HashMap, str::FromStr};
+mod modifiers;
 
 use uc_def::{
     ClassDef, ClassFlags, ClassHeader, ConstDef, ConstVal, DelegateDef, DimCount, EnumDef, FuncArg,
@@ -16,6 +14,8 @@ use crate::{
     lexer::{Delim, Keyword, Lexer, NumberSyntax, Sigil, Token, TokenKind as Tk},
     NumberLiteral,
 };
+
+use self::modifiers::{DeclFollowups, ModifierConfig, ModifierCount};
 
 #[derive(Debug)]
 enum TopLevelItem {
@@ -33,120 +33,6 @@ struct Parser<'a> {
     open_delims: isize,
     errs: Vec<String>,
 }
-
-bitflags! {
-    pub struct ModifierCount: u32 {
-        const ALLOW_NONE = 1 << 0;
-        const ALLOW_EMPTY = 1 << 1;
-        const ALLOW_ONE = 1 << 2;
-        const ALLOW_MULTIPLE = 1 << 3;
-
-        const ALLOW_PAREN = Self::ALLOW_NONE.bits | Self::ALLOW_ONE.bits | Self::ALLOW_MULTIPLE.bits;
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-enum DeclFollowups {
-    /// `var const`
-    Nothing,
-    /// `var private{private}`
-    OptForeignBlock,
-    /// `var(Category)`
-    IdentModifiers(ModifierCount),
-    /// `native(129)`
-    NumberModifiers(ModifierCount),
-}
-
-#[derive(Clone, Debug)]
-struct ModifierConfig {
-    modifiers: HashMap<Keyword, DeclFollowups>,
-}
-
-static CLASS_MODIFIERS: Lazy<ModifierConfig> = Lazy::new(|| {
-    let mut modifiers = HashMap::new();
-
-    modifiers.insert(
-        Keyword::Native,
-        DeclFollowups::IdentModifiers(ModifierCount::ALLOW_NONE | ModifierCount::ALLOW_ONE),
-    );
-
-    ModifierConfig { modifiers }
-});
-
-static VAR_MODIFIERS: Lazy<ModifierConfig> = Lazy::new(|| {
-    let mut modifiers = HashMap::new();
-
-    modifiers.insert(Keyword::Native, DeclFollowups::Nothing);
-    modifiers.insert(
-        Keyword::Config,
-        DeclFollowups::IdentModifiers(ModifierCount::ALLOW_NONE | ModifierCount::ALLOW_ONE),
-    );
-    modifiers.insert(
-        Keyword::Localized,
-        DeclFollowups::Nothing,
-    );
-    modifiers.insert(Keyword::Const, DeclFollowups::Nothing);
-    modifiers.insert(Keyword::EditConst, DeclFollowups::Nothing);
-
-    modifiers.insert(Keyword::NoExport, DeclFollowups::Nothing);
-    modifiers.insert(Keyword::Transient, DeclFollowups::Nothing);
-    modifiers.insert(Keyword::DataBinding, DeclFollowups::Nothing);
-
-    modifiers.insert(Keyword::Public, DeclFollowups::OptForeignBlock);
-    modifiers.insert(Keyword::Private, DeclFollowups::OptForeignBlock);
-    modifiers.insert(Keyword::Protected, DeclFollowups::OptForeignBlock);
-    modifiers.insert(Keyword::PrivateWrite, DeclFollowups::OptForeignBlock);
-    modifiers.insert(Keyword::ProtectedWrite, DeclFollowups::OptForeignBlock);
-
-    ModifierConfig { modifiers }
-});
-
-static ARG_MODIFIERS: Lazy<ModifierConfig> = Lazy::new(|| {
-    let mut modifiers = HashMap::new();
-
-    modifiers.insert(Keyword::Coerce, DeclFollowups::Nothing);
-    modifiers.insert(Keyword::Const, DeclFollowups::Nothing);
-    modifiers.insert(Keyword::Optional, DeclFollowups::Nothing);
-    modifiers.insert(Keyword::Skip, DeclFollowups::Nothing);
-    modifiers.insert(Keyword::Out, DeclFollowups::Nothing);
-    modifiers.insert(Keyword::Ref, DeclFollowups::Nothing);
-
-    ModifierConfig { modifiers }
-});
-
-static STRUCT_MODIFIERS: Lazy<ModifierConfig> = Lazy::new(|| {
-    let mut modifiers = HashMap::new();
-
-    modifiers.insert(Keyword::Native, DeclFollowups::Nothing);
-    modifiers.insert(Keyword::Immutable, DeclFollowups::Nothing);
-
-    ModifierConfig { modifiers }
-});
-
-static FUNC_MODIFIERS: Lazy<ModifierConfig> = Lazy::new(|| {
-    let mut modifiers = HashMap::new();
-
-    modifiers.insert(Keyword::Function, DeclFollowups::Nothing);
-    modifiers.insert(Keyword::Event, DeclFollowups::Nothing);
-    modifiers.insert(
-        Keyword::Native,
-        DeclFollowups::NumberModifiers(ModifierCount::ALLOW_NONE | ModifierCount::ALLOW_ONE),
-    );
-    modifiers.insert(
-        Keyword::Operator,
-        DeclFollowups::NumberModifiers(ModifierCount::ALLOW_NONE | ModifierCount::ALLOW_ONE),
-    );
-    modifiers.insert(Keyword::PreOperator, DeclFollowups::Nothing);
-    modifiers.insert(Keyword::PostOperator, DeclFollowups::Nothing);
-
-    modifiers.insert(Keyword::Static, DeclFollowups::Nothing);
-    modifiers.insert(Keyword::Final, DeclFollowups::Nothing);
-    modifiers.insert(Keyword::Simulated, DeclFollowups::Nothing);
-
-    modifiers.insert(Keyword::Coerce, DeclFollowups::Nothing);
-
-    ModifierConfig { modifiers }
-});
 
 impl<'a> Parser<'a> {
     fn new(lex: Lexer<'a>) -> Self {
@@ -204,7 +90,7 @@ impl<'a> Parser<'a> {
                 if kw.is_weak() {
                     Ok(Identifier::from_str(kw.as_ref()).unwrap())
                 } else {
-                    Err(format!("keyword {:?} is strong keyword", kw))
+                    Err(format!("token {:?} is strong keyword", tok))
                 }
             }
             _ => Err(self.fmt_unexpected(&tok)),
@@ -285,9 +171,9 @@ impl<'a> Parser<'a> {
                 None
             };
 
-            // TODO: Parse all the class modifiers
-            //self.expect(TokenKind::Semi)?;
-            self.recover_to_semi();
+            self.ignore_kws(&*modifiers::CLASS_MODIFIERS)?;
+
+            self.expect(Tk::Semi)?;
 
             ClassHeader::Class {
                 extends,
@@ -302,7 +188,7 @@ impl<'a> Parser<'a> {
                 None
             };
 
-            self.eat(Tk::Kw(Keyword::Native));
+            self.ignore_kws(&*modifiers::INTERFACE_MODIFIERS)?;
             self.expect(Tk::Semi)?;
 
             ClassHeader::Interface { extends }
@@ -390,6 +276,11 @@ impl<'a> Parser<'a> {
             }
             Tk::Kw(Keyword::Delegate) => Ok(Ty::Delegate(self.parse_angle_type()?)),
             Tk::Identifier => Ok(Ty::Simple(self.lex.extract_ident(&ty_tok))),
+            Tk::Kw(Keyword::Map) => {
+                self.expect(Tk::Open(Delim::LBrace))?;
+                self.ignore_foreign_block(Tk::Open(Delim::LBrace))?;
+                Ok(Ty::Simple(Identifier::from_str("Map").unwrap()))
+            }
             Tk::Kw(kw) if kw.is_weak() => {
                 Ok(Ty::Simple(Identifier::from_str(kw.as_ref()).unwrap()))
             }
@@ -403,7 +294,7 @@ impl<'a> Parser<'a> {
             self.expect(Tk::Close(Delim::RParen))?;
         }
 
-        self.ignore_kws(&*VAR_MODIFIERS)?;
+        self.ignore_kws(&*modifiers::VAR_MODIFIERS)?;
         let ty = self.parse_ty(None)?;
 
         let mut names = vec![];
@@ -508,7 +399,7 @@ impl<'a> Parser<'a> {
         if self.eat(Tk::Open(Delim::LBrace)) {
             self.ignore_foreign_block(Tk::Open(Delim::LBrace))?;
         }
-        self.ignore_kws(&*STRUCT_MODIFIERS)?;
+        self.ignore_kws(&*modifiers::STRUCT_MODIFIERS)?;
         let name = self.expect_ident()?;
 
         let extends = if self.eat(Tk::Kw(Keyword::Extends)) {
@@ -544,25 +435,24 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_function(&mut self, first: Token) -> Result<FuncDef<Identifier>, String> {
-        let Tk::Kw(kw) = first.kind else { panic!("parse_function needs the first function kw") };
-        let followups = FUNC_MODIFIERS
-            .modifiers
-            .get(&kw)
-            .expect("not a valid function keyword");
-        self.ignore_followups(followups)?;
-        self.ignore_kws(&*FUNC_MODIFIERS)?;
-
+    fn parse_function_sig(
+        &mut self,
+        allow_op_sigil: bool,
+    ) -> Result<(Identifier, FuncSig<Identifier>), String> {
         let ty_or_name = self.next_any()?;
         let (ret_ty, name) = match (ty_or_name.kind, self.peek_any()?.kind) {
             (Tk::Identifier, Tk::Open(Delim::LParen)) => {
                 (None, self.lex.extract_ident(&ty_or_name))
             }
+            (Tk::Kw(kw), Tk::Open(Delim::LParen)) if kw.is_weak() => {
+                (None, Identifier::from_str(kw.as_ref()).unwrap())
+            }
             _ => (Some(self.parse_ty(Some(ty_or_name))?), {
                 let name_tok = self.next_any()?;
                 match name_tok.kind {
                     Tk::Identifier => self.lex.extract_ident(&name_tok),
-                    Tk::Sig(s) if s.is_overloadable_op() => {
+                    Tk::Kw(kw) if kw.is_weak() => Identifier::from_str(kw.as_ref()).unwrap(),
+                    Tk::Sig(s) if allow_op_sigil && s.is_overloadable_op() => {
                         Identifier::from_str(&format!("__op_{}", s.as_ref())).unwrap()
                     }
                     _ => return Err(format!("expected function name, got {:?}", name_tok)),
@@ -581,7 +471,7 @@ impl<'a> Parser<'a> {
                 self.expect(Tk::Comma)?;
             }
 
-            self.ignore_kws(&*ARG_MODIFIERS)?;
+            self.ignore_kws(&*modifiers::ARG_MODIFIERS)?;
             let ty = self.parse_ty(None)?;
             let name = self.expect_ident_weak()?;
 
@@ -595,6 +485,20 @@ impl<'a> Parser<'a> {
 
             comma = true;
         }
+        Ok((name, FuncSig { ret_ty, args }))
+    }
+
+    fn parse_function(&mut self, first: Token) -> Result<FuncDef<Identifier>, String> {
+        let Tk::Kw(kw) = first.kind else { panic!("parse_function needs the first function kw") };
+        let followups = modifiers::FUNC_MODIFIERS
+            .get(kw)
+            .expect("not a valid function keyword");
+        self.ignore_followups(followups)?;
+        self.ignore_kws(&*modifiers::FUNC_MODIFIERS)?;
+
+        let (name, sig) = self.parse_function_sig(true)?;
+
+        self.eat(Tk::Kw(Keyword::Const));
 
         let body = if self.eat(Tk::Semi) {
             None
@@ -603,16 +507,32 @@ impl<'a> Parser<'a> {
             self.ignore_foreign_block(Tk::Open(Delim::LBrace))?;
             Some(FuncBody { locals: vec![] })
         } else {
-            return Err("expected ; or {".to_owned());
+            return Err(format!("expected ; or {{, got {:?}", self.peek_any()));
         };
 
         Ok(FuncDef {
             name,
             overrides: None,
             flags: FuncFlags::empty(),
-            sig: FuncSig { ret_ty, args },
+            sig,
             body,
         })
+    }
+
+    fn parse_state(&mut self) -> Result<(), String> {
+        // TODO
+        self.expect_ident()?;
+        self.expect(Tk::Open(Delim::LBrace))?;
+        self.ignore_foreign_block(Tk::Open(Delim::LBrace))?;
+
+        Ok(())
+    }
+
+    fn parse_delegate(&mut self) -> Result<DelegateDef<Identifier>, String> {
+        let (name, sig) = self.parse_function_sig(false)?;
+        self.expect(Tk::Semi)?;
+
+        Ok(DelegateDef { name, sig })
     }
 
     fn ignore_directive(&mut self) -> Result<(), String> {
@@ -690,7 +610,7 @@ impl<'a> Parser<'a> {
             let kw_or_next = self.peek();
             match &kw_or_next {
                 Some(tok) => match tok.kind {
-                    Tk::Kw(kw) => match mods.modifiers.get(&kw) {
+                    Tk::Kw(kw) => match mods.get(kw) {
                         Some(followups) => {
                             self.next();
                             self.ignore_followups(followups)?;
@@ -706,28 +626,51 @@ impl<'a> Parser<'a> {
 
     fn parse_one_item(&mut self) -> Result<Option<TopLevelItem>, String> {
         loop {
-            break match self.next() {
-                Some(tok) => match tok.kind {
+            break match (self.next(), self.peek()) {
+                (
+                    Some(Token {
+                        kind: Tk::Kw(Keyword::Simulated),
+                        ..
+                    }),
+                    Some(Token {
+                        kind: Tk::Kw(Keyword::State),
+                        ..
+                    }),
+                ) => {
+                    // hardcoded exception for simulated state
+                    self.next();
+                    self.parse_state()?;
+                    continue;
+                }
+                (Some(tok), _) => match tok.kind {
                     Tk::Kw(Keyword::Const) => Ok(Some(TopLevelItem::Const(self.parse_const()?))),
                     Tk::Kw(Keyword::Var) => Ok(Some(TopLevelItem::Var(self.parse_var()?))),
                     Tk::Kw(Keyword::Enum) => Ok(Some(TopLevelItem::Enum(self.parse_enum()?))),
                     Tk::Kw(Keyword::Struct) => Ok(Some(TopLevelItem::Struct(self.parse_struct()?))),
+                    Tk::Kw(Keyword::Delegate) => {
+                        Ok(Some(TopLevelItem::Delegate(self.parse_delegate()?)))
+                    }
                     Tk::Kw(Keyword::CppText | Keyword::DefaultProperties) => {
                         let brace = self.expect(Tk::Open(Delim::LBrace))?;
                         self.ignore_foreign_block(brace.kind)?;
                         continue;
                     }
-                    Tk::Kw(kw) if FUNC_MODIFIERS.modifiers.contains_key(&kw) => {
+                    Tk::Kw(Keyword::State) => {
+                        self.parse_state()?;
+                        continue;
+                    }
+                    Tk::Kw(kw) if modifiers::FUNC_MODIFIERS.contains(kw) => {
                         Ok(Some(TopLevelItem::Func(self.parse_function(tok)?)))
                     }
                     Tk::Directive => {
                         self.ignore_directive()?;
                         continue;
                     }
+                    Tk::Semi => continue,
                     Tk::Comment => unreachable!("filtered out in next"),
-                    _ => continue,
+                    _ => panic!("Unknown start of item: {:?}", tok),
                 },
-                None => Ok(None),
+                (None, _) => Ok(None),
             };
         }
     }
@@ -778,7 +721,7 @@ pub fn parse(lex: Lexer) -> (Hir<Identifier>, Vec<String>) {
             enums,
             consts,
             vars,
-            delegate_defs,
+            dels: delegate_defs,
             funcs,
         },
         parser.errs,

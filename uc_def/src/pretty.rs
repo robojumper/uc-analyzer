@@ -1,7 +1,8 @@
 use std::io;
 
 use crate::{
-    ClassDef, ClassHeader, ConstDef, EnumDef, FuncDef, Hir, Identifier, StructDef, Ty, VarDef,
+    ClassDef, ClassHeader, ConstDef, DelegateDef, EnumDef, FuncDef, Hir, Identifier, StructDef, Ty,
+    VarDef,
 };
 
 pub trait RefLookup {
@@ -198,6 +199,31 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         Ok(())
     }
 
+    fn format_del(&mut self, f: &DelegateDef<R::From>) -> io::Result<()> {
+        self.w.write_all(b"delegate ")?;
+        if let Some(ty) = &f.sig.ret_ty {
+            self.format_ty(ty)?;
+            self.w.write_all(b" ")?;
+        }
+        self.w.write_all(f.name.as_ref().as_bytes())?;
+        self.w.write_all(b"(")?;
+        for (idx, inst) in f.sig.args.iter().enumerate() {
+            self.format_ty(&inst.ty)?;
+            self.w.write_all(b" ")?;
+            self.w.write_all(inst.name.as_ref().as_bytes())?;
+            if let Some(c) = &inst.val {
+                self.w.write_all(b" = ")?;
+                self.w.write_fmt(format_args!("{:?}", c))?;
+            }
+
+            if idx != f.sig.args.len() - 1 {
+                self.w.write_all(b", ")?;
+            }
+        }
+        self.w.write_all(b");\n")?;
+        Ok(())
+    }
+
     fn format_func(&mut self, f: &FuncDef<R::From>) -> io::Result<()> {
         self.w.write_all(b"function ")?;
         if let Some(ty) = &f.sig.ret_ty {
@@ -260,6 +286,11 @@ pub fn format_hir<W: io::Write, I, R: RefLookup<From = I>>(
 
     for var in &hir.vars {
         printer.format_var(var)?;
+    }
+    printer.w.write_all(b"\n")?;
+
+    for del in &hir.dels {
+        printer.format_del(del)?;
     }
     printer.w.write_all(b"\n")?;
 

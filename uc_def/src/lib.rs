@@ -61,7 +61,7 @@ pub struct Hir<T> {
     pub enums: Vec<EnumDef>,
     pub consts: Vec<ConstDef>,
     pub vars: Vec<VarDef<T>>,
-    pub delegate_defs: Vec<DelegateDef<T>>,
+    pub dels: Vec<DelegateDef<T>>,
     pub funcs: Vec<FuncDef<T>>,
 }
 

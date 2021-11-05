@@ -132,8 +132,11 @@ impl Sigil {
 pub enum Keyword {
     Abstract,
     Array,
+    Client,
     Class,
+    ClassGroup,
     Coerce,
+    CollapseCategories,
     Config,
     Const,
     CppText,
@@ -142,21 +145,35 @@ pub enum Keyword {
     DefaultProperties,
     Delegate,
     DependsOn,
+    Deprecated,
+    DuplicateTransient,
     EditConst,
+    EditInline,
+    EditInlineNew,
     EditorOnly,
     Enum,
     Event,
+    Exec,
     Extends,
     Final,
     Function,
+    GlobalConfig,
+    HideCategories,
     Immutable,
+    Implements,
+    Inherits,
+    Init,
     Interface,
     Localized,
+    Map,
     Native,
+    NativeReplication,
     NoExport,
+    NotPlaceable,
     Operator,
     Optional,
     Out,
+    PerObjectConfig,
     Placeable,
     PostOperator,
     PreOperator,
@@ -166,9 +183,13 @@ pub enum Keyword {
     ProtectedWrite,
     Public,
     Ref,
+    Reliable,
     Replication,
+    Server,
+    ShowCategories,
     Simulated,
     Skip,
+    State,
     Static,
     Struct,
     StructCppText,
@@ -180,7 +201,10 @@ pub enum Keyword {
 
 impl Keyword {
     pub fn is_weak(&self) -> bool {
-        matches!(self, Keyword::Class | Keyword::Interface | Keyword::Event)
+        matches!(
+            self,
+            Keyword::Class | Keyword::Interface | Keyword::Event | Keyword::Init
+        )
     }
 }
 
