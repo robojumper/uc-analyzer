@@ -289,7 +289,19 @@ pub enum BaseExpr<T> {
     ExplContextExpr {
         access: ExplContextAccess,
     },
-    LiteralExpr {},
+    LiteralExpr {
+        lit: Literal,
+    },
+}
+
+#[derive(Debug)]
+pub enum Literal {
+    None,
+    ObjReference,
+    Number,
+    Bool,
+    Name,
+    String,
 }
 
 #[derive(Debug)]
