@@ -173,10 +173,142 @@ pub struct FuncArg<T> {
 #[derive(Debug)]
 pub struct FuncBody<T> {
     pub locals: Vec<Local<T>>,
+    pub statements: Vec<Statement<T>>,
+}
+
+#[derive(Debug)]
+pub enum Statement<T> {
+    IfStatement {
+        cond: Expr<T>,
+        then: BlockOrStatement<T>,
+        or_else: Option<BlockOrStatement<T>>,
+    },
+    ForStatement {
+        init: Box<Statement<T>>,
+        cond: Expr<T>,
+        every: Box<Statement<T>>,
+        run: BlockOrStatement<T>,
+    },
+    ForeachStatement {
+        source: Expr<T>,
+        dest: T,
+        run: BlockOrStatement<T>,
+    },
+    WhileStatement {
+        cond: Expr<T>,
+        run: BlockOrStatement<T>,
+    },
+    DoStatement {
+        cond: Expr<T>,
+        run: BlockOrStatement<T>,
+    },
+    SwitchStatement {
+        scrutinee: Expr<T>,
+        cases: Vec<CaseClause<T>>,
+    },
+    BreakStatement,
+    ContinueStatement,
+    GotoStatement,
+    ReturnStatement,
+    Label,
+    Expression(Expr<T>),
+}
+
+#[derive(Debug)]
+pub struct CaseClause<T> {
+    pub case: Case<T>,
+    pub statements: Vec<Statement<T>>,
+}
+
+#[derive(Debug)]
+pub enum Case<T> {
+    Case(Expr<T>),
+    Default,
+}
+
+#[derive(Debug)]
+pub enum BlockOrStatement<T> {
+    Block(Vec<Statement<T>>),
+    Statement(Box<Statement<T>>),
+}
+
+#[derive(Debug)]
+pub enum Expr<T> {
+    AssignmentExpr {
+        lhs: BaseExpr<T>,
+        rhs: BaseExpr<T>,
+    },
+    AssignmentOpExpr {
+        lhs: BaseExpr<T>,
+        op: T,
+        rhs: BaseExpr<T>,
+    },
+}
+
+#[derive(Debug)]
+pub enum BaseExpr<T> {
+    IndexExpr {
+        base: Box<BaseExpr<T>>,
+        idx: Box<BaseExpr<T>>,
+    },
+    ClassPropExpr {
+        lhs: Box<BaseExpr<T>>,
+        kind: ClassAccess,
+        field: T,
+    },
+    FieldExpr {
+        lhs: Box<BaseExpr<T>>,
+        field: T,
+    },
+    CallExpr {
+        func: Box<BaseExpr<T>>,
+        args: Vec<BaseExpr<T>>,
+    },
+    NewExpr {
+        args: Vec<BaseExpr<T>>,
+        cls: Box<BaseExpr<T>>,
+    },
+    PreOpExpr {
+        op: T,
+        rhs: Box<BaseExpr<T>>,
+    },
+    PostOpExpr {
+        lhs: Box<BaseExpr<T>>,
+        op: T,
+    },
+    BinOpExpr {
+        lhs: Box<BaseExpr<T>>,
+        op: T,
+        rhs: Box<BaseExpr<T>>,
+    },
+    TernExpr {
+        cond: Box<BaseExpr<T>>,
+        then: Box<BaseExpr<T>>,
+        alt: Box<BaseExpr<T>>,
+    },
+    ExplContextExpr {
+        access: ExplContextAccess,
+    },
+    LiteralExpr {},
+}
+
+#[derive(Debug)]
+pub enum ClassAccess {
+    Default,
+    Static,
+    Const,
+}
+
+#[derive(Debug)]
+pub enum ExplContextAccess {
+    Zelf,
+    Default,
+    Static,
+    Const,
 }
 
 #[derive(Debug)]
 pub struct Local<T> {
-    pub ty: Option<T>,
-    pub name: Identifier,
+    pub ty: Ty<T>,
+    pub names: Vec<VarInstance<T>>,
 }

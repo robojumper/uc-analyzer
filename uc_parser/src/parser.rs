@@ -6,16 +6,22 @@ mod modifiers;
 
 use uc_def::{
     ClassDef, ClassFlags, ClassHeader, ConstDef, ConstVal, DelegateDef, DimCount, EnumDef, FuncArg,
-    FuncBody, FuncDef, FuncFlags, FuncSig, Hir, Identifier, PropFlags, StructDef, Ty, VarDef,
-    VarInstance,
+    FuncBody, FuncDef, FuncFlags, FuncSig, Hir, Identifier, Local, PropFlags, StructDef, Ty,
+    VarDef, VarInstance,
 };
 
 use crate::{
-    lexer::{Delim, Keyword, Lexer, NumberSyntax, Sigil, Token, TokenKind as Tk},
+    lexer::{Delim, Keyword, Lexer, NumberSyntax, Sigil, Symbol, Token, TokenKind as Tk},
     NumberLiteral,
 };
 
 use self::modifiers::{DeclFollowups, ModifierConfig, ModifierCount};
+
+macro_rules! kw {
+    ($i:ident) => {
+        Tk::Sym(Symbol::Kw(Keyword::$i))
+    };
+}
 
 #[derive(Debug)]
 enum TopLevelItem {
@@ -61,11 +67,19 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn sym_to_ident(&self, tok: &Token) -> Identifier {
+        match tok.kind {
+            Tk::Sym(Symbol::Identifier) => self.lex.extract_ident(tok),
+            Tk::Sym(Symbol::Kw(k)) => Identifier::from_str(k.as_ref()).unwrap(),
+            _ => panic!("{:?} not a symbol", tok),
+        }
+    }
+
     fn expect(&mut self, kind: Tk) -> Result<Token, String> {
         let tok = self.next().ok_or_else(|| "eof".to_owned())?;
         if tok.kind == kind {
             Ok(tok)
-        } else if tok.kind == Tk::Identifier {
+        } else if tok.kind == Tk::Sym(Symbol::Identifier) {
             Err(format!(
                 "expected {:?}, got {:?} ({})",
                 kind,
@@ -78,22 +92,11 @@ impl<'a> Parser<'a> {
     }
 
     fn expect_ident(&mut self) -> Result<Identifier, String> {
-        self.expect(Tk::Identifier)
-            .map(|t| self.lex.extract_ident(&t))
-    }
-
-    fn expect_ident_weak(&mut self) -> Result<Identifier, String> {
-        let tok = self.next_any()?;
-        match tok.kind {
-            Tk::Identifier => Ok(self.lex.extract_ident(&tok)),
-            Tk::Kw(kw) => {
-                if kw.is_weak() {
-                    Ok(Identifier::from_str(kw.as_ref()).unwrap())
-                } else {
-                    Err(format!("token {:?} is strong keyword", tok))
-                }
-            }
-            _ => Err(self.fmt_unexpected(&tok)),
+        let tok = self.next().ok_or_else(|| "eof".to_owned())?;
+        if let Tk::Sym(_) = tok.kind {
+            Ok(self.sym_to_ident(&tok))
+        } else {
+            Err(format!("expected symbol, got {:?}", tok))
         }
     }
 
@@ -136,6 +139,20 @@ impl<'a> Parser<'a> {
         }
     }
 
+    pub fn eat_symbol(&mut self) -> bool {
+        match self.peek() {
+            None => false,
+            Some(tok) => {
+                if let Tk::Sym(_) = tok.kind {
+                    self.next();
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
     fn recover_to_semi(&mut self) {
         while let Some(Token { kind, .. }) = self.next() {
             if kind == Tk::Semi {
@@ -147,24 +164,22 @@ impl<'a> Parser<'a> {
     fn parse_class_def(&mut self) -> Result<ClassDef<Identifier>, String> {
         let token = self.next_any()?;
         let class = match token.kind {
-            Tk::Kw(Keyword::Class) => true,
-            Tk::Kw(Keyword::Interface) => false,
+            kw!(Class) => true,
+            kw!(Interface) => false,
             _ => return Err(self.fmt_unexpected(&token)),
         };
 
-        let name = self
-            .expect(Tk::Identifier)
-            .map(|t| self.lex.extract_ident(&t))?;
+        let name = self.expect_ident()?;
 
         let def = if class {
-            let extends = if self.eat(Tk::Kw(Keyword::Extends)) {
+            let extends = if self.eat(kw!(Extends)) {
                 let extends_name = self.expect_ident()?;
                 Some(extends_name)
             } else {
                 None
             };
 
-            let within = if self.eat(Tk::Kw(Keyword::Within)) {
+            let within = if self.eat(kw!(Within)) {
                 let within_name = self.expect_ident()?;
                 Some(within_name)
             } else {
@@ -182,7 +197,7 @@ impl<'a> Parser<'a> {
                 flags: ClassFlags::empty(),
             }
         } else {
-            let extends = if self.eat(Tk::Kw(Keyword::Extends)) {
+            let extends = if self.eat(kw!(Extends)) {
                 Some(self.expect_ident()?)
             } else {
                 None
@@ -205,7 +220,7 @@ impl<'a> Parser<'a> {
             Tk::Number(NumberSyntax::Int | NumberSyntax::Hex) => Ok(ConstVal::Int),
             Tk::Number(NumberSyntax::Float) => Ok(ConstVal::Float),
             Tk::Bool(_) => Ok(ConstVal::Bool),
-            Tk::Identifier => Ok(ConstVal::ValueReference),
+            Tk::Sym(_) => Ok(ConstVal::ValueReference),
             _ => Err(format!("expected const value, got {:?}", tok)),
         }
     }
@@ -231,8 +246,8 @@ impl<'a> Parser<'a> {
                 }
                 _ => {}
             }
-            if tok.kind == Tk::Identifier {
-                parts.push(self.lex.extract_ident(&tok));
+            if let Tk::Sym(_) = tok.kind {
+                parts.push(self.sym_to_ident(&tok));
                 dot = true;
             } else {
                 return Err(format!(
@@ -258,13 +273,13 @@ impl<'a> Parser<'a> {
         };
 
         match &ty_tok.kind {
-            Tk::Kw(Keyword::Array) => {
+            kw!(Array) => {
                 self.expect(Tk::Sig(Sigil::Lt))?;
                 let id = self.expect_ident()?;
                 self.expect(Tk::Sig(Sigil::Gt))?;
                 Ok(Ty::Array(id))
             }
-            Tk::Kw(Keyword::Class) => {
+            kw!(Class) => {
                 let class = if self.eat(Tk::Sig(Sigil::Lt)) {
                     let c = self.expect_ident()?;
                     self.expect(Tk::Sig(Sigil::Gt))?;
@@ -274,23 +289,20 @@ impl<'a> Parser<'a> {
                 };
                 Ok(Ty::Class(class))
             }
-            Tk::Kw(Keyword::Delegate) => Ok(Ty::Delegate(self.parse_angle_type()?)),
-            Tk::Identifier => Ok(Ty::Simple(self.lex.extract_ident(&ty_tok))),
-            Tk::Kw(Keyword::Map) => {
+            kw!(Delegate) => Ok(Ty::Delegate(self.parse_angle_type()?)),
+            kw!(Map) => {
                 self.expect(Tk::Open(Delim::LBrace))?;
                 self.ignore_foreign_block(Tk::Open(Delim::LBrace))?;
                 Ok(Ty::Simple(Identifier::from_str("Map").unwrap()))
             }
-            Tk::Kw(kw) if kw.is_weak() => {
-                Ok(Ty::Simple(Identifier::from_str(kw.as_ref()).unwrap()))
-            }
+            Tk::Sym(_) => Ok(Ty::Simple(self.sym_to_ident(&ty_tok))),
             _ => Err(format!("expected type after modifiers, got {:?}", ty_tok)),
         }
     }
 
     fn parse_var(&mut self) -> Result<VarDef<Identifier>, String> {
         if self.eat(Tk::Open(Delim::LParen)) {
-            self.eat(Tk::Identifier);
+            self.eat_symbol();
             self.expect(Tk::Close(Delim::RParen))?;
         }
 
@@ -300,7 +312,7 @@ impl<'a> Parser<'a> {
         let mut names = vec![];
 
         loop {
-            let var_name = self.expect_ident_weak()?;
+            let var_name = self.expect_ident()?;
             let count = if self.eat(Tk::Open(Delim::LBrack)) {
                 match self.peek_any()?.kind {
                     Tk::Number(_) => {
@@ -311,7 +323,7 @@ impl<'a> Parser<'a> {
                         self.expect(Tk::Close(Delim::RBrack))?;
                         DimCount::Number(cnt as u32)
                     }
-                    Tk::Identifier => {
+                    Tk::Sym(_) => {
                         let parts = self.parse_parts_until(Tk::Close(Delim::RBrack))?;
                         DimCount::Complex(parts)
                     }
@@ -372,8 +384,8 @@ impl<'a> Parser<'a> {
                 break;
             }
             let tok = self.next_any()?;
-            if tok.kind == Tk::Identifier {
-                variants.push(self.lex.extract_ident(&tok));
+            if let Tk::Sym(_) = tok.kind {
+                variants.push(self.sym_to_ident(&tok));
                 // Editor metadata
                 if self.eat(Tk::Sig(Sigil::Lt)) {
                     self.ignore_foreign_block(Tk::Sig(Sigil::Lt))?;
@@ -402,7 +414,7 @@ impl<'a> Parser<'a> {
         self.ignore_kws(&*modifiers::STRUCT_MODIFIERS)?;
         let name = self.expect_ident()?;
 
-        let extends = if self.eat(Tk::Kw(Keyword::Extends)) {
+        let extends = if self.eat(kw!(Extends)) {
             Some(self.expect_ident()?)
         } else {
             None
@@ -415,10 +427,10 @@ impl<'a> Parser<'a> {
         loop {
             match self.next_any()?.kind {
                 Tk::Close(Delim::RBrace) => break,
-                Tk::Kw(Keyword::Var) => {
+                kw!(Var) => {
                     fields.push(self.parse_var()?);
                 }
-                Tk::Kw(Keyword::StructDefaultProperties | Keyword::StructCppText) => {
+                kw!(StructCppText) | kw!(StructDefaultProperties) => {
                     let opener = self.expect(Tk::Open(Delim::LBrace))?;
                     self.ignore_foreign_block(opener.kind)?;
                 }
@@ -441,17 +453,11 @@ impl<'a> Parser<'a> {
     ) -> Result<(Identifier, FuncSig<Identifier>), String> {
         let ty_or_name = self.next_any()?;
         let (ret_ty, name) = match (ty_or_name.kind, self.peek_any()?.kind) {
-            (Tk::Identifier, Tk::Open(Delim::LParen)) => {
-                (None, self.lex.extract_ident(&ty_or_name))
-            }
-            (Tk::Kw(kw), Tk::Open(Delim::LParen)) if kw.is_weak() => {
-                (None, Identifier::from_str(kw.as_ref()).unwrap())
-            }
+            (Tk::Sym(_), Tk::Open(Delim::LParen)) => (None, self.sym_to_ident(&ty_or_name)),
             _ => (Some(self.parse_ty(Some(ty_or_name))?), {
                 let name_tok = self.next_any()?;
                 match name_tok.kind {
-                    Tk::Identifier => self.lex.extract_ident(&name_tok),
-                    Tk::Kw(kw) if kw.is_weak() => Identifier::from_str(kw.as_ref()).unwrap(),
+                    Tk::Sym(_) => self.sym_to_ident(&name_tok),
                     Tk::Sig(s) if allow_op_sigil && s.is_overloadable_op() => {
                         Identifier::from_str(&format!("__op_{}", s.as_ref())).unwrap()
                     }
@@ -473,7 +479,7 @@ impl<'a> Parser<'a> {
 
             self.ignore_kws(&*modifiers::ARG_MODIFIERS)?;
             let ty = self.parse_ty(None)?;
-            let name = self.expect_ident_weak()?;
+            let name = self.expect_ident()?;
 
             let val = if self.eat(Tk::Sig(Sigil::Eq)) {
                 Some(self.parse_const_val()?)
@@ -489,7 +495,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_function(&mut self, first: Token) -> Result<FuncDef<Identifier>, String> {
-        let Tk::Kw(kw) = first.kind else { panic!("parse_function needs the first function kw") };
+        let Tk::Sym(Symbol::Kw(kw)) = first.kind else { panic!("parse_function needs the first function kw") };
         let followups = modifiers::FUNC_MODIFIERS
             .get(kw)
             .expect("not a valid function keyword");
@@ -498,14 +504,14 @@ impl<'a> Parser<'a> {
 
         let (name, sig) = self.parse_function_sig(true)?;
 
-        self.eat(Tk::Kw(Keyword::Const));
+        self.eat(kw!(Const));
 
         let body = if self.eat(Tk::Semi) {
             None
         } else if self.eat(Tk::Open(Delim::LBrace)) {
-            // TODO: Body
+            let locals = self.parse_locals()?;
             self.ignore_foreign_block(Tk::Open(Delim::LBrace))?;
-            Some(FuncBody { locals: vec![] })
+            Some(FuncBody { locals, statements })
         } else {
             return Err(format!("expected ; or {{, got {:?}", self.peek_any()));
         };
@@ -517,6 +523,56 @@ impl<'a> Parser<'a> {
             sig,
             body,
         })
+    }
+
+    fn parse_locals(&mut self) -> Result<Vec<Local<Identifier>>, String> {
+        let mut locals = vec![];
+        while self.eat(kw!(Local)) {
+            match self.parse_local() {
+                Ok(l) => locals.push(l),
+                Err(e) => self.errs.push(e),
+            }
+        }
+        Ok(locals)
+    }
+
+    fn parse_local(&mut self) -> Result<Local<Identifier>, String> {
+        let ty = self.parse_ty(None)?;
+        let mut names = vec![];
+        loop {
+            let var_name = self.expect_ident()?;
+            let count = if self.eat(Tk::Open(Delim::LBrack)) {
+                match self.peek_any()?.kind {
+                    Tk::Number(_) => {
+                        let cnt_lit = self.expect_number()?;
+                        let NumberLiteral::Int(cnt) = cnt_lit else {
+                            return Err("not an integer".to_owned());
+                        };
+                        self.expect(Tk::Close(Delim::RBrack))?;
+                        DimCount::Number(cnt as u32)
+                    }
+                    Tk::Sym(_) => {
+                        let parts = self.parse_parts_until(Tk::Close(Delim::RBrack))?;
+                        DimCount::Complex(parts)
+                    }
+                    kind => {
+                        return Err(format!("expected number or identifier, got {:?}", kind));
+                    }
+                }
+            } else {
+                DimCount::None
+            };
+
+            names.push(VarInstance {
+                name: var_name,
+                count,
+            });
+
+            if !self.eat(Tk::Comma) {
+                break;
+            }
+        }
+        Ok(Local { ty, names })
     }
 
     fn parse_state(&mut self) -> Result<(), String> {
@@ -610,7 +666,7 @@ impl<'a> Parser<'a> {
             let kw_or_next = self.peek();
             match &kw_or_next {
                 Some(tok) => match tok.kind {
-                    Tk::Kw(kw) => match mods.get(kw) {
+                    Tk::Sym(Symbol::Kw(kw)) => match mods.get(kw) {
                         Some(followups) => {
                             self.next();
                             self.ignore_followups(followups)?;
@@ -629,12 +685,11 @@ impl<'a> Parser<'a> {
             break match (self.next(), self.peek()) {
                 (
                     Some(Token {
-                        kind: Tk::Kw(Keyword::Simulated),
+                        kind: kw!(Simulated),
                         ..
                     }),
                     Some(Token {
-                        kind: Tk::Kw(Keyword::State),
-                        ..
+                        kind: kw!(State), ..
                     }),
                 ) => {
                     // hardcoded exception for simulated state
@@ -643,23 +698,21 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 (Some(tok), _) => match tok.kind {
-                    Tk::Kw(Keyword::Const) => Ok(Some(TopLevelItem::Const(self.parse_const()?))),
-                    Tk::Kw(Keyword::Var) => Ok(Some(TopLevelItem::Var(self.parse_var()?))),
-                    Tk::Kw(Keyword::Enum) => Ok(Some(TopLevelItem::Enum(self.parse_enum()?))),
-                    Tk::Kw(Keyword::Struct) => Ok(Some(TopLevelItem::Struct(self.parse_struct()?))),
-                    Tk::Kw(Keyword::Delegate) => {
-                        Ok(Some(TopLevelItem::Delegate(self.parse_delegate()?)))
-                    }
-                    Tk::Kw(Keyword::CppText | Keyword::DefaultProperties) => {
+                    kw!(Const) => Ok(Some(TopLevelItem::Const(self.parse_const()?))),
+                    kw!(Var) => Ok(Some(TopLevelItem::Var(self.parse_var()?))),
+                    kw!(Enum) => Ok(Some(TopLevelItem::Enum(self.parse_enum()?))),
+                    kw!(Struct) => Ok(Some(TopLevelItem::Struct(self.parse_struct()?))),
+                    kw!(Delegate) => Ok(Some(TopLevelItem::Delegate(self.parse_delegate()?))),
+                    kw!(CppText) | kw!(DefaultProperties) | kw!(Replication) => {
                         let brace = self.expect(Tk::Open(Delim::LBrace))?;
                         self.ignore_foreign_block(brace.kind)?;
                         continue;
                     }
-                    Tk::Kw(Keyword::State) => {
+                    kw!(State) => {
                         self.parse_state()?;
                         continue;
                     }
-                    Tk::Kw(kw) if modifiers::FUNC_MODIFIERS.contains(kw) => {
+                    Tk::Sym(Symbol::Kw(kw)) if modifiers::FUNC_MODIFIERS.contains(kw) => {
                         Ok(Some(TopLevelItem::Func(self.parse_function(tok)?)))
                     }
                     Tk::Directive => {

@@ -34,12 +34,10 @@ pub enum TokenKind {
     Comma,
     /// A sigil consisting of 1-3 characters
     Sig(Sigil),
-    /// A keyword
-    Kw(Keyword),
+    /// A keyword or non-keyword identifier
+    Sym(Symbol),
     /// The `#`
     Directive,
-    /// An identifier
-    Identifier,
     /// An integer, hex, or floating point literal
     Number(NumberSyntax),
     /// A string literal
@@ -70,6 +68,19 @@ pub enum Delim {
     LBrace,
     /// `}`
     RBrace,
+}
+
+/// The sad state of identifiers in UnrealScript is that there
+/// aren't any strong keywords -- every keyword can *probably*
+/// be used in some identifier position. It's not recommended
+/// to do that, however. The worst example of this is that there's
+/// a class called `Input` in Engine, but `input` is a keyword
+/// for variable declarations, so it's impossible to have a var
+/// or local of type `Input`!
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Symbol {
+    Kw(Keyword),
+    Identifier,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, strum::AsRefStr)]
@@ -163,7 +174,10 @@ pub enum Keyword {
     Implements,
     Inherits,
     Init,
+    Input,
     Interface,
+    Latent,
+    Local,
     Localized,
     Map,
     Native,
@@ -185,6 +199,7 @@ pub enum Keyword {
     Ref,
     Reliable,
     Replication,
+    RepNotify,
     Server,
     ShowCategories,
     Simulated,
@@ -456,8 +471,8 @@ impl<'a> Lexer<'a> {
             TokenKind::Bool(false)
         } else {
             match Keyword::from_str(text) {
-                Ok(kw) => TokenKind::Kw(kw),
-                Err(_) => TokenKind::Identifier,
+                Ok(kw) => TokenKind::Sym(Symbol::Kw(kw)),
+                Err(_) => TokenKind::Sym(Symbol::Identifier),
             }
         };
 
@@ -465,7 +480,7 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn extract_ident(&self, token: &Token) -> Identifier {
-        assert_eq!(token.kind, TokenKind::Identifier);
+        assert_eq!(token.kind, TokenKind::Sym(Symbol::Identifier));
         Identifier::from_str(&self.source.text[token.span.exp_start..token.span.exp_end]).unwrap()
     }
 

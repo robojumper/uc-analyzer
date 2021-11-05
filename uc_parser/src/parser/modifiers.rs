@@ -112,6 +112,8 @@ pub static VAR_MODIFIERS: Lazy<ModifierConfig> = Lazy::new(|| {
     modifiers.insert(Kw::DuplicateTransient, DF::Nothing);
     modifiers.insert(Kw::DataBinding, DF::Nothing);
     modifiers.insert(Kw::Init, DF::Nothing);
+    modifiers.insert(Kw::RepNotify, DF::Nothing);
+    modifiers.insert(Kw::Input, DF::Nothing);
 
     modifiers.insert(Kw::Public, DF::OptForeignBlock);
     modifiers.insert(Kw::Private, DF::OptForeignBlock);
@@ -164,6 +166,7 @@ pub static FUNC_MODIFIERS: Lazy<ModifierConfig> = Lazy::new(|| {
     modifiers.insert(Kw::Static, DF::Nothing);
     modifiers.insert(Kw::Final, DF::Nothing);
     modifiers.insert(Kw::Exec, DF::Nothing);
+    modifiers.insert(Kw::Latent, DF::Nothing);
 
     modifiers.insert(Kw::Simulated, DF::Nothing);
     modifiers.insert(Kw::Reliable, DF::Nothing);
