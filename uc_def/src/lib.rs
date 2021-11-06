@@ -1,4 +1,4 @@
-use std::{fmt::Display, str::FromStr};
+use std::{collections::HashMap, fmt::Display, hash::Hash, str::FromStr};
 
 use bitflags::bitflags;
 
@@ -6,20 +6,16 @@ pub mod pretty;
 
 bitflags! {
     pub struct ClassFlags: u32 {
-        const NATIVE = 1 << 0;
-        const CONFIG = 1 << 1;
-        const PEROBJECTCONFIG = 1 << 2;
-        const IMPLEMENTS = 1 << 3;
-        const ABSTRACT = 1 << 4;
+        const INTERFACE = 1 << 0;
+        const NATIVE = 1 << 1;
+        const CONFIG = 1 << 2;
+        const PEROBJECTCONFIG = 1 << 3;
+        const IMPLEMENTS = 1 << 4;
+        const ABSTRACT = 1 << 5;
     }
 
     pub struct InterfaceFlags: u32 {
         const NATIVE = 1 << 0;
-    }
-
-    pub struct PropFlags: u32 {
-        const LOCALIZED = 1 << 0;
-        const CONFIG = 1 << 1;
     }
 
     pub struct FuncFlags: u32 {
@@ -64,6 +60,46 @@ bitflags! {
     pub struct StructFlags: u32 {
 
     }
+}
+
+pub trait Flags: Copy + Eq + Hash {
+    fn into_raw(self) -> u32;
+    fn from_raw(bits: u32) -> Self;
+}
+
+macro_rules! impl_flags_for_bitflags {
+    ($($t:ty),+ $(,)?) => {
+        $(
+            impl Flags for $t {
+                fn into_raw(self) -> u32 {
+                    self.bits()
+                }
+
+                fn from_raw(bits: u32) -> Self {
+                    let ret = <$t>::from_bits_truncate(bits);
+                    assert_eq!(bits, ret.bits());
+                    ret
+                }
+            }
+        )+
+    }
+}
+
+impl_flags_for_bitflags! {
+    ClassFlags, FuncFlags, VarFlags, ArgFlags, StructFlags,
+}
+
+#[derive(Debug)]
+pub enum Values<T> {
+    Absent,
+    Nums(Box<[i32]>),
+    Idents(Box<[T]>),
+}
+
+#[derive(Debug)]
+pub struct Modifiers<F: Flags, T> {
+    pub flags: F,
+    pub followups: HashMap<F, Option<Values<T>>>,
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -122,6 +158,7 @@ pub enum ClassHeader<T> {
 pub struct ClassDef<T> {
     pub name: Identifier,
     pub kind: ClassHeader<T>,
+    pub mods: Modifiers<ClassFlags, T>,
 }
 
 #[derive(Debug)]
@@ -166,7 +203,7 @@ pub struct VarInstance<T> {
 pub struct VarDef<T> {
     pub ty: Ty<T>,
     pub names: Vec<VarInstance<T>>,
-    pub flags: PropFlags,
+    pub mods: Modifiers<VarFlags, T>,
 }
 
 #[derive(Debug)]
@@ -180,6 +217,7 @@ pub struct StructDef<T> {
     pub name: Identifier,
     pub extends: Option<T>,
     pub fields: Vec<VarDef<T>>,
+    pub mods: Modifiers<StructFlags, T>,
 }
 
 #[derive(Debug)]
@@ -192,7 +230,7 @@ pub struct DelegateDef<T> {
 pub struct FuncDef<T> {
     pub name: Identifier,
     pub overrides: Option<T>,
-    pub flags: FuncFlags,
+    pub mods: Modifiers<FuncFlags, T>,
     pub sig: FuncSig<T>,
     pub body: Option<FuncBody<T>>,
 }
@@ -208,6 +246,7 @@ pub struct FuncArg<T> {
     pub ty: Ty<T>,
     pub name: Identifier,
     pub val: Option<ConstVal>,
+    pub mods: Modifiers<ArgFlags, T>,
 }
 
 #[derive(Debug)]

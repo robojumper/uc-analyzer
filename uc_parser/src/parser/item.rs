@@ -2,8 +2,7 @@ use std::str::FromStr;
 
 use uc_def::{
     ClassDef, ClassFlags, ClassHeader, ConstDef, ConstVal, DelegateDef, DimCount, EnumDef, FuncArg,
-    FuncBody, FuncDef, FuncFlags, FuncSig, Identifier, Local, PropFlags, StructDef, VarDef,
-    VarInstance,
+    FuncBody, FuncDef, FuncSig, Identifier, Local, StructDef, VarDef, VarInstance,
 };
 
 use super::Parser;
@@ -34,7 +33,7 @@ impl Parser<'_> {
 
         let name = self.expect_ident()?;
 
-        let def = if class {
+        let (def, mods) = if class {
             let extends = if self.eat(kw!(Extends)) {
                 let extends_name = self.expect_ident()?;
                 Some(extends_name)
@@ -49,16 +48,19 @@ impl Parser<'_> {
                 None
             };
 
-            self.parse_kws(&*modifiers::CLASS_MODIFIERS)?;
+            let mods = self.parse_kws(&*modifiers::CLASS_MODIFIERS)?;
 
             self.expect(Tk::Semi)?;
 
-            ClassHeader::Class {
-                extends,
-                within,
-                implements: vec![],
-                flags: ClassFlags::empty(),
-            }
+            (
+                ClassHeader::Class {
+                    extends,
+                    within,
+                    implements: vec![],
+                    flags: ClassFlags::empty(),
+                },
+                mods,
+            )
         } else {
             let extends = if self.eat(kw!(Extends)) {
                 Some(self.expect_ident()?)
@@ -66,13 +68,17 @@ impl Parser<'_> {
                 None
             };
 
-            self.parse_kws(&*modifiers::INTERFACE_MODIFIERS)?;
+            let mods = self.parse_kws(&*modifiers::INTERFACE_MODIFIERS)?;
             self.expect(Tk::Semi)?;
 
-            ClassHeader::Interface { extends }
+            (ClassHeader::Interface { extends }, mods)
         };
 
-        Ok(ClassDef { kind: def, name })
+        Ok(ClassDef {
+            kind: def,
+            name,
+            mods,
+        })
     }
 
     fn parse_const_val(&mut self) -> Result<ConstVal, String> {
@@ -105,7 +111,7 @@ impl Parser<'_> {
             self.expect(Tk::Close(Delim::RParen))?;
         }
 
-        self.parse_kws(&*modifiers::VAR_MODIFIERS)?;
+        let mods = self.parse_kws(&*modifiers::VAR_MODIFIERS)?;
         let ty = self.parse_ty(None)?;
 
         let mut names = vec![];
@@ -156,11 +162,7 @@ impl Parser<'_> {
 
         self.expect(Tk::Semi)?;
 
-        Ok(VarDef {
-            names,
-            ty,
-            flags: PropFlags::empty(),
-        })
+        Ok(VarDef { names, ty, mods })
     }
 
     fn parse_enum(&mut self) -> Result<EnumDef, String> {
@@ -203,7 +205,7 @@ impl Parser<'_> {
         if self.eat(Tk::Open(Delim::LBrace)) {
             self.ignore_foreign_block(Tk::Open(Delim::LBrace))?;
         }
-        self.parse_kws(&*modifiers::STRUCT_MODIFIERS)?;
+        let mods = self.parse_kws(&*modifiers::STRUCT_MODIFIERS)?;
         let name = self.expect_ident()?;
 
         let extends = if self.eat(kw!(Extends)) {
@@ -240,6 +242,7 @@ impl Parser<'_> {
             name,
             extends,
             fields,
+            mods,
         })
     }
 
@@ -273,7 +276,7 @@ impl Parser<'_> {
                 self.expect(Tk::Comma)?;
             }
 
-            self.parse_kws(&*modifiers::ARG_MODIFIERS)?;
+            let mods = self.parse_kws(&*modifiers::ARG_MODIFIERS)?;
             let ty = self.parse_ty(None)?;
             let name = self.expect_ident()?;
 
@@ -283,7 +286,12 @@ impl Parser<'_> {
                 None
             };
 
-            args.push(FuncArg { ty, name, val });
+            args.push(FuncArg {
+                ty,
+                name,
+                val,
+                mods,
+            });
 
             comma = true;
         }
@@ -291,7 +299,7 @@ impl Parser<'_> {
     }
 
     fn parse_function(&mut self) -> Result<FuncDef<Identifier>, String> {
-        self.parse_kws(&*modifiers::FUNC_MODIFIERS)?;
+        let mods = self.parse_kws(&*modifiers::FUNC_MODIFIERS)?;
 
         let (name, sig) = self.parse_function_sig(true)?;
 
@@ -313,7 +321,7 @@ impl Parser<'_> {
         Ok(FuncDef {
             name,
             overrides: None,
-            flags: FuncFlags::empty(),
+            mods,
             sig,
             body,
         })

@@ -1,39 +1,14 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, hash::Hash};
 
 use bitflags::bitflags;
 use once_cell::sync::Lazy;
-use uc_def::{ArgFlags, ClassFlags, FuncFlags, Identifier, InterfaceFlags, StructFlags, VarFlags};
+use uc_def::{
+    ArgFlags, ClassFlags, Flags, FuncFlags, Identifier, Modifiers, StructFlags, Values, VarFlags,
+};
 
 use crate::lexer::{Delim, Keyword as Kw, Symbol, Token, TokenKind as Tk};
 
 use super::Parser;
-
-pub trait Flags: Copy {
-    fn into_raw(self) -> u32;
-    fn from_raw(bits: u32) -> Self;
-}
-
-macro_rules! impl_flags_for_bitflags {
-    ($($t:ty),+ $(,)?) => {
-        $(
-            impl Flags for $t {
-                fn into_raw(self) -> u32 {
-                    self.bits()
-                }
-
-                fn from_raw(bits: u32) -> Self {
-                    let ret = <$t>::from_bits_truncate(bits);
-                    assert_eq!(bits, ret.bits());
-                    ret
-                }
-            }
-        )+
-    }
-}
-
-impl_flags_for_bitflags! {
-    InterfaceFlags, ClassFlags, FuncFlags, VarFlags, ArgFlags, StructFlags,
-}
 
 bitflags! {
     pub struct ModifierCount: u32 {
@@ -93,19 +68,6 @@ impl<F: Flags> ModifierConfig<F> {
     }
 }
 
-#[derive(Debug)]
-pub enum Values {
-    Absent,
-    Nums(Box<[i32]>),
-    Idents(Box<[Identifier]>),
-}
-
-#[derive(Debug)]
-pub struct ParseResult<F: Flags> {
-    pub flags: F,
-    pub followups: HashMap<Kw, Option<Values>>,
-}
-
 impl Parser<'_> {
     fn parse_list<T, F: Fn(&mut Parser) -> Result<T, String>>(
         &mut self,
@@ -126,7 +88,10 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_followups(&mut self, followups: &DeclFollowups) -> Result<Option<Values>, String> {
+    pub fn parse_followups(
+        &mut self,
+        followups: &DeclFollowups,
+    ) -> Result<Option<Values<Identifier>>, String> {
         match followups {
             DeclFollowups::Nothing => Ok(None),
             DeclFollowups::OptForeignBlock => match self.peek() {
@@ -175,7 +140,7 @@ impl Parser<'_> {
     pub fn parse_kws<F: Flags>(
         &mut self,
         mods: &ModifierConfig<F>,
-    ) -> Result<ParseResult<F>, String> {
+    ) -> Result<Modifiers<F, Identifier>, String> {
         let mut flags = 0u32;
         let mut followups = HashMap::new();
         loop {
@@ -188,7 +153,7 @@ impl Parser<'_> {
                             let f = config.flag.into_raw();
                             let vals = self.parse_followups(&config.foll)?;
                             if f != 0u32 {
-                                followups.insert(kw, vals);
+                                followups.insert(config.flag, vals);
                             }
                             flags |= f;
                         }
@@ -200,7 +165,7 @@ impl Parser<'_> {
             }
         }
 
-        Ok(ParseResult {
+        Ok(Modifiers {
             flags: F::from_raw(flags),
             followups,
         })
@@ -248,15 +213,15 @@ pub static CLASS_MODIFIERS: Lazy<ModifierConfig<ClassFlags>> = Lazy::new(|| {
     ModifierConfig { modifiers: m }
 });
 
-pub static INTERFACE_MODIFIERS: Lazy<ModifierConfig<InterfaceFlags>> = Lazy::new(|| {
+pub static INTERFACE_MODIFIERS: Lazy<ModifierConfig<ClassFlags>> = Lazy::new(|| {
     let mut m = HashMap::new();
-    type IF = InterfaceFlags;
-    let e = InterfaceFlags::empty();
+    type CF = ClassFlags;
+    let e = ClassFlags::empty();
 
     m.insert(
         Kw::Native,
         C::new(
-            IF::NATIVE,
+            CF::NATIVE,
             DF::IdentModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE),
         ),
     );
