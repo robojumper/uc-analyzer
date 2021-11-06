@@ -220,8 +220,8 @@ impl Parser<'_> {
             match self.peek_any()?.kind {
                 Tk::Close(Delim::RBrace) => {
                     self.next();
-                    break
-                },
+                    break;
+                }
                 kw!(Var) => {
                     fields.push(self.parse_var()?);
                 }
@@ -418,7 +418,15 @@ impl Parser<'_> {
                         self.parse_state()?;
                         continue;
                     }
-                    kw!(Simulated) if matches!(self.peek2(), Some(Token { kind: kw!(State), .. } )) => {
+                    kw!(Simulated)
+                        if matches!(
+                            self.peek2(),
+                            Some(Token {
+                                kind: kw!(State),
+                                ..
+                            })
+                        ) =>
+                    {
                         self.parse_state()?;
                         continue;
                     }
@@ -432,8 +440,8 @@ impl Parser<'_> {
                     }
                     Tk::Semi => {
                         self.next();
-                        continue
-                    },
+                        continue;
+                    }
                     Tk::Comment => unreachable!("filtered out in next"),
                     _ => panic!("Unknown start of item: {:?}", tok),
                 },

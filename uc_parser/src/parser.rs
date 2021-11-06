@@ -55,7 +55,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    
     fn peek(&self) -> Option<Token> {
         self.clone().next()
     }

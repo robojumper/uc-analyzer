@@ -304,7 +304,6 @@ pub static VAR_MODIFIERS: Lazy<ModifierConfig<VarFlags>> = Lazy::new(|| {
 
 pub static ARG_MODIFIERS: Lazy<ModifierConfig<ArgFlags>> = Lazy::new(|| {
     let mut m = HashMap::new();
-    let e = ArgFlags::empty();
     type AF = ArgFlags;
 
     m.insert(Kw::Coerce, C::new(AF::COERCE, DF::Nothing));
@@ -320,7 +319,6 @@ pub static ARG_MODIFIERS: Lazy<ModifierConfig<ArgFlags>> = Lazy::new(|| {
 pub static STRUCT_MODIFIERS: Lazy<ModifierConfig<StructFlags>> = Lazy::new(|| {
     let mut m = HashMap::new();
     let e = StructFlags::empty();
-    type SF = StructFlags;
 
     m.insert(Kw::Native, C::new(e, DF::Nothing));
     m.insert(Kw::Immutable, C::new(e, DF::Nothing));

@@ -1,8 +1,6 @@
 //! The UnrealScript parser, for now reading expanded files from
 //! `make -intermediate`.
 
-#![feature(let_else)]
-
 pub mod lexer;
 pub mod parser;
 
