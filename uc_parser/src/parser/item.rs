@@ -8,7 +8,7 @@ use uc_def::{
 use super::Parser;
 use crate::{
     kw,
-    lexer::{Delim, NumberSyntax, Sigil, Symbol, Token, TokenKind as Tk},
+    lexer::{NumberSyntax, Sigil, Symbol, Token, TokenKind as Tk},
     parser::modifiers,
 };
 
@@ -106,9 +106,9 @@ impl Parser<'_> {
 
     fn parse_var(&mut self) -> Result<VarDef<Identifier>, String> {
         self.expect(kw!(Var))?;
-        if self.eat(Tk::Open(Delim::LParen)) {
+        if self.eat(Tk::Sig(Sigil::LParen)) {
             self.eat_symbol();
-            self.expect(Tk::Close(Delim::RParen))?;
+            self.expect(Tk::Sig(Sigil::RParen))?;
         }
 
         let mods = self.parse_kws(&*modifiers::VAR_MODIFIERS)?;
@@ -118,15 +118,15 @@ impl Parser<'_> {
 
         loop {
             let var_name = self.expect_ident()?;
-            let count = if self.eat(Tk::Open(Delim::LBrack)) {
+            let count = if self.eat(Tk::Sig(Sigil::LBrack)) {
                 match self.peek_any()?.kind {
                     Tk::Number(_) => {
                         let cnt = self.expect_number()?.expect_int()?;
-                        self.expect(Tk::Close(Delim::RBrack))?;
+                        self.expect(Tk::Sig(Sigil::RBrack))?;
                         DimCount::Number(cnt as u32)
                     }
                     Tk::Sym(_) => {
-                        let parts = self.parse_parts_until(Tk::Close(Delim::RBrack))?;
+                        let parts = self.parse_parts_until(Tk::Sig(Sigil::RBrack))?;
                         DimCount::Complex(parts)
                     }
                     kind => {
@@ -138,9 +138,9 @@ impl Parser<'_> {
             };
 
             // Native export text
-            if self.eat(Tk::Open(Delim::LBrace)) {
+            if self.eat(Tk::Sig(Sigil::LBrace)) {
                 self.lex
-                    .ignore_foreign_block(Tk::Open(Delim::LBrace))
+                    .ignore_foreign_block(Tk::Sig(Sigil::LBrace))
                     .map_err(|e| format!("{:?}", e))?;
             }
             // Editor metadata
@@ -168,18 +168,18 @@ impl Parser<'_> {
     fn parse_enum(&mut self) -> Result<EnumDef, String> {
         self.expect(kw!(Enum))?;
         let name = self.expect_ident()?;
-        self.expect(Tk::Open(Delim::LBrace))?;
+        self.expect(Tk::Sig(Sigil::LBrace))?;
 
         let mut variants = vec![];
         let mut comma = false;
         loop {
-            if self.eat(Tk::Close(Delim::RBrace)) {
+            if self.eat(Tk::Sig(Sigil::RBrace)) {
                 break;
             }
             if comma {
                 self.expect(Tk::Comma)?;
             }
-            if self.eat(Tk::Close(Delim::RBrace)) {
+            if self.eat(Tk::Sig(Sigil::RBrace)) {
                 break;
             }
             let tok = self.next_any()?;
@@ -202,8 +202,8 @@ impl Parser<'_> {
 
     fn parse_struct(&mut self) -> Result<StructDef<Identifier>, String> {
         self.expect(kw!(Struct))?;
-        if self.eat(Tk::Open(Delim::LBrace)) {
-            self.ignore_foreign_block(Tk::Open(Delim::LBrace))?;
+        if self.eat(Tk::Sig(Sigil::LBrace)) {
+            self.ignore_foreign_block(Tk::Sig(Sigil::LBrace))?;
         }
         let mods = self.parse_kws(&*modifiers::STRUCT_MODIFIERS)?;
         let name = self.expect_ident()?;
@@ -214,13 +214,13 @@ impl Parser<'_> {
             None
         };
 
-        self.expect(Tk::Open(Delim::LBrace))?;
+        self.expect(Tk::Sig(Sigil::LBrace))?;
 
         let mut fields = vec![];
 
         loop {
             match self.peek_any()?.kind {
-                Tk::Close(Delim::RBrace) => {
+                Tk::Sig(Sigil::RBrace) => {
                     self.next();
                     break;
                 }
@@ -229,7 +229,7 @@ impl Parser<'_> {
                 }
                 kw!(StructCppText) | kw!(StructDefaultProperties) => {
                     self.next();
-                    let opener = self.expect(Tk::Open(Delim::LBrace))?;
+                    let opener = self.expect(Tk::Sig(Sigil::LBrace))?;
                     self.ignore_foreign_block(opener.kind)?;
                 }
                 t => return Err(format!("unexpected token: {:?}", t)),
@@ -252,7 +252,7 @@ impl Parser<'_> {
     ) -> Result<(Identifier, FuncSig<Identifier>), String> {
         let ty_or_name = self.next_any()?;
         let (ret_ty, name) = match (ty_or_name.kind, self.peek_any()?.kind) {
-            (Tk::Sym(_), Tk::Open(Delim::LParen)) => (None, self.sym_to_ident(&ty_or_name)),
+            (Tk::Sym(_), Tk::Sig(Sigil::LParen)) => (None, self.sym_to_ident(&ty_or_name)),
             _ => (Some(self.parse_ty(Some(ty_or_name))?), {
                 let name_tok = self.next_any()?;
                 match name_tok.kind {
@@ -265,11 +265,11 @@ impl Parser<'_> {
             }),
         };
 
-        self.expect(Tk::Open(Delim::LParen))?;
+        self.expect(Tk::Sig(Sigil::LParen))?;
         let mut comma = false;
         let mut args = vec![];
         loop {
-            if self.eat(Tk::Close(Delim::RParen)) {
+            if self.eat(Tk::Sig(Sigil::RParen)) {
                 break;
             }
             if comma {
@@ -280,8 +280,27 @@ impl Parser<'_> {
             let ty = self.parse_ty(None)?;
             let name = self.expect_ident()?;
 
-            let val = if self.eat(Tk::Sig(Sigil::Eq)) {
-                Some(self.parse_const_val()?)
+            let count = if self.eat(Tk::Sig(Sigil::LBrack)) {
+                match self.peek_any()?.kind {
+                    Tk::Number(_) => {
+                        let cnt = self.expect_number()?.expect_int()?;
+                        self.expect(Tk::Sig(Sigil::RBrack))?;
+                        DimCount::Number(cnt as u32)
+                    }
+                    Tk::Sym(_) => {
+                        let parts = self.parse_parts_until(Tk::Sig(Sigil::RBrack))?;
+                        DimCount::Complex(parts)
+                    }
+                    kind => {
+                        return Err(format!("expected number or identifier, got {:?}", kind));
+                    }
+                }
+            } else {
+                DimCount::None
+            };
+
+            let def = if self.eat(Tk::Sig(Sigil::Eq)) {
+                Some(dbg!(self.parse_base_expression()?))
             } else {
                 None
             };
@@ -289,7 +308,8 @@ impl Parser<'_> {
             args.push(FuncArg {
                 ty,
                 name,
-                val,
+                count,
+                def,
                 mods,
             });
 
@@ -307,9 +327,9 @@ impl Parser<'_> {
 
         let body = if self.eat(Tk::Semi) {
             None
-        } else if self.eat(Tk::Open(Delim::LBrace)) {
+        } else if self.eat(Tk::Sig(Sigil::LBrace)) {
             let locals = self.parse_locals()?;
-            self.ignore_foreign_block(Tk::Open(Delim::LBrace))?;
+            self.ignore_foreign_block(Tk::Sig(Sigil::LBrace))?;
             Some(FuncBody {
                 locals,
                 statements: vec![],
@@ -343,15 +363,15 @@ impl Parser<'_> {
         let mut names = vec![];
         loop {
             let var_name = self.expect_ident()?;
-            let count = if self.eat(Tk::Open(Delim::LBrack)) {
+            let count = if self.eat(Tk::Sig(Sigil::LBrack)) {
                 match self.peek_any()?.kind {
                     Tk::Number(_) => {
                         let cnt = self.expect_number()?.expect_int()?;
-                        self.expect(Tk::Close(Delim::RBrack))?;
+                        self.expect(Tk::Sig(Sigil::RBrack))?;
                         DimCount::Number(cnt as u32)
                     }
                     Tk::Sym(_) => {
-                        let parts = self.parse_parts_until(Tk::Close(Delim::RBrack))?;
+                        let parts = self.parse_parts_until(Tk::Sig(Sigil::RBrack))?;
                         DimCount::Complex(parts)
                     }
                     kind => {
@@ -380,8 +400,11 @@ impl Parser<'_> {
         self.eat(kw!(Auto));
         self.expect(kw!(State))?;
         self.expect_ident()?;
-        self.expect(Tk::Open(Delim::LBrace))?;
-        self.ignore_foreign_block(Tk::Open(Delim::LBrace))?;
+        if self.eat(kw!(Extends)) {
+            self.expect_ident()?;
+        }
+        self.expect(Tk::Sig(Sigil::LBrace))?;
+        self.ignore_foreign_block(Tk::Sig(Sigil::LBrace))?;
 
         Ok(())
     }
@@ -389,9 +412,21 @@ impl Parser<'_> {
     fn parse_delegate(&mut self) -> Result<DelegateDef<Identifier>, String> {
         self.expect(kw!(Delegate))?;
         let (name, sig) = self.parse_function_sig(false)?;
-        self.expect(Tk::Semi)?;
+        
+        let body = if self.eat(Tk::Semi) {
+            None
+        } else if self.eat(Tk::Sig(Sigil::LBrace)) {
+            let locals = self.parse_locals()?;
+            self.ignore_foreign_block(Tk::Sig(Sigil::LBrace))?;
+            Some(FuncBody {
+                locals,
+                statements: vec![],
+            })
+        } else {
+            return Err(format!("expected ; or {{, got {:?}", self.peek_any()));
+        };
 
-        Ok(DelegateDef { name, sig })
+        Ok(DelegateDef { name, body, sig })
     }
 
     fn ignore_directive(&mut self) -> Result<(), String> {
@@ -418,7 +453,7 @@ impl Parser<'_> {
                     kw!(Delegate) => Ok(Some(TopLevelItem::Delegate(self.parse_delegate()?))),
                     kw!(CppText) | kw!(DefaultProperties) | kw!(Replication) => {
                         self.next();
-                        let brace = self.expect(Tk::Open(Delim::LBrace))?;
+                        let brace = self.expect(Tk::Sig(Sigil::LBrace))?;
                         self.ignore_foreign_block(brace.kind)?;
                         continue;
                     }
@@ -451,7 +486,7 @@ impl Parser<'_> {
                         continue;
                     }
                     Tk::Comment => unreachable!("filtered out in next"),
-                    _ => panic!("Unknown start of item: {:?}", tok),
+                    _ => panic!("Unknown start of item: {:?}, buffered errs: {:?}", tok, self.errs),
                 },
                 None => Ok(None),
             };

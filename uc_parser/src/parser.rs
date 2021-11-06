@@ -9,7 +9,7 @@ mod modifiers;
 use uc_def::{Hir, Identifier, Ty};
 
 use crate::{
-    lexer::{Delim, Lexer, Sigil, Symbol, Token, TokenKind as Tk},
+    lexer::{Lexer, Sigil, Symbol, Token, TokenKind as Tk},
     parser::item::TopLevelItem,
     NumberLiteral,
 };
@@ -24,17 +24,12 @@ macro_rules! kw {
 #[derive(Clone, Debug)]
 struct Parser<'a> {
     lex: Lexer<'a>,
-    open_delims: isize,
     errs: Vec<String>,
 }
 
 impl<'a> Parser<'a> {
     fn new(lex: Lexer<'a>) -> Self {
-        Self {
-            lex,
-            open_delims: 0,
-            errs: vec![],
-        }
+        Self { lex, errs: vec![] }
     }
 
     fn next(&mut self) -> Option<Token> {
@@ -43,14 +38,7 @@ impl<'a> Parser<'a> {
                 Token {
                     kind: Tk::Comment, ..
                 } => {}
-                x => {
-                    match x.kind {
-                        Tk::Open(_) => self.open_delims += 1,
-                        Tk::Close(_) => self.open_delims -= 1,
-                        _ => {}
-                    }
-                    return Some(x);
-                }
+                x => return Some(x),
             }
         }
     }
@@ -197,9 +185,9 @@ impl<'a> Parser<'a> {
         match &ty_tok.kind {
             kw!(Array) => {
                 self.expect(Tk::Sig(Sigil::Lt))?;
-                let id = self.expect_ident()?;
+                let ty = self.parse_ty(None)?;
                 self.expect(Tk::Sig(Sigil::Gt))?;
-                Ok(Ty::Array(id))
+                Ok(Ty::Array(Box::new(ty)))
             }
             kw!(Class) => {
                 let class = if self.eat(Tk::Sig(Sigil::Lt)) {
@@ -213,11 +201,28 @@ impl<'a> Parser<'a> {
             }
             kw!(Delegate) => Ok(Ty::Delegate(self.parse_angle_type()?)),
             kw!(Map) => {
-                self.expect(Tk::Open(Delim::LBrace))?;
-                self.ignore_foreign_block(Tk::Open(Delim::LBrace))?;
+                self.expect(Tk::Sig(Sigil::LBrace))?;
+                self.ignore_foreign_block(Tk::Sig(Sigil::LBrace))?;
                 Ok(Ty::Simple(Identifier::from_str("Map").unwrap()))
             }
-            Tk::Sym(_) => Ok(Ty::Simple(self.sym_to_ident(&ty_tok))),
+            Tk::Sym(_) => {
+                if self.eat(Tk::Sig(Sigil::Dot)) {
+                    let mut parts = vec![self.sym_to_ident(&ty_tok)];
+                    loop {
+                        parts.push(self.expect_ident()?);
+                        match self.peek() {
+                            Some(Token { kind: Tk::Sig(Sigil::Dot), .. }) => {
+                                self.next();
+                                continue;
+                            },
+                            _ => break,
+                        }
+                    }
+                    Ok(Ty::Qualified(parts))
+                } else {
+                    Ok(Ty::Simple(self.sym_to_ident(&ty_tok)))
+                }
+            },
             _ => Err(format!("expected type after modifiers, got {:?}", ty_tok)),
         }
     }

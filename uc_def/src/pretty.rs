@@ -1,4 +1,4 @@
-use std::io;
+use std::{fmt, io};
 
 use crate::{
     ClassDef, ClassHeader, ConstDef, DelegateDef, EnumDef, FuncDef, Hir, Identifier, StructDef, Ty,
@@ -6,7 +6,7 @@ use crate::{
 };
 
 pub trait RefLookup {
-    type From;
+    type From: fmt::Debug;
     fn lookup<'a>(&self, i: &'a Self::From) -> &'a str;
 }
 
@@ -119,9 +119,12 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
             Ty::Simple(i) => {
                 self.format_i(i)?;
             }
+            Ty::Qualified(i) => {
+                self.format_veci(i, b".")?;
+            }
             Ty::Array(i) => {
                 self.w.write_all(b"array<")?;
-                self.format_i(i)?;
+                self.format_ty(i)?;
                 self.w.write_all(b">")?;
             }
             Ty::Class(ci) => {
@@ -211,7 +214,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
             self.format_ty(&inst.ty)?;
             self.w.write_all(b" ")?;
             self.w.write_all(inst.name.as_ref().as_bytes())?;
-            if let Some(c) = &inst.val {
+            if let Some(c) = &inst.def {
                 self.w.write_all(b" = ")?;
                 self.w.write_fmt(format_args!("{:?}", c))?;
             }
@@ -236,7 +239,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
             self.format_ty(&inst.ty)?;
             self.w.write_all(b" ")?;
             self.w.write_all(inst.name.as_ref().as_bytes())?;
-            if let Some(c) = &inst.val {
+            if let Some(c) = &inst.def {
                 self.w.write_all(b" = ")?;
                 self.w.write_fmt(format_args!("{:?}", c))?;
             }

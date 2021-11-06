@@ -1,3 +1,4 @@
+use core::panic;
 use std::fs::read_to_string;
 use std::io;
 
@@ -45,6 +46,9 @@ fn main() {
         let lexer = lexer::Lexer::new(&contents);
         let (hir, errs) = parser::parse(lexer);
         dbg!(&errs);
+        if !errs.is_empty() {
+            panic!();
+        }
         let out = std::io::stdout();
         let mut out = out.lock();
         uc_def::pretty::format_hir(&hir, &mut out, uc_def::pretty::IdentifierFormat).unwrap();

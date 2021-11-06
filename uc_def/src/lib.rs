@@ -33,6 +33,7 @@ bitflags! {
         const PRIVATE = 1 << 11;
         const PROTECTED = 1 << 12;
         const COERCE = 1 << 13;
+        const ITERATOR = 1 << 14;
     }
 
     pub struct VarFlags: u32 {
@@ -171,7 +172,8 @@ pub enum DimCount<T> {
 #[derive(Debug)]
 pub enum Ty<T> {
     Simple(T),
-    Array(T),
+    Qualified(Vec<T>),
+    Array(Box<Ty<T>>),
     Class(Option<T>),
     Delegate(Vec<T>),
 }
@@ -223,6 +225,7 @@ pub struct StructDef<T> {
 #[derive(Debug)]
 pub struct DelegateDef<T> {
     pub name: Identifier,
+    pub body: Option<FuncBody<T>>,
     pub sig: FuncSig<T>,
 }
 
@@ -245,7 +248,8 @@ pub struct FuncSig<T> {
 pub struct FuncArg<T> {
     pub ty: Ty<T>,
     pub name: Identifier,
-    pub val: Option<ConstVal>,
+    pub count: DimCount<T>,
+    pub def: Option<BaseExpr<T>>,
     pub mods: Modifiers<ArgFlags, T>,
 }
 
@@ -330,17 +334,12 @@ pub enum BaseExpr<T> {
         base: Box<BaseExpr<T>>,
         idx: Box<BaseExpr<T>>,
     },
-    ClassPropExpr {
-        lhs: Box<BaseExpr<T>>,
-        kind: ClassAccess,
-        field: T,
-    },
     FieldExpr {
         lhs: Box<BaseExpr<T>>,
-        field: T,
+        rhs: Box<BaseExpr<T>>,
     },
     CallExpr {
-        func: Box<BaseExpr<T>>,
+        func: T,
         args: Vec<BaseExpr<T>>,
     },
     NewExpr {
@@ -365,8 +364,8 @@ pub enum BaseExpr<T> {
         then: Box<BaseExpr<T>>,
         alt: Box<BaseExpr<T>>,
     },
-    ExplContextExpr {
-        access: ExplContextAccess,
+    SymExpr {
+        sym: T,
     },
     LiteralExpr {
         lit: Literal,
@@ -381,21 +380,6 @@ pub enum Literal {
     Bool,
     Name,
     String,
-}
-
-#[derive(Debug)]
-pub enum ClassAccess {
-    Default,
-    Static,
-    Const,
-}
-
-#[derive(Debug)]
-pub enum ExplContextAccess {
-    Zelf,
-    Default,
-    Static,
-    Const,
 }
 
 #[derive(Debug)]

@@ -24,10 +24,6 @@ pub enum TokenKind {
     Error(char),
     /// A token that hit EOF or an invalid character before being terminated
     Incomplete(IncompleteReason),
-    /// An opening delimiter
-    Open(Delim),
-    /// A closing delimiter
-    Close(Delim),
     /// The statement and item delimiter `;`
     Semi,
     /// The variant, arg, name delimiter `,`
@@ -52,22 +48,6 @@ pub enum TokenKind {
 pub enum IncompleteReason {
     Eol,
     InvalidChar,
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum Delim {
-    /// `[`
-    LBrack,
-    /// `]`
-    RBrack,
-    /// `(`
-    LParen,
-    /// `)`
-    RParen,
-    /// `{`
-    LBrace,
-    /// `}`
-    RBrace,
 }
 
 /// The sad state of identifiers in UnrealScript is that there
@@ -123,6 +103,13 @@ pub enum Sigil {
     SubSub,
     Tilde,
     TildeEq,
+
+    LBrack,
+    RBrack,
+    LParen,
+    RParen,
+    LBrace,
+    RBrace,
 }
 
 impl Sigil {
@@ -133,7 +120,7 @@ impl Sigil {
             | DivAssign | Dollar | DollarAssign | Eq | EqEq | Gt | GtEq | GtGt | GtGtGt | Lt
             | LtEq | LtLt | Mod | Mul | MulAssign | MulMul | Or | OrOr | Pow | PowPow | Sub
             | SubAssign | SubSub | Tilde | TildeEq => true,
-            Colon | Dot | Tern => false,
+            Colon | Dot | Tern | LParen | RParen | LBrack | RBrack | LBrace | RBrace => false,
         }
     }
 }
@@ -166,6 +153,7 @@ pub enum Keyword {
     Enum,
     Event,
     Exec,
+    Export,
     Extends,
     Final,
     Function,
@@ -177,13 +165,19 @@ pub enum Keyword {
     Init,
     Input,
     Interface,
+    Interp,
+    Iterator,
     Latent,
     Local,
     Localized,
     Map,
     Native,
     NativeReplication,
+    New,
     NoExport,
+    NoExportHeader,
+    NoImport,
+    None,
     NotPlaceable,
     Operator,
     Optional,
@@ -204,6 +198,7 @@ pub enum Keyword {
     Server,
     ShowCategories,
     Simulated,
+    Singular,
     Skip,
     State,
     Static,
@@ -211,7 +206,9 @@ pub enum Keyword {
     StructCppText,
     StructDefaultProperties,
     Transient,
+    Unreliable,
     Var,
+    Virtual,
     Within,
 }
 
@@ -266,7 +263,6 @@ impl<'a> Lexer<'a> {
         let c_ = self.source.peek();
 
         let kind = {
-            use self::Delim::*;
             use self::Sigil::*;
             use self::TokenKind::*;
             match (c, c_) {
@@ -357,12 +353,12 @@ impl<'a> Lexer<'a> {
                     return Some(self.parse_number(pos))
                 }
                 (c, _) => match c {
-                    '(' => Open(LParen),
-                    ')' => Close(RParen),
-                    '[' => Open(LBrack),
-                    ']' => Close(RBrack),
-                    '{' => Open(LBrace),
-                    '}' => Close(RBrace),
+                    '(' => Sig(LParen),
+                    ')' => Sig(RParen),
+                    '[' => Sig(LBrack),
+                    ']' => Sig(RBrack),
+                    '{' => Sig(LBrace),
+                    '}' => Sig(RBrace),
                     '.' => Sig(Dot),
                     ',' => Comma,
                     ':' => Sig(Colon),
@@ -413,7 +409,7 @@ impl<'a> Lexer<'a> {
     /// from a variable declaration. Returns Err(Incomplete) if incomplete.
     pub fn ignore_foreign_block(&mut self, opener: TokenKind) -> Result<(), Token> {
         let (recurser, closer) = match opener {
-            TokenKind::Open(Delim::LBrace) => (Some('{'), Some('}')),
+            TokenKind::Sig(Sigil::LBrace) => (Some('{'), Some('}')),
             TokenKind::Sig(Sigil::Lt) => (None, Some('>')),
             _ => panic!(
                 "TokenKind {:?} is not a valid opener for foreign block",
