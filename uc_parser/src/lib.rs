@@ -23,3 +23,12 @@ pub enum NumberLiteral {
     Int(i32),
     Float(f32),
 }
+
+impl NumberLiteral {
+    pub fn expect_int(&self) -> Result<i32, String> {
+        match self {
+            NumberLiteral::Int(i) => Ok(*i),
+            NumberLiteral::Float(_) => Err("not an integer".to_owned()),
+        }
+    }
+}

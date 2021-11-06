@@ -2,8 +2,38 @@ use std::collections::HashMap;
 
 use bitflags::bitflags;
 use once_cell::sync::Lazy;
+use uc_def::{ArgFlags, ClassFlags, FuncFlags, Identifier, InterfaceFlags, StructFlags, VarFlags};
 
-use crate::lexer::Keyword as Kw;
+use crate::lexer::{Delim, Keyword as Kw, Symbol, Token, TokenKind as Tk};
+
+use super::Parser;
+
+pub trait Flags: Copy {
+    fn into_raw(self) -> u32;
+    fn from_raw(bits: u32) -> Self;
+}
+
+macro_rules! impl_flags_for_bitflags {
+    ($($t:ty),+ $(,)?) => {
+        $(
+            impl Flags for $t {
+                fn into_raw(self) -> u32 {
+                    self.bits()
+                }
+
+                fn from_raw(bits: u32) -> Self {
+                    let ret = <$t>::from_bits_truncate(bits);
+                    assert_eq!(bits, ret.bits());
+                    ret
+                }
+            }
+        )+
+    }
+}
+
+impl_flags_for_bitflags! {
+    InterfaceFlags, ClassFlags, FuncFlags, VarFlags, ArgFlags, StructFlags,
+}
 
 bitflags! {
     pub struct ModifierCount: u32 {
@@ -24,162 +54,322 @@ pub enum DeclFollowups {
     /// `var private{private}`
     OptForeignBlock,
     /// `var(Category)`
-    IdentModifiers(MC),
+    IdentModifiers(ModifierCount),
     /// `native(129)`
-    NumberModifiers(MC),
+    NumberModifiers(ModifierCount),
 }
 
 type DF = DeclFollowups;
 type MC = ModifierCount;
+type C<F> = KeywordConfig<F>;
 
-#[derive(Clone, Debug)]
-pub struct ModifierConfig {
-    modifiers: HashMap<Kw, DF>,
+const ONE_IDENT: DeclFollowups = DeclFollowups::IdentModifiers(ModifierCount::ALLOW_ONE);
+const MORE_IDENTS: DeclFollowups = DeclFollowups::IdentModifiers(ModifierCount::ALLOW_MULTIPLE);
+
+#[derive(Debug)]
+struct KeywordConfig<F: Flags> {
+    flag: F,
+    foll: DeclFollowups,
 }
 
-impl ModifierConfig {
+impl<F: Flags> KeywordConfig<F> {
+    fn new(flag: F, foll: DeclFollowups) -> Self {
+        KeywordConfig { flag, foll }
+    }
+}
+
+#[derive(Debug)]
+pub struct ModifierConfig<F: Flags> {
+    modifiers: HashMap<Kw, KeywordConfig<F>>,
+}
+
+impl<F: Flags> ModifierConfig<F> {
     pub fn contains(&self, kw: Kw) -> bool {
         self.modifiers.contains_key(&kw)
     }
 
-    pub fn get(&self, kw: Kw) -> Option<&DF> {
+    fn get(&self, kw: Kw) -> Option<&KeywordConfig<F>> {
         self.modifiers.get(&kw)
     }
 }
 
-pub static CLASS_MODIFIERS: Lazy<ModifierConfig> = Lazy::new(|| {
-    let mut modifiers = HashMap::new();
+#[derive(Debug)]
+pub enum Values {
+    Absent,
+    Nums(Box<[i32]>),
+    Idents(Box<[Identifier]>),
+}
 
-    modifiers.insert(
+#[derive(Debug)]
+pub struct ParseResult<F: Flags> {
+    pub flags: F,
+    pub followups: HashMap<Kw, Option<Values>>,
+}
+
+impl Parser<'_> {
+    fn parse_list<T, F: Fn(&mut Parser) -> Result<T, String>>(
+        &mut self,
+        f: F,
+    ) -> Result<Box<[T]>, String> {
+        let mut list = vec![];
+        self.next();
+        let mut comma = false;
+        loop {
+            if self.eat(Tk::Close(Delim::RParen)) {
+                break Ok(list.into_boxed_slice());
+            }
+            if comma {
+                self.expect(Tk::Comma)?;
+            }
+            list.push(f(self)?);
+            comma = true;
+        }
+    }
+
+    pub fn parse_followups(&mut self, followups: &DeclFollowups) -> Result<Option<Values>, String> {
+        match followups {
+            DeclFollowups::Nothing => Ok(None),
+            DeclFollowups::OptForeignBlock => match self.peek() {
+                Some(Token {
+                    kind: opener @ Tk::Open(Delim::LParen),
+                    ..
+                }) => {
+                    self.next();
+                    self.ignore_foreign_block(opener)?;
+                    Ok(None)
+                }
+                Some(_) | None => Ok(None),
+            },
+            DeclFollowups::IdentModifiers(mods) | DeclFollowups::NumberModifiers(mods) => {
+                match self.peek() {
+                    Some(Token {
+                        kind: Tk::Open(Delim::LParen),
+                        ..
+                    }) => {
+                        if mods.intersects(ModifierCount::ALLOW_PAREN) {
+                            match followups {
+                                DeclFollowups::IdentModifiers(_) => self
+                                    .parse_list(|p| p.expect_ident())
+                                    .map(|l| Some(Values::Idents(l))),
+                                DeclFollowups::NumberModifiers(_) => self
+                                    .parse_list(|p| p.expect_number()?.expect_int())
+                                    .map(|l| Some(Values::Nums(l))),
+                                _ => unreachable!("checked in outer match"),
+                            }
+                        } else {
+                            Ok(None)
+                        }
+                    }
+                    t @ (Some(_) | None) => {
+                        if mods.contains(ModifierCount::ALLOW_NONE) {
+                            Ok(Some(Values::Absent))
+                        } else {
+                            Err(format!("missing followups: {:?}, got {:?}", followups, t))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn parse_kws<F: Flags>(
+        &mut self,
+        mods: &ModifierConfig<F>,
+    ) -> Result<ParseResult<F>, String> {
+        let mut flags = 0u32;
+        let mut followups = HashMap::new();
+        loop {
+            let kw_or_next = self.peek();
+            match &kw_or_next {
+                Some(tok) => match tok.kind {
+                    Tk::Sym(Symbol::Kw(kw)) => match mods.get(kw) {
+                        Some(config) => {
+                            self.next();
+                            let f = config.flag.into_raw();
+                            let vals = self.parse_followups(&config.foll)?;
+                            if f != 0u32 {
+                                followups.insert(kw, vals);
+                            }
+                            flags |= f;
+                        }
+                        None => break,
+                    },
+                    _ => break,
+                },
+                None => break,
+            }
+        }
+
+        Ok(ParseResult {
+            flags: F::from_raw(flags),
+            followups,
+        })
+    }
+}
+
+pub static CLASS_MODIFIERS: Lazy<ModifierConfig<ClassFlags>> = Lazy::new(|| {
+    let mut m = HashMap::new();
+    type CF = ClassFlags;
+    let e = ClassFlags::empty();
+
+    m.insert(
         Kw::Native,
-        DF::IdentModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE),
+        C::new(
+            CF::NATIVE,
+            DF::IdentModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE),
+        ),
     );
 
-    modifiers.insert(Kw::Config, DF::IdentModifiers(MC::ALLOW_ONE));
-    modifiers.insert(Kw::PerObjectConfig, DF::Nothing);
-    modifiers.insert(Kw::Implements, DF::IdentModifiers(MC::ALLOW_MULTIPLE));
+    m.insert(Kw::Config, C::new(CF::CONFIG, ONE_IDENT));
 
-    modifiers.insert(Kw::Abstract, DF::Nothing);
-    modifiers.insert(Kw::DependsOn, DF::IdentModifiers(MC::ALLOW_MULTIPLE));
-    modifiers.insert(Kw::Transient, DF::Nothing);
-    modifiers.insert(Kw::Deprecated, DF::Nothing);
+    m.insert(
+        Kw::PerObjectConfig,
+        C::new(CF::PEROBJECTCONFIG, DF::Nothing),
+    );
+    m.insert(Kw::Implements, C::new(CF::IMPLEMENTS, MORE_IDENTS));
 
-    modifiers.insert(Kw::NativeReplication, DF::Nothing);
+    m.insert(Kw::Abstract, C::new(CF::ABSTRACT, DF::Nothing));
+    m.insert(Kw::DependsOn, C::new(e, MORE_IDENTS));
+    m.insert(Kw::Transient, C::new(e, DF::Nothing));
+    m.insert(Kw::Deprecated, C::new(e, DF::Nothing));
 
-    modifiers.insert(Kw::NoExport, DF::Nothing);
-    modifiers.insert(Kw::CollapseCategories, DF::Nothing);
-    modifiers.insert(Kw::HideCategories, DF::IdentModifiers(MC::ALLOW_MULTIPLE));
-    modifiers.insert(Kw::EditInlineNew, DF::Nothing);
-    modifiers.insert(Kw::NotPlaceable, DF::Nothing);
-    modifiers.insert(Kw::Placeable, DF::Nothing);
-    modifiers.insert(Kw::ClassGroup, DF::IdentModifiers(MC::ALLOW_ONE));
-    modifiers.insert(Kw::Inherits, DF::IdentModifiers(MC::ALLOW_MULTIPLE));
-    modifiers.insert(Kw::ShowCategories, DF::IdentModifiers(MC::ALLOW_MULTIPLE));
+    m.insert(Kw::NativeReplication, C::new(e, DF::Nothing));
 
-    ModifierConfig { modifiers }
+    m.insert(Kw::NoExport, C::new(e, DF::Nothing));
+    m.insert(Kw::CollapseCategories, C::new(e, DF::Nothing));
+    m.insert(Kw::HideCategories, C::new(e, MORE_IDENTS));
+    m.insert(Kw::EditInlineNew, C::new(e, DF::Nothing));
+    m.insert(Kw::NotPlaceable, C::new(e, DF::Nothing));
+    m.insert(Kw::Placeable, C::new(e, DF::Nothing));
+    m.insert(Kw::ClassGroup, C::new(e, ONE_IDENT));
+    m.insert(Kw::Inherits, C::new(e, MORE_IDENTS));
+    m.insert(Kw::ShowCategories, C::new(e, MORE_IDENTS));
+
+    ModifierConfig { modifiers: m }
 });
 
-pub static INTERFACE_MODIFIERS: Lazy<ModifierConfig> = Lazy::new(|| {
-    let mut modifiers = HashMap::new();
+pub static INTERFACE_MODIFIERS: Lazy<ModifierConfig<InterfaceFlags>> = Lazy::new(|| {
+    let mut m = HashMap::new();
+    type IF = InterfaceFlags;
+    let e = InterfaceFlags::empty();
 
-    modifiers.insert(
+    m.insert(
         Kw::Native,
-        DF::IdentModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE),
+        C::new(
+            IF::NATIVE,
+            DF::IdentModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE),
+        ),
     );
 
-    modifiers.insert(Kw::DependsOn, DF::IdentModifiers(MC::ALLOW_MULTIPLE));
+    m.insert(Kw::DependsOn, C::new(e, MORE_IDENTS));
 
-    ModifierConfig { modifiers }
+    ModifierConfig { modifiers: m }
 });
 
-pub static VAR_MODIFIERS: Lazy<ModifierConfig> = Lazy::new(|| {
-    let mut modifiers = HashMap::new();
+pub static VAR_MODIFIERS: Lazy<ModifierConfig<VarFlags>> = Lazy::new(|| {
+    let mut m = HashMap::new();
+    type VF = VarFlags;
+    let e = VarFlags::empty();
 
-    modifiers.insert(Kw::Native, DF::Nothing);
-    modifiers.insert(
-        Kw::Config,
-        DF::IdentModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE),
+    m.insert(Kw::Native, C::new(VF::NATIVE, DF::Nothing));
+    m.insert(Kw::Config, C::new(VF::CONFIG, DF::Nothing));
+    m.insert(Kw::GlobalConfig, C::new(VF::GLOBALCONFIG, DF::Nothing));
+    m.insert(Kw::Localized, C::new(VF::LOCALIZED, DF::Nothing));
+    m.insert(Kw::Const, C::new(VF::CONST, DF::Nothing));
+
+    m.insert(Kw::EditConst, C::new(e, DF::Nothing));
+    m.insert(Kw::EditInline, C::new(e, DF::Nothing));
+    m.insert(Kw::NoExport, C::new(e, DF::Nothing));
+    m.insert(Kw::Transient, C::new(e, DF::Nothing));
+    m.insert(Kw::DuplicateTransient, C::new(e, DF::Nothing));
+    m.insert(Kw::DataBinding, C::new(e, DF::Nothing));
+    m.insert(Kw::Init, C::new(e, DF::Nothing));
+    m.insert(Kw::RepNotify, C::new(e, DF::Nothing));
+    m.insert(Kw::Input, C::new(e, DF::Nothing));
+
+    m.insert(Kw::Public, C::new(VF::PUBLIC, DF::OptForeignBlock));
+    m.insert(Kw::Private, C::new(VF::PRIVATE, DF::OptForeignBlock));
+    m.insert(
+        Kw::PrivateWrite,
+        C::new(VF::PRIVATEWRITE, DF::OptForeignBlock),
     );
-    modifiers.insert(Kw::GlobalConfig, DF::Nothing);
-    modifiers.insert(Kw::Localized, DF::Nothing);
-    modifiers.insert(Kw::Const, DF::Nothing);
-    modifiers.insert(Kw::EditConst, DF::Nothing);
+    m.insert(Kw::Protected, C::new(VF::PROTECTED, DF::OptForeignBlock));
+    m.insert(
+        Kw::ProtectedWrite,
+        C::new(VF::PROTECTEDWRITE, DF::OptForeignBlock),
+    );
 
-    modifiers.insert(Kw::EditInline, DF::Nothing);
-
-    modifiers.insert(Kw::NoExport, DF::Nothing);
-    modifiers.insert(Kw::Transient, DF::Nothing);
-    modifiers.insert(Kw::DuplicateTransient, DF::Nothing);
-    modifiers.insert(Kw::DataBinding, DF::Nothing);
-    modifiers.insert(Kw::Init, DF::Nothing);
-    modifiers.insert(Kw::RepNotify, DF::Nothing);
-    modifiers.insert(Kw::Input, DF::Nothing);
-
-    modifiers.insert(Kw::Public, DF::OptForeignBlock);
-    modifiers.insert(Kw::Private, DF::OptForeignBlock);
-    modifiers.insert(Kw::Protected, DF::OptForeignBlock);
-    modifiers.insert(Kw::PrivateWrite, DF::OptForeignBlock);
-    modifiers.insert(Kw::ProtectedWrite, DF::OptForeignBlock);
-
-    ModifierConfig { modifiers }
+    ModifierConfig { modifiers: m }
 });
 
-pub static ARG_MODIFIERS: Lazy<ModifierConfig> = Lazy::new(|| {
-    let mut modifiers = HashMap::new();
+pub static ARG_MODIFIERS: Lazy<ModifierConfig<ArgFlags>> = Lazy::new(|| {
+    let mut m = HashMap::new();
+    let e = ArgFlags::empty();
+    type AF = ArgFlags;
 
-    modifiers.insert(Kw::Coerce, DF::Nothing);
-    modifiers.insert(Kw::Const, DF::Nothing);
-    modifiers.insert(Kw::Optional, DF::Nothing);
-    modifiers.insert(Kw::Skip, DF::Nothing);
-    modifiers.insert(Kw::Out, DF::Nothing);
-    modifiers.insert(Kw::Ref, DF::Nothing);
+    m.insert(Kw::Coerce, C::new(AF::COERCE, DF::Nothing));
+    m.insert(Kw::Const, C::new(AF::CONST, DF::Nothing));
+    m.insert(Kw::Optional, C::new(AF::OPTIONAL, DF::Nothing));
+    m.insert(Kw::Skip, C::new(AF::SKIP, DF::Nothing));
+    m.insert(Kw::Out, C::new(AF::OUT, DF::Nothing));
+    m.insert(Kw::Ref, C::new(AF::REF, DF::Nothing));
 
-    ModifierConfig { modifiers }
+    ModifierConfig { modifiers: m }
 });
 
-pub static STRUCT_MODIFIERS: Lazy<ModifierConfig> = Lazy::new(|| {
-    let mut modifiers = HashMap::new();
+pub static STRUCT_MODIFIERS: Lazy<ModifierConfig<StructFlags>> = Lazy::new(|| {
+    let mut m = HashMap::new();
+    let e = StructFlags::empty();
+    type SF = StructFlags;
 
-    modifiers.insert(Kw::Native, DF::Nothing);
-    modifiers.insert(Kw::Immutable, DF::Nothing);
-    modifiers.insert(Kw::Transient, DF::Nothing);
+    m.insert(Kw::Native, C::new(e, DF::Nothing));
+    m.insert(Kw::Immutable, C::new(e, DF::Nothing));
+    m.insert(Kw::Transient, C::new(e, DF::Nothing));
 
-    ModifierConfig { modifiers }
+    ModifierConfig { modifiers: m }
 });
 
-pub static FUNC_MODIFIERS: Lazy<ModifierConfig> = Lazy::new(|| {
-    let mut modifiers = HashMap::new();
+pub static FUNC_MODIFIERS: Lazy<ModifierConfig<FuncFlags>> = Lazy::new(|| {
+    let mut m = HashMap::new();
+    let e = FuncFlags::empty();
+    type FF = FuncFlags;
 
-    modifiers.insert(Kw::Function, DF::Nothing);
-    modifiers.insert(Kw::Event, DF::Nothing);
-    modifiers.insert(
+    m.insert(Kw::Function, C::new(e, DF::Nothing));
+    m.insert(Kw::Event, C::new(FF::EVENT, DF::Nothing));
+    m.insert(
         Kw::Native,
-        DF::NumberModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE),
+        C::new(
+            FF::NATIVE,
+            DF::NumberModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE),
+        ),
     );
-    modifiers.insert(
+    m.insert(
         Kw::Operator,
-        DF::NumberModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE),
+        C::new(
+            FF::OPERATOR,
+            DF::NumberModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE),
+        ),
     );
-    modifiers.insert(Kw::PreOperator, DF::Nothing);
-    modifiers.insert(Kw::PostOperator, DF::Nothing);
+    m.insert(Kw::PreOperator, C::new(FF::PREOPERATOR, DF::Nothing));
+    m.insert(Kw::PostOperator, C::new(FF::POSTOPERATOR, DF::Nothing));
 
-    modifiers.insert(Kw::Static, DF::Nothing);
-    modifiers.insert(Kw::Final, DF::Nothing);
-    modifiers.insert(Kw::Exec, DF::Nothing);
-    modifiers.insert(Kw::Latent, DF::Nothing);
+    m.insert(Kw::Static, C::new(FF::STATIC, DF::Nothing));
+    m.insert(Kw::Final, C::new(FF::FINAL, DF::Nothing));
+    m.insert(Kw::Exec, C::new(FF::EXEC, DF::Nothing));
+    m.insert(Kw::Latent, C::new(FF::LATENT, DF::Nothing));
 
-    modifiers.insert(Kw::Simulated, DF::Nothing);
-    modifiers.insert(Kw::Reliable, DF::Nothing);
-    modifiers.insert(Kw::Client, DF::Nothing);
-    modifiers.insert(Kw::Server, DF::Nothing);
+    m.insert(Kw::Simulated, C::new(e, DF::Nothing));
+    m.insert(Kw::Reliable, C::new(e, DF::Nothing));
+    m.insert(Kw::Client, C::new(e, DF::Nothing));
+    m.insert(Kw::Server, C::new(e, DF::Nothing));
 
-    modifiers.insert(Kw::NoExport, DF::Nothing);
+    m.insert(Kw::NoExport, C::new(e, DF::Nothing));
 
-    modifiers.insert(Kw::Public, DF::Nothing);
-    modifiers.insert(Kw::Private, DF::Nothing);
-    modifiers.insert(Kw::Protected, DF::Nothing);
+    m.insert(Kw::Public, C::new(FF::PUBLIC, DF::Nothing));
+    m.insert(Kw::Private, C::new(FF::PRIVATE, DF::Nothing));
+    m.insert(Kw::Protected, C::new(FF::PROTECTED, DF::Nothing));
 
-    modifiers.insert(Kw::Coerce, DF::Nothing);
+    m.insert(Kw::Coerce, C::new(FF::COERCE, DF::Nothing));
 
-    ModifierConfig { modifiers }
+    ModifierConfig { modifiers: m }
 });

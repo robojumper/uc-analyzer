@@ -55,6 +55,26 @@ impl<'a> Parser<'a> {
         }
     }
 
+    
+    fn peek(&self) -> Option<Token> {
+        self.clone().next()
+    }
+
+    /// This pretty much only exists to support `simulated state`
+    fn peek2(&self) -> Option<Token> {
+        let mut s = self.clone();
+        s.next();
+        s.next()
+    }
+
+    fn peek_any(&self) -> Result<Token, String> {
+        self.peek().ok_or_else(|| "eof".to_owned())
+    }
+
+    fn next_any(&mut self) -> Result<Token, String> {
+        self.next().ok_or_else(|| "eof".to_owned())
+    }
+
     fn sym_to_ident(&self, tok: &Token) -> Identifier {
         match tok.kind {
             Tk::Sym(Symbol::Identifier) => self.lex.extract_ident(tok),
@@ -99,18 +119,6 @@ impl<'a> Parser<'a> {
 
     fn fmt_unexpected(&self, token: &Token) -> String {
         format!("unexpected token: {:?}", token)
-    }
-
-    fn peek(&self) -> Option<Token> {
-        self.clone().next()
-    }
-
-    fn peek_any(&self) -> Result<Token, String> {
-        self.peek().ok_or_else(|| "eof".to_owned())
-    }
-
-    fn next_any(&mut self) -> Result<Token, String> {
-        self.next().ok_or_else(|| "eof".to_owned())
     }
 
     pub fn eat(&mut self, kind: Tk) -> bool {

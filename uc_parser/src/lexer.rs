@@ -143,6 +143,7 @@ impl Sigil {
 pub enum Keyword {
     Abstract,
     Array,
+    Auto,
     Client,
     Class,
     ClassGroup,

@@ -6,15 +6,11 @@ use uc_def::{
     VarInstance,
 };
 
-use super::{
-    modifiers::{DeclFollowups, ModifierConfig, ModifierCount},
-    Parser,
-};
+use super::Parser;
 use crate::{
     kw,
     lexer::{Delim, NumberSyntax, Sigil, Symbol, Token, TokenKind as Tk},
     parser::modifiers,
-    NumberLiteral,
 };
 
 #[derive(Debug)]
@@ -53,7 +49,7 @@ impl Parser<'_> {
                 None
             };
 
-            self.ignore_kws(&*modifiers::CLASS_MODIFIERS)?;
+            self.parse_kws(&*modifiers::CLASS_MODIFIERS)?;
 
             self.expect(Tk::Semi)?;
 
@@ -70,7 +66,7 @@ impl Parser<'_> {
                 None
             };
 
-            self.ignore_kws(&*modifiers::INTERFACE_MODIFIERS)?;
+            self.parse_kws(&*modifiers::INTERFACE_MODIFIERS)?;
             self.expect(Tk::Semi)?;
 
             ClassHeader::Interface { extends }
@@ -93,6 +89,7 @@ impl Parser<'_> {
     }
 
     fn parse_const(&mut self) -> Result<ConstDef, String> {
+        self.expect(kw!(Const))?;
         let name = self.expect_ident()?;
         self.expect(Tk::Sig(Sigil::Eq))?;
         let val = self.parse_const_val()?;
@@ -102,12 +99,13 @@ impl Parser<'_> {
     }
 
     fn parse_var(&mut self) -> Result<VarDef<Identifier>, String> {
+        self.expect(kw!(Var))?;
         if self.eat(Tk::Open(Delim::LParen)) {
             self.eat_symbol();
             self.expect(Tk::Close(Delim::RParen))?;
         }
 
-        self.ignore_kws(&*modifiers::VAR_MODIFIERS)?;
+        self.parse_kws(&*modifiers::VAR_MODIFIERS)?;
         let ty = self.parse_ty(None)?;
 
         let mut names = vec![];
@@ -117,10 +115,7 @@ impl Parser<'_> {
             let count = if self.eat(Tk::Open(Delim::LBrack)) {
                 match self.peek_any()?.kind {
                     Tk::Number(_) => {
-                        let cnt_lit = self.expect_number()?;
-                        let NumberLiteral::Int(cnt) = cnt_lit else {
-                            return Err("not an integer".to_owned());
-                        };
+                        let cnt = self.expect_number()?.expect_int()?;
                         self.expect(Tk::Close(Delim::RBrack))?;
                         DimCount::Number(cnt as u32)
                     }
@@ -169,6 +164,7 @@ impl Parser<'_> {
     }
 
     fn parse_enum(&mut self) -> Result<EnumDef, String> {
+        self.expect(kw!(Enum))?;
         let name = self.expect_ident()?;
         self.expect(Tk::Open(Delim::LBrace))?;
 
@@ -203,10 +199,11 @@ impl Parser<'_> {
     }
 
     fn parse_struct(&mut self) -> Result<StructDef<Identifier>, String> {
+        self.expect(kw!(Struct))?;
         if self.eat(Tk::Open(Delim::LBrace)) {
             self.ignore_foreign_block(Tk::Open(Delim::LBrace))?;
         }
-        self.ignore_kws(&*modifiers::STRUCT_MODIFIERS)?;
+        self.parse_kws(&*modifiers::STRUCT_MODIFIERS)?;
         let name = self.expect_ident()?;
 
         let extends = if self.eat(kw!(Extends)) {
@@ -220,12 +217,16 @@ impl Parser<'_> {
         let mut fields = vec![];
 
         loop {
-            match self.next_any()?.kind {
-                Tk::Close(Delim::RBrace) => break,
+            match self.peek_any()?.kind {
+                Tk::Close(Delim::RBrace) => {
+                    self.next();
+                    break
+                },
                 kw!(Var) => {
                     fields.push(self.parse_var()?);
                 }
                 kw!(StructCppText) | kw!(StructDefaultProperties) => {
+                    self.next();
                     let opener = self.expect(Tk::Open(Delim::LBrace))?;
                     self.ignore_foreign_block(opener.kind)?;
                 }
@@ -272,7 +273,7 @@ impl Parser<'_> {
                 self.expect(Tk::Comma)?;
             }
 
-            self.ignore_kws(&*modifiers::ARG_MODIFIERS)?;
+            self.parse_kws(&*modifiers::ARG_MODIFIERS)?;
             let ty = self.parse_ty(None)?;
             let name = self.expect_ident()?;
 
@@ -289,13 +290,8 @@ impl Parser<'_> {
         Ok((name, FuncSig { ret_ty, args }))
     }
 
-    fn parse_function(&mut self, first: Token) -> Result<FuncDef<Identifier>, String> {
-        let Tk::Sym(Symbol::Kw(kw)) = first.kind else { panic!("parse_function needs the first function kw") };
-        let followups = modifiers::FUNC_MODIFIERS
-            .get(kw)
-            .expect("not a valid function keyword");
-        self.ignore_followups(followups)?;
-        self.ignore_kws(&*modifiers::FUNC_MODIFIERS)?;
+    fn parse_function(&mut self) -> Result<FuncDef<Identifier>, String> {
+        self.parse_kws(&*modifiers::FUNC_MODIFIERS)?;
 
         let (name, sig) = self.parse_function_sig(true)?;
 
@@ -342,10 +338,7 @@ impl Parser<'_> {
             let count = if self.eat(Tk::Open(Delim::LBrack)) {
                 match self.peek_any()?.kind {
                     Tk::Number(_) => {
-                        let cnt_lit = self.expect_number()?;
-                        let NumberLiteral::Int(cnt) = cnt_lit else {
-                            return Err("not an integer".to_owned());
-                        };
+                        let cnt = self.expect_number()?.expect_int()?;
                         self.expect(Tk::Close(Delim::RBrack))?;
                         DimCount::Number(cnt as u32)
                     }
@@ -375,6 +368,9 @@ impl Parser<'_> {
 
     fn parse_state(&mut self) -> Result<(), String> {
         // TODO
+        self.eat(kw!(Simulated));
+        self.eat(kw!(Auto));
+        self.expect(kw!(State))?;
         self.expect_ident()?;
         self.expect(Tk::Open(Delim::LBrace))?;
         self.ignore_foreign_block(Tk::Open(Delim::LBrace))?;
@@ -383,6 +379,7 @@ impl Parser<'_> {
     }
 
     fn parse_delegate(&mut self) -> Result<DelegateDef<Identifier>, String> {
+        self.expect(kw!(Delegate))?;
         let (name, sig) = self.parse_function_sig(false)?;
         self.expect(Tk::Semi)?;
 
@@ -402,126 +399,45 @@ impl Parser<'_> {
         Ok(())
     }
 
-    fn ignore_followups(&mut self, followups: &DeclFollowups) -> Result<(), String> {
-        match followups {
-            DeclFollowups::Nothing => Ok(()),
-            DeclFollowups::OptForeignBlock => match self.peek() {
-                Some(Token {
-                    kind: opener @ Tk::Open(Delim::LParen),
-                    ..
-                }) => {
-                    self.next();
-                    self.ignore_foreign_block(opener)?;
-                    Ok(())
-                }
-                Some(_) | None => Ok(()),
-            },
-            DeclFollowups::IdentModifiers(mods) | DeclFollowups::NumberModifiers(mods) => {
-                match self.peek() {
-                    Some(Token {
-                        kind: Tk::Open(Delim::LParen),
-                        ..
-                    }) => {
-                        if mods.intersects(ModifierCount::ALLOW_PAREN) {
-                            self.next();
-                            let mut comma = false;
-                            loop {
-                                if self.eat(Tk::Close(Delim::RParen)) {
-                                    break Ok(());
-                                }
-                                if comma {
-                                    self.expect(Tk::Comma)?;
-                                }
-                                match followups {
-                                    DeclFollowups::IdentModifiers(_) => {
-                                        self.expect_ident()?;
-                                    }
-                                    &DeclFollowups::NumberModifiers(_) => {
-                                        self.expect_number()?;
-                                    }
-                                    _ => unreachable!("checked in outer match"),
-                                }
-                                comma = true;
-                            }
-                        } else {
-                            Ok(())
-                        }
-                    }
-                    t @ (Some(_) | None) => {
-                        if mods.contains(ModifierCount::ALLOW_NONE) {
-                            Ok(())
-                        } else {
-                            Err(format!("missing followups: {:?}, got {:?}", followups, t))
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fn ignore_kws(&mut self, mods: &ModifierConfig) -> Result<(), String> {
-        loop {
-            let kw_or_next = self.peek();
-            match &kw_or_next {
-                Some(tok) => match tok.kind {
-                    Tk::Sym(Symbol::Kw(kw)) => match mods.get(kw) {
-                        Some(followups) => {
-                            self.next();
-                            self.ignore_followups(followups)?;
-                        }
-                        None => return Ok(()),
-                    },
-                    _ => return Ok(()),
-                },
-                None => return Ok(()),
-            }
-        }
-    }
-
     fn parse_one_item(&mut self) -> Result<Option<TopLevelItem>, String> {
         loop {
-            break match (self.next(), self.peek()) {
-                (
-                    Some(Token {
-                        kind: kw!(Simulated),
-                        ..
-                    }),
-                    Some(Token {
-                        kind: kw!(State), ..
-                    }),
-                ) => {
-                    // hardcoded exception for simulated state
-                    self.next();
-                    self.parse_state()?;
-                    continue;
-                }
-                (Some(tok), _) => match tok.kind {
+            break match self.peek() {
+                Some(tok) => match tok.kind {
                     kw!(Const) => Ok(Some(TopLevelItem::Const(self.parse_const()?))),
                     kw!(Var) => Ok(Some(TopLevelItem::Var(self.parse_var()?))),
                     kw!(Enum) => Ok(Some(TopLevelItem::Enum(self.parse_enum()?))),
                     kw!(Struct) => Ok(Some(TopLevelItem::Struct(self.parse_struct()?))),
                     kw!(Delegate) => Ok(Some(TopLevelItem::Delegate(self.parse_delegate()?))),
                     kw!(CppText) | kw!(DefaultProperties) | kw!(Replication) => {
+                        self.next();
                         let brace = self.expect(Tk::Open(Delim::LBrace))?;
                         self.ignore_foreign_block(brace.kind)?;
                         continue;
                     }
-                    kw!(State) => {
+                    kw!(State) | kw!(Auto) => {
+                        self.parse_state()?;
+                        continue;
+                    }
+                    kw!(Simulated) if matches!(self.peek2(), Some(Token { kind: kw!(State), .. } )) => {
                         self.parse_state()?;
                         continue;
                     }
                     Tk::Sym(Symbol::Kw(kw)) if modifiers::FUNC_MODIFIERS.contains(kw) => {
-                        Ok(Some(TopLevelItem::Func(self.parse_function(tok)?)))
+                        Ok(Some(TopLevelItem::Func(self.parse_function()?)))
                     }
                     Tk::Directive => {
+                        self.next();
                         self.ignore_directive()?;
                         continue;
                     }
-                    Tk::Semi => continue,
+                    Tk::Semi => {
+                        self.next();
+                        continue
+                    },
                     Tk::Comment => unreachable!("filtered out in next"),
                     _ => panic!("Unknown start of item: {:?}", tok),
                 },
-                (None, _) => Ok(None),
+                None => Ok(None),
             };
         }
     }
