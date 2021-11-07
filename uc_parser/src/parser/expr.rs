@@ -153,11 +153,14 @@ impl Parser<'_> {
                 } else if let SigilOrVecOp::Sig(Sigil::LParen) = op {
                     let mut args = vec![];
                     loop {
+                        while self.eat(Tk::Comma) {
+                            args.push(None);
+                        }
                         if self.eat(sig!(RParen)) {
                             break;
                         }
                         let expr = self.parse_base_expression_bp(0)?;
-                        args.push(expr);
+                        args.push(Some(expr));
                         let delim = self.next_any()?;
                         match delim.kind {
                             Tk::Comma => continue,
@@ -293,6 +296,7 @@ fn infix_binding_power(op: SigilOrVecOp) -> Option<(u8, u8)> {
         Sigil::LtEq => (22, 23),
         Sigil::GtEq => (22, 23),
         Sigil::EqEq => (22, 23),
+        Sigil::TildeEq => (22, 23),
 
         Sigil::BangEq => (20, 21),
 

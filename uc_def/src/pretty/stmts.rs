@@ -38,7 +38,11 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 self.w.write_all(b")")?;
                 self.format_block(run)?;
             }
-            Statement::ForeachStatement { source, run } => todo!(),
+            Statement::ForeachStatement { source, run } => {
+                self.w.write_all(b"foreach ")?;
+                self.format_expr(source)?;
+                self.format_block(run)?;
+            }
             Statement::WhileStatement { cond, run } => {
                 self.w.write_all(b"if (")?;
                 self.format_expr(cond)?;
@@ -48,8 +52,12 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
             }
             Statement::DoStatement { cond, run } => todo!(),
             Statement::SwitchStatement { scrutinee, cases } => todo!(),
-            Statement::BreakStatement => todo!(),
-            Statement::ContinueStatement => todo!(),
+            Statement::BreakStatement => {
+                self.w.write_all(b"break;")?;
+            }
+            Statement::ContinueStatement => {
+                self.w.write_all(b"continue;")?;
+            }
             //Statement::GotoStatement => todo!(),
             Statement::ReturnStatement { expr } => {
                 self.w.write_all(b"return")?;
@@ -108,7 +116,9 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 self.format_expr(lhs)?;
                 self.w.write_all(b"(")?;
                 for (idx, arg) in args.iter().enumerate() {
-                    self.format_expr(arg)?;
+                    if let Some(arg) = arg {
+                        self.format_expr(arg)?;
+                    }
                     if idx != args.len() - 1 {
                         self.w.write_all(b", ")?;
                     }

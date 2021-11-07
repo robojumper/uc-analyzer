@@ -1,4 +1,4 @@
-use uc_def::{Block, Case, CaseClause, Expr, Identifier, Statement};
+use uc_def::{Block, Case, CaseClause, Identifier, Statement};
 
 use crate::{
     kw,
@@ -58,7 +58,6 @@ impl Parser<'_> {
         Ok(stmt)
     }
 
-    /*
     fn parse_single_case(&mut self) -> Result<Option<CaseClause<Identifier>>, String> {
         let case = match self.peek_any()?.kind {
             kw!(Default) => {
@@ -72,9 +71,27 @@ impl Parser<'_> {
                 Case::Case(expr)
             }
             sig!(RBrace) => return Ok(None),
+            _ => return Err("switch must be followed by case or default clause".to_owned()),
         };
+        while self.eat(Tk::Semi) {}
+        let mut statements = vec![];
+
+        loop {
+            match self.peek_any()?.kind {
+                kw!(Default) | kw!(Case) | sig!(RBrace) => break,
+                _ => {
+                    // After a case label and eating free semicolons, the only
+                    // thing that can appear here is a closing brace, another
+                    // case label, or a statement
+                    let stmt = self.expect_one_statement("switch clause", true)?;
+                    while self.eat(Tk::Semi) {}
+                    statements.push(stmt);
+                }
+            }
+        }
+
+        Ok(Some(CaseClause { case, statements }))
     }
-    */
 
     fn parse_one_stmt(&mut self) -> Result<Option<Statement<Identifier>>, String> {
         match self.peek() {
@@ -165,16 +182,26 @@ impl Parser<'_> {
                     let scrutinee = self.parse_base_expression()?;
                     self.expect(sig!(RParen))?;
                     self.expect(sig!(LBrace))?;
-                    /*
-                    let
 
-                    match self.peek_any()?.kind {
-                        kw!(Case) => {
+                    let mut cases = vec![];
 
+                    loop {
+                        match self.parse_single_case() {
+                            Ok(Some(case)) => {
+                                cases.push(case);
+                            }
+                            Ok(None) => break,
+                            Err(e) => {
+                                self.errs.push(e);
+                                // TODO
+                                self.recover_to_semi();
+                            }
                         }
                     }
-                    */
-                    todo!()
+
+                    self.expect(sig!(RBrace))?;
+
+                    Ok(Some(Statement::SwitchStatement { scrutinee, cases }))
                 }
                 kw!(Break) => {
                     self.next();

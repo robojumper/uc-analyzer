@@ -380,7 +380,7 @@ pub enum Expr<T> {
     },
     CallExpr {
         lhs: Box<Expr<T>>,
-        args: Vec<Expr<T>>,
+        args: Vec<Option<Expr<T>>>,
     },
     NewExpr {
         args: Vec<Expr<T>>,
