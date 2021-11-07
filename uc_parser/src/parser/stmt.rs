@@ -1,4 +1,4 @@
-use uc_def::{BlockOrStatement, Expr, Identifier, Statement};
+use uc_def::{BlockOrStatement, Case, CaseClause, Expr, Identifier, Statement};
 
 use crate::{
     kw,
@@ -15,14 +15,15 @@ fn stmt_wants_semi<I>(stmt: &Statement<I>) -> bool {
         Statement::ForStatement { .. } => false,
         Statement::ForeachStatement { .. } => false,
         Statement::WhileStatement { .. } => false,
-        Statement::DoStatement { .. } => false,
+        Statement::DoStatement { .. } => true,
         Statement::SwitchStatement { .. } => false,
         Statement::BreakStatement => true,
         Statement::ContinueStatement => true,
-        Statement::GotoStatement => true,
+        //Statement::GotoStatement => true,
         Statement::ReturnStatement { .. } => true,
         Statement::Label(_) => false,
-        Statement::Expression(_) => true,
+        Statement::Assignment { .. } => true,
+        Statement::Expr { .. } => true,
     }
 }
 
@@ -61,6 +62,24 @@ impl Parser<'_> {
         Ok(stmt)
     }
 
+    /*
+    fn parse_single_case(&mut self) -> Result<Option<CaseClause<Identifier>>, String> {
+        let case = match self.peek_any()?.kind {
+            kw!(Default) => {
+                self.next();
+                Case::Default
+            }
+            kw!(Case) => {
+                self.next();
+                let expr = self.parse_base_expression()?;
+                self.expect(sig!(Colon))?;
+                Case::Case(expr)
+            }
+            sig!(RBrace) => return Ok(None),
+        };
+    }
+    */
+
     fn parse_one_stmt(&mut self) -> Result<Option<Statement<Identifier>>, String> {
         match self.peek() {
             Some(tok) => match tok.kind {
@@ -75,7 +94,9 @@ impl Parser<'_> {
                         })
                     ) =>
                 {
-                    Err("label".to_owned())
+                    let label = self.expect_ident()?;
+                    self.next();
+                    Ok(Some(Statement::Label(label)))
                 }
                 kw!(If) => {
                     self.next();
@@ -115,7 +136,13 @@ impl Parser<'_> {
                         run,
                     }))
                 }
-                kw!(Foreach) => Err("foreach".to_owned()),
+                kw!(Foreach) => {
+                    self.next();
+                    let source = self.parse_base_expression()?;
+                    let run = self.parse_block_or_stmt("foreach")?;
+
+                    Ok(Some(Statement::ForeachStatement { source, run }))
+                }
                 kw!(While) => {
                     self.next();
                     self.expect(sig!(LParen))?;
@@ -125,25 +152,60 @@ impl Parser<'_> {
 
                     Ok(Some(Statement::WhileStatement { cond, run }))
                 }
-                kw!(Do) => Err("do".to_owned()),
-                kw!(Switch) => Err("switch".to_owned()),
-                kw!(Break) => Err("break".to_owned()),
-                kw!(Continue) => Err("continue".to_owned()),
-                kw!(Goto) => Err("goto".to_owned()),
+                kw!(Do) => {
+                    self.expect(sig!(LBrace))?;
+                    let stmts = self.parse_statements();
+                    self.expect(sig!(RBrace))?;
+                    self.expect(kw!(Until))?;
+                    self.expect(sig!(LParen))?;
+                    let cond = self.parse_base_expression()?;
+                    self.expect(sig!(RParen))?;
+
+                    Ok(Some(Statement::DoStatement { cond, run: stmts }))
+                }
+                kw!(Switch) => {
+                    self.next();
+                    self.expect(sig!(LParen))?;
+                    let scrutinee = self.parse_base_expression()?;
+                    self.expect(sig!(RParen))?;
+                    self.expect(sig!(LBrace))?;
+                    /*
+                    let
+
+                    match self.peek_any()?.kind {
+                        kw!(Case) => {
+
+                        }
+                    }
+                    */
+                    todo!()
+                }
+                kw!(Break) => {
+                    self.next();
+                    Ok(Some(Statement::BreakStatement))
+                }
+                kw!(Continue) => {
+                    self.next();
+                    Ok(Some(Statement::ContinueStatement))
+                }
+                kw!(Goto) => panic!("goto isn't used???"),
                 kw!(Return) => {
                     self.next();
-                    let expr = self.parse_base_expression()?;
+                    let expr = match self.peek_any()?.kind {
+                        Tk::Semi => None,
+                        _ => Some(self.parse_base_expression()?),
+                    };
                     Ok(Some(Statement::ReturnStatement { expr }))
                 }
                 _ => {
                     let lhs = self.parse_base_expression()?;
-                    let expr = if self.eat(sig!(Eq)) {
+                    let stat = if self.eat(sig!(Eq)) {
                         let rhs = self.parse_base_expression()?;
-                        Expr::AssignmentExpr { lhs, rhs }
+                        Statement::Assignment { lhs, rhs }
                     } else {
-                        Expr::BaseExpr { expr: lhs }
+                        Statement::Expr { expr: lhs }
                     };
-                    Ok(Some(Statement::Expression(expr)))
+                    Ok(Some(stat))
                 }
             },
             None => Ok(None),

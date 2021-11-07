@@ -1,6 +1,6 @@
 use std::io;
 
-use crate::{BaseExpr, BlockOrStatement, Literal, Op, Statement};
+use crate::{BlockOrStatement, Expr, Literal, Op, Statement};
 
 use super::{PPrinter, RefLookup};
 
@@ -38,7 +38,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 self.w.write_all(b")")?;
                 self.format_block_or_statement(run)?;
             }
-            Statement::ForeachStatement { source, dest, run } => todo!(),
+            Statement::ForeachStatement { source, run } => todo!(),
             Statement::WhileStatement { cond, run } => {
                 self.w.write_all(b"if (")?;
                 self.format_expr(cond)?;
@@ -50,25 +50,26 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
             Statement::SwitchStatement { scrutinee, cases } => todo!(),
             Statement::BreakStatement => todo!(),
             Statement::ContinueStatement => todo!(),
-            Statement::GotoStatement => todo!(),
+            //Statement::GotoStatement => todo!(),
             Statement::ReturnStatement { expr } => {
-                self.w.write_all(b"return ")?;
-                self.format_expr(expr)?;
+                self.w.write_all(b"return")?;
+                if let Some(expr) = expr {
+                    self.w.write_all(b" ")?;
+                    self.format_expr(expr)?;
+                }
                 self.w.write_all(b";")?;
             }
             Statement::Label(_) => todo!(),
-            Statement::Expression(e) => match e {
-                crate::Expr::AssignmentExpr { lhs, rhs } => {
-                    self.format_expr(lhs)?;
-                    self.w.write_all(b" = ")?;
-                    self.format_expr(rhs)?;
-                    self.w.write_all(b";")?;
-                }
-                crate::Expr::BaseExpr { expr } => {
-                    self.format_expr(expr)?;
-                    self.w.write_all(b";")?;
-                }
-            },
+            Statement::Assignment { lhs, rhs } => {
+                self.format_expr(lhs)?;
+                self.w.write_all(b" = ")?;
+                self.format_expr(rhs)?;
+                self.w.write_all(b";")?;
+            }
+            Statement::Expr { expr } => {
+                self.format_expr(expr)?;
+                self.w.write_all(b";")?;
+            }
         }
 
         Ok(())
@@ -101,9 +102,9 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         Ok(())
     }
 
-    pub fn format_expr(&mut self, expr: &BaseExpr<R::From>) -> io::Result<()> {
+    pub fn format_expr(&mut self, expr: &Expr<R::From>) -> io::Result<()> {
         match expr {
-            BaseExpr::IndexExpr { base, idx } => {
+            Expr::IndexExpr { base, idx } => {
                 self.w.write_all(b"(")?;
                 self.format_expr(base)?;
                 self.w.write_all(b"[")?;
@@ -111,12 +112,12 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 self.w.write_all(b"]")?;
                 self.w.write_all(b")")?;
             }
-            BaseExpr::FieldExpr { lhs, rhs } => {
+            Expr::FieldExpr { lhs, rhs } => {
                 self.format_expr(lhs)?;
                 self.w.write_all(b".")?;
                 self.format_expr(rhs)?;
             }
-            BaseExpr::CallExpr { lhs, args } => {
+            Expr::CallExpr { lhs, args } => {
                 self.format_expr(lhs)?;
                 self.w.write_all(b"(")?;
                 for (idx, arg) in args.iter().enumerate() {
@@ -127,7 +128,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 }
                 self.w.write_all(b")")?;
             }
-            BaseExpr::NewExpr { args, cls, arch } => {
+            Expr::NewExpr { args, cls, arch } => {
                 self.w.write_all(b"(")?;
                 self.w.write_all(b"new ")?;
                 if !args.is_empty() {
@@ -149,21 +150,21 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 }
                 self.w.write_all(b")")?;
             }
-            BaseExpr::PreOpExpr { op, rhs } => {
+            Expr::PreOpExpr { op, rhs } => {
                 self.w.write_all(b"(")?;
                 self.format_op(op)?;
                 self.w.write_all(b" ")?;
                 self.format_expr(rhs)?;
                 self.w.write_all(b")")?;
             }
-            BaseExpr::PostOpExpr { lhs, op } => {
+            Expr::PostOpExpr { lhs, op } => {
                 self.w.write_all(b"(")?;
                 self.format_expr(lhs)?;
                 self.w.write_all(b" ")?;
                 self.format_op(op)?;
                 self.w.write_all(b")")?;
             }
-            BaseExpr::BinOpExpr { lhs, op, rhs } => {
+            Expr::BinOpExpr { lhs, op, rhs } => {
                 self.w.write_all(b"(")?;
                 self.format_expr(lhs)?;
                 self.w.write_all(b" ")?;
@@ -172,7 +173,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 self.format_expr(rhs)?;
                 self.w.write_all(b")")?;
             }
-            BaseExpr::TernExpr { cond, then, alt } => {
+            Expr::TernExpr { cond, then, alt } => {
                 self.w.write_all(b"(")?;
                 self.format_expr(cond)?;
                 self.w.write_all(b" ? ")?;
@@ -181,10 +182,10 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 self.format_expr(alt)?;
                 self.w.write_all(b")")?;
             }
-            BaseExpr::SymExpr { sym } => {
+            Expr::SymExpr { sym } => {
                 self.format_i(sym)?;
             }
-            BaseExpr::LiteralExpr { lit } => {
+            Expr::LiteralExpr { lit } => {
                 self.format_lit(lit)?;
             }
         }

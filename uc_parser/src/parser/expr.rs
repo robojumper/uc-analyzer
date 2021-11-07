@@ -2,7 +2,7 @@
 //! See https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
 //! for an introduction to Pratt parsing.
 
-use uc_def::{BaseExpr, Identifier, Op};
+use uc_def::{Expr, Identifier, Op};
 
 use crate::{
     kw,
@@ -37,11 +37,11 @@ impl SigilOrVecOp {
 }
 
 impl Parser<'_> {
-    pub fn parse_base_expression(&mut self) -> Result<BaseExpr<Identifier>, String> {
+    pub fn parse_base_expression(&mut self) -> Result<Expr<Identifier>, String> {
         self.parse_base_expression_bp(0)
     }
 
-    fn parse_base_expression_bp(&mut self, min_bp: u8) -> Result<BaseExpr<Identifier>, String> {
+    fn parse_base_expression_bp(&mut self, min_bp: u8) -> Result<Expr<Identifier>, String> {
         let mut lhs = {
             let tok = self.next_any()?;
             match tok.kind {
@@ -53,7 +53,7 @@ impl Parser<'_> {
                 Tk::Sig(sig) => match prefix_binding_power(SigilOrVecOp::Sig(sig)) {
                     Some(((), r_bp)) => {
                         let rhs = self.parse_base_expression_bp(r_bp)?;
-                        BaseExpr::PreOpExpr {
+                        Expr::PreOpExpr {
                             op: sig.to_op(),
                             rhs: Box::new(rhs),
                         }
@@ -86,7 +86,7 @@ impl Parser<'_> {
                         None
                     };
 
-                    BaseExpr::NewExpr {
+                    Expr::NewExpr {
                         args,
                         cls: Box::new(cls),
                         arch: arch.map(Box::new),
@@ -94,26 +94,26 @@ impl Parser<'_> {
                 }
                 Tk::Sym(_) if matches!(self.peek(), Some(Token { kind: Tk::Name, .. })) => {
                     self.next();
-                    BaseExpr::LiteralExpr {
+                    Expr::LiteralExpr {
                         lit: uc_def::Literal::ObjReference,
                     }
                 }
-                kw!(None) => BaseExpr::LiteralExpr {
+                kw!(None) => Expr::LiteralExpr {
                     lit: uc_def::Literal::None,
                 },
-                Tk::Sym(_) => BaseExpr::SymExpr {
+                Tk::Sym(_) => Expr::SymExpr {
                     sym: self.sym_to_ident(&tok),
                 },
-                Tk::Number(_) => BaseExpr::LiteralExpr {
+                Tk::Number(_) => Expr::LiteralExpr {
                     lit: uc_def::Literal::Number,
                 },
-                Tk::String => BaseExpr::LiteralExpr {
+                Tk::String => Expr::LiteralExpr {
                     lit: uc_def::Literal::String,
                 },
-                Tk::Name => BaseExpr::LiteralExpr {
+                Tk::Name => Expr::LiteralExpr {
                     lit: uc_def::Literal::Name,
                 },
-                Tk::Bool(_) => BaseExpr::LiteralExpr {
+                Tk::Bool(_) => Expr::LiteralExpr {
                     lit: uc_def::Literal::Bool,
                 },
                 _ => return Err(format!("Unknown start of expression: {:?}", tok)),
@@ -146,7 +146,7 @@ impl Parser<'_> {
                 lhs = if let SigilOrVecOp::Sig(Sigil::LBrack) = op {
                     let rhs = self.parse_base_expression_bp(0)?;
                     self.expect(sig!(RBrack))?;
-                    BaseExpr::IndexExpr {
+                    Expr::IndexExpr {
                         base: Box::new(lhs),
                         idx: Box::new(rhs),
                     }
@@ -165,12 +165,12 @@ impl Parser<'_> {
                             _ => return Err(format!("Expected comma or }}, got {:?}", delim)),
                         }
                     }
-                    BaseExpr::CallExpr {
+                    Expr::CallExpr {
                         lhs: Box::new(lhs),
                         args,
                     }
                 } else {
-                    BaseExpr::PostOpExpr {
+                    Expr::PostOpExpr {
                         lhs: Box::new(lhs),
                         op: op.to_op(),
                     }
@@ -188,7 +188,7 @@ impl Parser<'_> {
                     let mhs = self.parse_base_expression_bp(0)?;
                     self.expect(sig!(Colon))?;
                     let rhs = self.parse_base_expression_bp(r_bp)?;
-                    BaseExpr::TernExpr {
+                    Expr::TernExpr {
                         cond: Box::new(lhs),
                         then: Box::new(mhs),
                         alt: Box::new(rhs),
@@ -196,12 +196,12 @@ impl Parser<'_> {
                 } else {
                     let rhs = self.parse_base_expression_bp(r_bp)?;
                     if let SigilOrVecOp::Sig(Sigil::Dot) = op {
-                        BaseExpr::FieldExpr {
+                        Expr::FieldExpr {
                             lhs: Box::new(lhs),
                             rhs: Box::new(rhs),
                         }
                     } else {
-                        BaseExpr::BinOpExpr {
+                        Expr::BinOpExpr {
                             lhs: Box::new(lhs),
                             op: op.to_op(),
                             rhs: Box::new(rhs),

@@ -255,7 +255,7 @@ pub struct FuncArg<T> {
     pub ty: Ty<T>,
     pub name: Identifier,
     pub count: DimCount<T>,
-    pub def: Option<BaseExpr<T>>,
+    pub def: Option<Expr<T>>,
     pub mods: Modifiers<ArgFlags, T>,
 }
 
@@ -268,41 +268,46 @@ pub struct FuncBody<T> {
 #[derive(Debug)]
 pub enum Statement<T> {
     IfStatement {
-        cond: BaseExpr<T>,
+        cond: Expr<T>,
         then: BlockOrStatement<T>,
         or_else: Option<BlockOrStatement<T>>,
     },
     ForStatement {
         init: Box<Statement<T>>,
-        cond: BaseExpr<T>,
+        cond: Expr<T>,
         retry: Box<Statement<T>>,
         run: BlockOrStatement<T>,
     },
     ForeachStatement {
-        source: BaseExpr<T>,
-        dest: T,
+        source: Expr<T>,
         run: BlockOrStatement<T>,
     },
     WhileStatement {
-        cond: BaseExpr<T>,
+        cond: Expr<T>,
         run: BlockOrStatement<T>,
     },
     DoStatement {
-        cond: BaseExpr<T>,
-        run: BlockOrStatement<T>,
+        cond: Expr<T>,
+        run: Vec<Statement<T>>,
     },
     SwitchStatement {
-        scrutinee: BaseExpr<T>,
+        scrutinee: Expr<T>,
         cases: Vec<CaseClause<T>>,
     },
     BreakStatement,
     ContinueStatement,
-    GotoStatement,
+    //GotoStatement,
     ReturnStatement {
-        expr: BaseExpr<T>,
+        expr: Option<Expr<T>>,
     },
     Label(T),
-    Expression(Expr<T>),
+    Assignment {
+        lhs: Expr<T>,
+        rhs: Expr<T>,
+    },
+    Expr {
+        expr: Expr<T>,
+    },
 }
 
 #[derive(Debug)]
@@ -317,6 +322,7 @@ pub enum Case<T> {
     Default,
 }
 
+// Todo: Throw this away and just wrap everything in a block?
 #[derive(Debug)]
 pub enum BlockOrStatement<T> {
     Block(Vec<Statement<T>>),
@@ -366,46 +372,40 @@ pub enum Op {
 
 #[derive(Debug)]
 pub enum Expr<T> {
-    AssignmentExpr { lhs: BaseExpr<T>, rhs: BaseExpr<T> },
-    BaseExpr { expr: BaseExpr<T> },
-}
-
-#[derive(Debug)]
-pub enum BaseExpr<T> {
     IndexExpr {
-        base: Box<BaseExpr<T>>,
-        idx: Box<BaseExpr<T>>,
+        base: Box<Expr<T>>,
+        idx: Box<Expr<T>>,
     },
     FieldExpr {
-        lhs: Box<BaseExpr<T>>,
-        rhs: Box<BaseExpr<T>>,
+        lhs: Box<Expr<T>>,
+        rhs: Box<Expr<T>>,
     },
     CallExpr {
-        lhs: Box<BaseExpr<T>>,
-        args: Vec<BaseExpr<T>>,
+        lhs: Box<Expr<T>>,
+        args: Vec<Expr<T>>,
     },
     NewExpr {
-        args: Vec<BaseExpr<T>>,
-        cls: Box<BaseExpr<T>>,
-        arch: Option<Box<BaseExpr<T>>>,
+        args: Vec<Expr<T>>,
+        cls: Box<Expr<T>>,
+        arch: Option<Box<Expr<T>>>,
     },
     PreOpExpr {
         op: Op,
-        rhs: Box<BaseExpr<T>>,
+        rhs: Box<Expr<T>>,
     },
     PostOpExpr {
-        lhs: Box<BaseExpr<T>>,
+        lhs: Box<Expr<T>>,
         op: Op,
     },
     BinOpExpr {
-        lhs: Box<BaseExpr<T>>,
+        lhs: Box<Expr<T>>,
         op: Op,
-        rhs: Box<BaseExpr<T>>,
+        rhs: Box<Expr<T>>,
     },
     TernExpr {
-        cond: Box<BaseExpr<T>>,
-        then: Box<BaseExpr<T>>,
-        alt: Box<BaseExpr<T>>,
+        cond: Box<Expr<T>>,
+        then: Box<Expr<T>>,
+        alt: Box<Expr<T>>,
     },
     SymExpr {
         sym: T,

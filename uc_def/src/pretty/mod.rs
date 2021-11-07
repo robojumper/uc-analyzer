@@ -1,7 +1,7 @@
 use std::{fmt, io};
 
 use crate::{
-    BaseExpr, ClassDef, ClassHeader, ConstDef, DelegateDef, EnumDef, FuncBody, FuncDef, Hir,
+    ClassDef, ClassHeader, ConstDef, DelegateDef, EnumDef, Expr, FuncBody, FuncDef, Hir,
     Identifier, Local, StructDef, Ty, VarDef, VarInstance,
 };
 
@@ -322,7 +322,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
 }
 
 pub fn format_base_expr<W: io::Write, I, R: RefLookup<From = I>>(
-    expr: &BaseExpr<I>,
+    expr: &Expr<I>,
     w: &mut W,
     r: R,
 ) -> io::Result<()> {
