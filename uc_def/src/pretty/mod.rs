@@ -1,8 +1,8 @@
 use std::{fmt, io};
 
 use crate::{
-    ClassDef, ClassHeader, ConstDef, DelegateDef, EnumDef, FuncDef, Hir, Identifier, StructDef, Ty,
-    VarDef,
+    BaseExpr, ClassDef, ClassHeader, ConstDef, DelegateDef, EnumDef, FuncDef, Hir, Identifier,
+    StructDef, Ty, VarDef,
 };
 
 mod expr;
@@ -263,6 +263,19 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         }
         Ok(())
     }
+}
+
+pub fn format_base_expr<W: io::Write, I, R: RefLookup<From = I>>(
+    expr: &BaseExpr<I>,
+    w: &mut W,
+    r: R,
+) -> io::Result<()> {
+    let mut printer = PPrinter {
+        lk: r,
+        w,
+        indent: vec![],
+    };
+    printer.format_expr(expr)
 }
 
 pub fn format_hir<W: io::Write, I, R: RefLookup<From = I>>(

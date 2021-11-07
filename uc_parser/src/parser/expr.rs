@@ -4,7 +4,11 @@
 
 use uc_def::{BaseExpr, Identifier, Op};
 
-use crate::{kw, lexer::{Keyword, Sigil, Symbol, Token, TokenKind as Tk}};
+use crate::{
+    kw,
+    lexer::{Keyword, Sigil, Symbol, Token, TokenKind as Tk},
+    sig,
+};
 
 mod test;
 
@@ -41,9 +45,9 @@ impl Parser<'_> {
         let mut lhs = {
             let tok = self.next_any()?;
             match tok.kind {
-                Tk::Sig(Sigil::LParen) => {
+                sig!(LParen) => {
                     let lhs = self.parse_base_expression_bp(0)?;
-                    self.expect(Tk::Sig(Sigil::RParen))?;
+                    self.expect(sig!(RParen))?;
                     lhs
                 }
                 Tk::Sig(sig) => match prefix_binding_power(SigilOrVecOp::Sig(sig)) {
@@ -58,14 +62,14 @@ impl Parser<'_> {
                 },
                 kw!(New) => {
                     let mut args = vec![];
-                    if self.eat(Tk::Sig(Sigil::LParen)) {
+                    if self.eat(sig!(LParen)) {
                         loop {
                             let expr = self.parse_base_expression_bp(0)?;
                             args.push(expr);
                             let delim = self.next_any()?;
                             match delim.kind {
                                 Tk::Comma => continue,
-                                Tk::Sig(Sigil::RParen) => break,
+                                sig!(RParen) => break,
                                 _ => return Err(format!("Expected comma or }}, got {:?}", delim)),
                             }
                         }
@@ -74,9 +78,9 @@ impl Parser<'_> {
                     let ((), r_bp) = NEW_PREFIX_POWER;
 
                     let cls = self.parse_base_expression_bp(r_bp)?;
-                    let arch = if self.eat(Tk::Sig(Sigil::LParen)) {
+                    let arch = if self.eat(sig!(LParen)) {
                         let arch = self.parse_base_expression_bp(0)?;
-                        self.expect(Tk::Sig(Sigil::RParen))?;
+                        self.expect(sig!(RParen))?;
                         Some(arch)
                     } else {
                         None
@@ -122,7 +126,8 @@ impl Parser<'_> {
                     kind: Tk::Sig(s), ..
                 }) if is_infix_or_postfix_op(s) => SigilOrVecOp::Sig(s),
                 Some(Token {
-                    kind: Tk::Sym(Symbol::Kw(k @ (Keyword::Cross | Keyword::Dot))), ..
+                    kind: Tk::Sym(Symbol::Kw(k @ (Keyword::Cross | Keyword::Dot))),
+                    ..
                 }) => SigilOrVecOp::VecOp(k),
                 // EOF is fine, anything else is fine too. At least for now
                 // TODO: List tokens that could appear after exprs explicitly?
@@ -140,7 +145,7 @@ impl Parser<'_> {
 
                 lhs = if let SigilOrVecOp::Sig(Sigil::LBrack) = op {
                     let rhs = self.parse_base_expression_bp(0)?;
-                    self.expect(Tk::Sig(Sigil::RBrack))?;
+                    self.expect(sig!(RBrack))?;
                     BaseExpr::IndexExpr {
                         base: Box::new(lhs),
                         idx: Box::new(rhs),
@@ -148,12 +153,15 @@ impl Parser<'_> {
                 } else if let SigilOrVecOp::Sig(Sigil::LParen) = op {
                     let mut args = vec![];
                     loop {
+                        if self.eat(sig!(RParen)) {
+                            break;
+                        }
                         let expr = self.parse_base_expression_bp(0)?;
                         args.push(expr);
                         let delim = self.next_any()?;
                         match delim.kind {
                             Tk::Comma => continue,
-                            Tk::Sig(Sigil::RParen) => break,
+                            sig!(RParen) => break,
                             _ => return Err(format!("Expected comma or }}, got {:?}", delim)),
                         }
                     }
@@ -178,7 +186,7 @@ impl Parser<'_> {
 
                 lhs = if let SigilOrVecOp::Sig(Sigil::Tern) = op {
                     let mhs = self.parse_base_expression_bp(0)?;
-                    self.expect(Tk::Sig(Sigil::Colon))?;
+                    self.expect(sig!(Colon))?;
                     let rhs = self.parse_base_expression_bp(r_bp)?;
                     BaseExpr::TernExpr {
                         cond: Box::new(lhs),
@@ -209,7 +217,8 @@ impl Parser<'_> {
 }
 
 fn is_infix_or_postfix_op(op: Sigil) -> bool {
-    postfix_binding_power(SigilOrVecOp::Sig(op)).is_some() || infix_binding_power(SigilOrVecOp::Sig(op)).is_some()
+    postfix_binding_power(SigilOrVecOp::Sig(op)).is_some()
+        || infix_binding_power(SigilOrVecOp::Sig(op)).is_some()
 }
 
 // Todo: is this correct?
@@ -254,51 +263,57 @@ fn postfix_binding_power(op: SigilOrVecOp) -> Option<(u8, ())> {
 /// if it's a valid function call and pull things apart if not.
 const NEW_PREFIX_POWER: ((), u8) = ((), 38);
 
+// The UC number in the () is the opposite of the binding power, i.e. lower number
+// binds stronger. The lowest specified binding power is 12, the highest is 34.
+// The numbers for UC operators were obtained by calculating (34+12)-n
 fn infix_binding_power(op: SigilOrVecOp) -> Option<(u8, u8)> {
     let op = match op {
         SigilOrVecOp::Sig(s) => s,
         SigilOrVecOp::VecOp(_) => return Some((16, 17)),
     };
     let res = match op {
-        Sigil::Tern => (9, 8),
-
-        Sigil::MulMul => (12, 13),
-
-        Sigil::Mul => (16, 17),
-        Sigil::Div => (16, 17),
-
-        Sigil::Mod => (18, 19),
-
-        Sigil::Add => (20, 21),
-        Sigil::Sub => (20, 21),
-
-        Sigil::LtLt => (22, 23),
-        Sigil::GtGt => (22, 23),
-        Sigil::GtGtGt => (22, 23),
-
-        Sigil::Lt => (24, 25),
-        Sigil::Gt => (24, 25),
-        Sigil::LtEq => (24, 25),
-        Sigil::GtEq => (24, 25),
-        Sigil::EqEq => (24, 25),
-
-        Sigil::BangEq => (26, 27),
-
-        Sigil::And => (28, 29),
-        Sigil::Pow => (28, 29),
-        Sigil::Or => (28, 29),
-
-        Sigil::AndAnd => (30, 31),
-        Sigil::PowPow => (30, 31),
-
-        Sigil::OrOr => (32, 33),
-
-        Sigil::MulAssign => (34, 35),
-        Sigil::DivAssign => (34, 35),
-        Sigil::AddAssign => (34, 35),
-        Sigil::SubAssign => (34, 35),
-
         Sigil::Dot => (42, 43),
+
+        Sigil::MulMul => (34, 35),
+
+        Sigil::Mul => (30, 31),
+        Sigil::Div => (30, 31),
+
+        Sigil::Mod => (28, 29),
+
+        Sigil::Add => (26, 27),
+        Sigil::Sub => (26, 27),
+
+        Sigil::LtLt => (24, 25),
+        Sigil::GtGt => (24, 25),
+        Sigil::GtGtGt => (24, 25),
+
+        Sigil::Lt => (22, 23),
+        Sigil::Gt => (22, 23),
+        Sigil::LtEq => (22, 23),
+        Sigil::GtEq => (22, 23),
+        Sigil::EqEq => (22, 23),
+
+        Sigil::BangEq => (20, 21),
+
+        Sigil::And => (18, 19),
+        Sigil::Pow => (18, 19),
+        Sigil::Or => (18, 19),
+
+        Sigil::AndAnd => (16, 17),
+        Sigil::PowPow => (16, 17),
+
+        Sigil::OrOr => (14, 15),
+
+        // Inserted here...
+        Sigil::Tern => (13, 12),
+
+        // And pushed these down from 12, 13 to accomodate ternary
+        Sigil::MulAssign => (10, 11),
+        Sigil::DivAssign => (10, 11),
+        Sigil::AddAssign => (10, 11),
+        Sigil::SubAssign => (10, 11),
+
         _ => return None,
     };
     Some(res)

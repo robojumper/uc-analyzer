@@ -268,38 +268,40 @@ pub struct FuncBody<T> {
 #[derive(Debug)]
 pub enum Statement<T> {
     IfStatement {
-        cond: Expr<T>,
+        cond: BaseExpr<T>,
         then: BlockOrStatement<T>,
         or_else: Option<BlockOrStatement<T>>,
     },
     ForStatement {
-        init: Box<Statement<T>>,
-        cond: Expr<T>,
+        init: Option<Box<Statement<T>>>,
+        cond: BaseExpr<T>,
         every: Box<Statement<T>>,
         run: BlockOrStatement<T>,
     },
     ForeachStatement {
-        source: Expr<T>,
+        source: BaseExpr<T>,
         dest: T,
         run: BlockOrStatement<T>,
     },
     WhileStatement {
-        cond: Expr<T>,
+        cond: BaseExpr<T>,
         run: BlockOrStatement<T>,
     },
     DoStatement {
-        cond: Expr<T>,
+        cond: BaseExpr<T>,
         run: BlockOrStatement<T>,
     },
     SwitchStatement {
-        scrutinee: Expr<T>,
+        scrutinee: BaseExpr<T>,
         cases: Vec<CaseClause<T>>,
     },
     BreakStatement,
     ContinueStatement,
     GotoStatement,
-    ReturnStatement,
-    Label,
+    ReturnStatement {
+        expr: BaseExpr<T>,
+    },
+    Label(T),
     Expression(Expr<T>),
 }
 
@@ -336,7 +338,6 @@ pub enum Op {
     DivAssign,
     Dollar,
     DollarAssign,
-    Eq,
     EqEq,
     Gt,
     GtEq,
@@ -365,15 +366,8 @@ pub enum Op {
 
 #[derive(Debug)]
 pub enum Expr<T> {
-    AssignmentExpr {
-        lhs: BaseExpr<T>,
-        rhs: BaseExpr<T>,
-    },
-    AssignmentOpExpr {
-        lhs: BaseExpr<T>,
-        op: Op,
-        rhs: BaseExpr<T>,
-    },
+    AssignmentExpr { lhs: BaseExpr<T>, rhs: BaseExpr<T> },
+    BaseExpr { expr: BaseExpr<T> },
 }
 
 #[derive(Debug)]

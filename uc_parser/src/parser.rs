@@ -5,11 +5,12 @@ use std::str::FromStr;
 mod expr;
 mod item;
 mod modifiers;
+mod stmt;
 
 use uc_def::{Hir, Identifier, Ty};
 
 use crate::{
-    lexer::{Lexer, Sigil, Symbol, Token, TokenKind as Tk},
+    lexer::{Lexer, Symbol, Token, TokenKind as Tk},
     parser::item::TopLevelItem,
     NumberLiteral,
 };
@@ -18,6 +19,13 @@ use crate::{
 macro_rules! kw {
     ($i:ident) => {
         crate::lexer::TokenKind::Sym(crate::lexer::Symbol::Kw(crate::lexer::Keyword::$i))
+    };
+}
+
+#[macro_export]
+macro_rules! sig {
+    ($i:ident) => {
+        crate::lexer::TokenKind::Sig(crate::lexer::Sigil::$i)
     };
 }
 
@@ -151,7 +159,7 @@ impl<'a> Parser<'a> {
             let mut tok = self.next_any()?;
             match tok.kind {
                 tk if tk == end_token => break,
-                Tk::Sig(Sigil::Dot) if dot => {
+                sig!(Dot) if dot => {
                     tok = self.next_any()?;
                 }
                 _ => {}
@@ -171,9 +179,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_angle_type(&mut self) -> Result<Vec<Identifier>, String> {
-        self.expect(Tk::Sig(Sigil::Lt))?;
+        self.expect(sig!(Lt))?;
 
-        self.parse_parts_until(Tk::Sig(Sigil::Gt))
+        self.parse_parts_until(sig!(Gt))
     }
 
     fn parse_ty(&mut self, first_tok: Option<Token>) -> Result<Ty<Identifier>, String> {
@@ -184,15 +192,15 @@ impl<'a> Parser<'a> {
 
         match &ty_tok.kind {
             kw!(Array) => {
-                self.expect(Tk::Sig(Sigil::Lt))?;
+                self.expect(sig!(Lt))?;
                 let ty = self.parse_ty(None)?;
-                self.expect(Tk::Sig(Sigil::Gt))?;
+                self.expect(sig!(Gt))?;
                 Ok(Ty::Array(Box::new(ty)))
             }
             kw!(Class) => {
-                let class = if self.eat(Tk::Sig(Sigil::Lt)) {
+                let class = if self.eat(sig!(Lt)) {
                     let c = self.expect_ident()?;
-                    self.expect(Tk::Sig(Sigil::Gt))?;
+                    self.expect(sig!(Gt))?;
                     Some(c)
                 } else {
                     None
@@ -201,19 +209,18 @@ impl<'a> Parser<'a> {
             }
             kw!(Delegate) => Ok(Ty::Delegate(self.parse_angle_type()?)),
             kw!(Map) => {
-                self.expect(Tk::Sig(Sigil::LBrace))?;
-                self.ignore_foreign_block(Tk::Sig(Sigil::LBrace))?;
+                self.expect(sig!(LBrace))?;
+                self.ignore_foreign_block(sig!(LBrace))?;
                 Ok(Ty::Simple(Identifier::from_str("Map").unwrap()))
             }
             Tk::Sym(_) => {
-                if self.eat(Tk::Sig(Sigil::Dot)) {
+                if self.eat(sig!(Dot)) {
                     let mut parts = vec![self.sym_to_ident(&ty_tok)];
                     loop {
                         parts.push(self.expect_ident()?);
                         match self.peek() {
                             Some(Token {
-                                kind: Tk::Sig(Sigil::Dot),
-                                ..
+                                kind: sig!(Dot), ..
                             }) => {
                                 self.next();
                                 continue;

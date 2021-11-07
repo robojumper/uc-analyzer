@@ -122,7 +122,6 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
             Op::DivAssign => "/=",
             Op::Dollar => "$",
             Op::DollarAssign => "$=",
-            Op::Eq => "=",
             Op::EqEq => "==",
             Op::Gt => ">",
             Op::GtEq => ">=",

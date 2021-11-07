@@ -6,7 +6,10 @@ use uc_def::{
     ArgFlags, ClassFlags, Flags, FuncFlags, Identifier, Modifiers, StructFlags, Values, VarFlags,
 };
 
-use crate::lexer::{Keyword as Kw, Sigil, Symbol, Token, TokenKind as Tk};
+use crate::{
+    lexer::{Keyword as Kw, Sigil, Symbol, Token, TokenKind as Tk},
+    sig,
+};
 
 use super::Parser;
 
@@ -77,7 +80,7 @@ impl Parser<'_> {
         self.next();
         let mut comma = false;
         loop {
-            if self.eat(Tk::Sig(Sigil::RParen)) {
+            if self.eat(sig!(RParen)) {
                 break Ok(list.into_boxed_slice());
             }
             if comma {
@@ -96,7 +99,7 @@ impl Parser<'_> {
             DeclFollowups::Nothing => Ok(None),
             DeclFollowups::OptForeignBlock => match self.peek() {
                 Some(Token {
-                    kind: opener @ Tk::Sig(Sigil::LBrace),
+                    kind: opener @ sig!(LBrace),
                     ..
                 }) => {
                     self.next();
@@ -108,8 +111,7 @@ impl Parser<'_> {
             DeclFollowups::IdentModifiers(mods) | DeclFollowups::NumberModifiers(mods) => {
                 match self.peek() {
                     Some(Token {
-                        kind: Tk::Sig(Sigil::LParen),
-                        ..
+                        kind: sig!(LParen), ..
                     }) => {
                         if mods.intersects(ModifierCount::ALLOW_PAREN) {
                             match followups {
