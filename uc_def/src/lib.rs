@@ -321,7 +321,7 @@ pub enum BlockOrStatement<T> {
     Statement(Box<Statement<T>>),
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum Op {
     Add,
     AddAdd,

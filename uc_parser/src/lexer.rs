@@ -124,7 +124,7 @@ impl Sigil {
         }
     }
 
-    pub fn to_op(&self) -> Op {
+    pub fn to_op(self) -> Op {
         use Sigil::*;
         match self {
             Add => Op::Add,

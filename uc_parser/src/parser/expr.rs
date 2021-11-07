@@ -2,16 +2,35 @@
 //! See https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
 //! for an introduction to Pratt parsing.
 
-use uc_def::{BaseExpr, Identifier};
+use uc_def::{BaseExpr, Identifier, Op};
 
-use crate::{
-    kw,
-    lexer::{Sigil, Token, TokenKind as Tk},
-};
+use crate::{kw, lexer::{Keyword, Sigil, Symbol, Token, TokenKind as Tk}};
 
 mod test;
 
 use super::Parser;
+
+/// Slightly annoying: Operators on the parser level don't neatly correspond
+/// to sigils but also not to operators on the HIR. We need to give parens and
+/// the ternary op a binding power, but also have the vector operators
+/// cross and dot. This might not be the best way to handle this.
+/// TODO: Investigate eagerly converting Sig to Op and create a FakeOp variant?
+#[derive(Copy, Clone, Debug)]
+enum SigilOrVecOp {
+    Sig(Sigil),
+    VecOp(Keyword),
+}
+
+impl SigilOrVecOp {
+    fn to_op(self) -> Op {
+        match self {
+            SigilOrVecOp::Sig(s) => s.to_op(),
+            SigilOrVecOp::VecOp(Keyword::Cross) => Op::VecCross,
+            SigilOrVecOp::VecOp(Keyword::Dot) => Op::VecDot,
+            _ => unreachable!("only constructed with cross or dot"),
+        }
+    }
+}
 
 impl Parser<'_> {
     pub fn parse_base_expression(&mut self) -> Result<BaseExpr<Identifier>, String> {
@@ -27,7 +46,7 @@ impl Parser<'_> {
                     self.expect(Tk::Sig(Sigil::RParen))?;
                     lhs
                 }
-                Tk::Sig(sig) => match prefix_binding_power(sig) {
+                Tk::Sig(sig) => match prefix_binding_power(SigilOrVecOp::Sig(sig)) {
                     Some(((), r_bp)) => {
                         let rhs = self.parse_base_expression_bp(r_bp)?;
                         BaseExpr::PreOpExpr {
@@ -101,7 +120,10 @@ impl Parser<'_> {
             let op = match self.peek() {
                 Some(Token {
                     kind: Tk::Sig(s), ..
-                }) if is_infix_or_postfix_op(s) => s,
+                }) if is_infix_or_postfix_op(s) => SigilOrVecOp::Sig(s),
+                Some(Token {
+                    kind: Tk::Sym(Symbol::Kw(k @ (Keyword::Cross | Keyword::Dot))), ..
+                }) => SigilOrVecOp::VecOp(k),
                 // EOF is fine, anything else is fine too. At least for now
                 // TODO: List tokens that could appear after exprs explicitly?
                 // `;` statement delimiter
@@ -116,14 +138,14 @@ impl Parser<'_> {
                 }
                 self.next();
 
-                lhs = if op == Sigil::LBrack {
+                lhs = if let SigilOrVecOp::Sig(Sigil::LBrack) = op {
                     let rhs = self.parse_base_expression_bp(0)?;
                     self.expect(Tk::Sig(Sigil::RBrack))?;
                     BaseExpr::IndexExpr {
                         base: Box::new(lhs),
                         idx: Box::new(rhs),
                     }
-                } else if op == Sigil::LParen {
+                } else if let SigilOrVecOp::Sig(Sigil::LParen) = op {
                     let mut args = vec![];
                     loop {
                         let expr = self.parse_base_expression_bp(0)?;
@@ -154,7 +176,7 @@ impl Parser<'_> {
                 }
                 self.next();
 
-                lhs = if op == Sigil::Tern {
+                lhs = if let SigilOrVecOp::Sig(Sigil::Tern) = op {
                     let mhs = self.parse_base_expression_bp(0)?;
                     self.expect(Tk::Sig(Sigil::Colon))?;
                     let rhs = self.parse_base_expression_bp(r_bp)?;
@@ -165,7 +187,7 @@ impl Parser<'_> {
                     }
                 } else {
                     let rhs = self.parse_base_expression_bp(r_bp)?;
-                    if op == Sigil::Dot {
+                    if let SigilOrVecOp::Sig(Sigil::Dot) = op {
                         BaseExpr::FieldExpr {
                             lhs: Box::new(lhs),
                             rhs: Box::new(rhs),
@@ -187,11 +209,15 @@ impl Parser<'_> {
 }
 
 fn is_infix_or_postfix_op(op: Sigil) -> bool {
-    postfix_binding_power(op).is_some() || infix_binding_power(op).is_some()
+    postfix_binding_power(SigilOrVecOp::Sig(op)).is_some() || infix_binding_power(SigilOrVecOp::Sig(op)).is_some()
 }
 
 // Todo: is this correct?
-fn prefix_binding_power(op: Sigil) -> Option<((), u8)> {
+fn prefix_binding_power(op: SigilOrVecOp) -> Option<((), u8)> {
+    let op = match op {
+        SigilOrVecOp::Sig(s) => s,
+        SigilOrVecOp::VecOp(_) => return None,
+    };
     let res = match op {
         Sigil::Bang => ((), 11),
         Sigil::AddAdd => ((), 11),
@@ -204,7 +230,11 @@ fn prefix_binding_power(op: Sigil) -> Option<((), u8)> {
 }
 
 // Todo: is this correct?
-fn postfix_binding_power(op: Sigil) -> Option<(u8, ())> {
+fn postfix_binding_power(op: SigilOrVecOp) -> Option<(u8, ())> {
+    let op = match op {
+        SigilOrVecOp::Sig(s) => s,
+        SigilOrVecOp::VecOp(_) => return None,
+    };
     let res = match op {
         Sigil::AddAdd => (10, ()),
         Sigil::SubSub => (10, ()),
@@ -224,7 +254,11 @@ fn postfix_binding_power(op: Sigil) -> Option<(u8, ())> {
 /// if it's a valid function call and pull things apart if not.
 const NEW_PREFIX_POWER: ((), u8) = ((), 38);
 
-fn infix_binding_power(op: Sigil) -> Option<(u8, u8)> {
+fn infix_binding_power(op: SigilOrVecOp) -> Option<(u8, u8)> {
+    let op = match op {
+        SigilOrVecOp::Sig(s) => s,
+        SigilOrVecOp::VecOp(_) => return Some((16, 17)),
+    };
     let res = match op {
         Sigil::Tern => (9, 8),
 
