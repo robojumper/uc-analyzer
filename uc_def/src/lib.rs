@@ -273,9 +273,9 @@ pub enum Statement<T> {
         or_else: Option<BlockOrStatement<T>>,
     },
     ForStatement {
-        init: Option<Box<Statement<T>>>,
+        init: Box<Statement<T>>,
         cond: BaseExpr<T>,
-        every: Box<Statement<T>>,
+        retry: Box<Statement<T>>,
         run: BlockOrStatement<T>,
     },
     ForeachStatement {

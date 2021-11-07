@@ -314,6 +314,13 @@ fn infix_binding_power(op: SigilOrVecOp) -> Option<(u8, u8)> {
         Sigil::AddAssign => (10, 11),
         Sigil::SubAssign => (10, 11),
 
+        Sigil::Dollar => (8, 9),
+        Sigil::At => (8, 9),
+
+        Sigil::DollarAssign => (6, 7),
+        Sigil::AtAssign => (6, 7),
+        // Technically there's a `-=` for strings with an even lower binding power
+        // here. We just pretend it doesn't exist. Fix your own code.
         _ => return None,
     };
     Some(res)

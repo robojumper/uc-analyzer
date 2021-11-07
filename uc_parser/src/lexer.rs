@@ -404,9 +404,7 @@ impl<'a> Lexer<'a> {
                 }
                 ('/', Some('/')) => return Some(self.parse_eol_comment(pos)),
                 ('/', Some('*')) => return Some(self.parse_block_comment(pos)),
-                ('0'..='9', _) | ('.', Some('0'..='9')) => {
-                    return Some(self.parse_number(pos))
-                }
+                ('0'..='9', _) | ('.', Some('0'..='9')) => return Some(self.parse_number(pos)),
                 (c, _) => match c {
                     '(' => Sig(LParen),
                     ')' => Sig(RParen),

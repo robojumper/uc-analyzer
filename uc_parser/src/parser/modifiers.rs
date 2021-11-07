@@ -7,7 +7,7 @@ use uc_def::{
 };
 
 use crate::{
-    lexer::{Keyword as Kw, Sigil, Symbol, Token, TokenKind as Tk},
+    lexer::{Keyword as Kw, Symbol, Token, TokenKind as Tk},
     sig,
 };
 

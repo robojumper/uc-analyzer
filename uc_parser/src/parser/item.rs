@@ -6,7 +6,7 @@ use uc_def::{
 use super::Parser;
 use crate::{
     kw,
-    lexer::{NumberSyntax, Sigil, Symbol, Token, TokenKind as Tk},
+    lexer::{NumberSyntax, Symbol, Token, TokenKind as Tk},
     parser::modifiers,
     sig,
 };
@@ -94,7 +94,7 @@ impl Parser<'_> {
                 match next.kind {
                     Tk::Number(NumberSyntax::Int | NumberSyntax::Hex) => Ok(ConstVal::Int),
                     Tk::Number(NumberSyntax::Float) => Ok(ConstVal::Float),
-                    _ => Err(format!("expected number after -, got {:?}", tok))
+                    _ => Err(format!("expected number after -, got {:?}", tok)),
                 }
             }
             _ => Err(format!("expected const value, got {:?}", tok)),

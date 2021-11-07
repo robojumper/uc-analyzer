@@ -1,11 +1,11 @@
 use std::{fmt, io};
 
 use crate::{
-    BaseExpr, ClassDef, ClassHeader, ConstDef, DelegateDef, EnumDef, FuncDef, Hir, Identifier,
-    StructDef, Ty, VarDef,
+    BaseExpr, ClassDef, ClassHeader, ConstDef, DelegateDef, EnumDef, FuncBody, FuncDef, Hir,
+    Identifier, Local, StructDef, Ty, VarDef, VarInstance,
 };
 
-mod expr;
+mod stmts;
 
 pub trait RefLookup {
     type From: fmt::Debug;
@@ -29,6 +29,18 @@ struct PPrinter<W: io::Write, R: RefLookup> {
 }
 
 impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
+    fn indent_incr(&mut self) {
+        self.indent.extend_from_slice(b"    ");
+    }
+
+    fn indent_decr(&mut self) {
+        self.indent.truncate(self.indent.len() - 4);
+    }
+
+    fn indent(&mut self) -> io::Result<()> {
+        self.w.write_all(&self.indent)
+    }
+
     fn format_i(&mut self, i: &R::From) -> io::Result<()> {
         self.w.write_all(self.lk.lookup(i).as_bytes())
     }
@@ -104,13 +116,13 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
             None => {}
         }
         self.w.write_all(b" {\n")?;
-        self.indent.extend_from_slice(b"    ");
+        self.indent_incr();
 
         for var in &s.fields {
             self.format_var(var)?;
         }
 
-        self.indent.truncate(self.indent.len() - 4);
+        self.indent_decr();
 
         self.w.write_all(b"};\n\n")?;
         Ok(())
@@ -174,12 +186,20 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
     }
 
     fn format_var(&mut self, s: &VarDef<R::From>) -> io::Result<()> {
-        self.w.write_all(&self.indent)?;
+        self.indent()?;
         self.w.write_all(b"var ")?;
         self.format_ty(&s.ty)?;
         self.w.write_all(b" ")?;
 
-        for (idx, inst) in s.names.iter().enumerate() {
+        self.format_instances(&s.names)?;
+
+        self.w.write_all(b";\n")?;
+
+        Ok(())
+    }
+
+    fn format_instances(&mut self, i: &[VarInstance<R::From>]) -> io::Result<()> {
+        for (idx, inst) in i.iter().enumerate() {
             self.w.write_all(inst.name.as_ref().as_bytes())?;
             match &inst.count {
                 crate::DimCount::None => {}
@@ -194,13 +214,10 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                     self.w.write_all(b"]")?;
                 }
             }
-            if idx != s.names.len() - 1 {
+            if idx != i.len() - 1 {
                 self.w.write_all(b", ")?;
             }
         }
-
-        self.w.write_all(b";\n")?;
-
         Ok(())
     }
 
@@ -225,7 +242,13 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 self.w.write_all(b", ")?;
             }
         }
-        self.w.write_all(b");\n")?;
+        self.w.write_all(b")")?;
+        match &f.body {
+            Some(b) => {
+                self.format_body(b)?;
+            }
+            None => self.w.write_all(b";\n")?,
+        }
         Ok(())
     }
 
@@ -257,10 +280,43 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         self.w.write_all(b")")?;
 
         match &f.body {
-            // TODO
-            Some(_b) => self.w.write_all(b" { ... }\n")?,
+            Some(b) => {
+                self.format_body(b)?;
+            }
             None => self.w.write_all(b";\n")?,
         }
+        Ok(())
+    }
+
+    fn format_body(&mut self, f: &FuncBody<R::From>) -> io::Result<()> {
+        self.w.write_all(b" {\n")?;
+        self.indent_incr();
+
+        for local in &f.locals {
+            self.format_local(local)?;
+        }
+
+        for stmt in &f.statements {
+            self.indent()?;
+            self.format_statement(stmt)?;
+            self.w.write_all(b"\n")?;
+        }
+
+        self.indent_decr();
+        self.w.write_all(b"}\n")?;
+        Ok(())
+    }
+
+    fn format_local(&mut self, l: &Local<R::From>) -> io::Result<()> {
+        self.indent()?;
+        self.w.write_all(b"local ")?;
+        self.format_ty(&l.ty)?;
+        self.w.write_all(b" ")?;
+
+        self.format_instances(&l.names)?;
+
+        self.w.write_all(b";\n")?;
+
         Ok(())
     }
 }

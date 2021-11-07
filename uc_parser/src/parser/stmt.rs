@@ -2,11 +2,29 @@ use uc_def::{BlockOrStatement, Expr, Identifier, Statement};
 
 use crate::{
     kw,
-    lexer::{Sigil, Token, TokenKind as Tk},
+    lexer::{Token, TokenKind as Tk},
     sig,
 };
 
 use super::Parser;
+
+/// Does this statement usually want to be terminated by a semicolon?
+fn stmt_wants_semi<I>(stmt: &Statement<I>) -> bool {
+    match stmt {
+        Statement::IfStatement { .. } => false,
+        Statement::ForStatement { .. } => false,
+        Statement::ForeachStatement { .. } => false,
+        Statement::WhileStatement { .. } => false,
+        Statement::DoStatement { .. } => false,
+        Statement::SwitchStatement { .. } => false,
+        Statement::BreakStatement => true,
+        Statement::ContinueStatement => true,
+        Statement::GotoStatement => true,
+        Statement::ReturnStatement { .. } => true,
+        Statement::Label(_) => false,
+        Statement::Expression(_) => true,
+    }
+}
 
 impl Parser<'_> {
     fn parse_block_or_stmt(
@@ -18,17 +36,36 @@ impl Parser<'_> {
             self.expect(sig!(RBrace))?;
             Ok(BlockOrStatement::Block(stmts))
         } else {
-            let stmt = self
-                .parse_one_stmt()?
-                .ok_or_else(|| format!("missing statement after {}", ctx))?;
-            Ok(BlockOrStatement::Statement(Box::new(stmt)))
+            Ok(BlockOrStatement::Statement(Box::new(
+                self.expect_one_statement(ctx, true)?,
+            )))
         }
+    }
+
+    fn expect_one_statement(
+        &mut self,
+        ctx: &'static str,
+        expect_semi: bool,
+    ) -> Result<Statement<Identifier>, String> {
+        let stmt = self
+            .parse_one_stmt()?
+            .ok_or_else(|| format!("missing statement after {}", ctx))?;
+        if expect_semi && stmt_wants_semi(&stmt) && !self.eat(Tk::Semi) {
+            return Err(format!(
+                "missing semicolon after statement after {} (next is {:?}, previously parsed {:?})",
+                ctx,
+                self.peek(),
+                stmt
+            ));
+        }
+        Ok(stmt)
     }
 
     fn parse_one_stmt(&mut self) -> Result<Option<Statement<Identifier>>, String> {
         match self.peek() {
             Some(tok) => match tok.kind {
                 sig!(RBrace) => Ok(None),
+                sig!(RParen) => Ok(None),
                 Tk::Sym(_)
                     if matches!(
                         self.peek2(),
@@ -60,7 +97,24 @@ impl Parser<'_> {
                         or_else,
                     }))
                 }
-                kw!(For) => Err("foreach".to_owned()),
+                kw!(For) => {
+                    self.next();
+                    self.expect(sig!(LParen))?;
+                    let init = self.expect_one_statement("for init", true)?;
+                    let cond = self.parse_base_expression()?;
+                    self.expect(Tk::Semi)?;
+                    let retry = self.expect_one_statement("for retry", false)?;
+                    self.expect(sig!(RParen))?;
+
+                    let run = self.parse_block_or_stmt("for")?;
+
+                    Ok(Some(Statement::ForStatement {
+                        init: Box::new(init),
+                        cond,
+                        retry: Box::new(retry),
+                        run,
+                    }))
+                }
                 kw!(Foreach) => Err("foreach".to_owned()),
                 kw!(While) => {
                     self.next();
@@ -69,12 +123,8 @@ impl Parser<'_> {
                     self.expect(sig!(RParen))?;
                     let run = self.parse_block_or_stmt("while")?;
 
-                    Ok(Some(Statement::WhileStatement { 
-                        cond,
-                        run,
-                    }))
-
-                },
+                    Ok(Some(Statement::WhileStatement { cond, run }))
+                }
                 kw!(Do) => Err("do".to_owned()),
                 kw!(Switch) => Err("switch".to_owned()),
                 kw!(Break) => Err("break".to_owned()),
@@ -83,7 +133,6 @@ impl Parser<'_> {
                 kw!(Return) => {
                     self.next();
                     let expr = self.parse_base_expression()?;
-                    self.expect(Tk::Semi)?;
                     Ok(Some(Statement::ReturnStatement { expr }))
                 }
                 _ => {
@@ -94,7 +143,6 @@ impl Parser<'_> {
                     } else {
                         Expr::BaseExpr { expr: lhs }
                     };
-                    self.expect(Tk::Semi)?;
                     Ok(Some(Statement::Expression(expr)))
                 }
             },
@@ -106,7 +154,13 @@ impl Parser<'_> {
         let mut stmts = vec![];
         loop {
             match self.parse_one_stmt() {
-                Ok(Some(stmt)) => stmts.push(stmt),
+                Ok(Some(stmt)) => {
+                    if stmt_wants_semi(&stmt) && !self.eat(Tk::Semi) {
+                        self.errs.push("Error, missing semicolon".to_owned());
+                    }
+                    while self.eat(Tk::Semi) {}
+                    stmts.push(stmt);
+                }
                 Ok(None) => break,
                 Err(e) => {
                     self.errs.push(e);

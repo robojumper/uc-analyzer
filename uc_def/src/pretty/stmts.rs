@@ -1,10 +1,106 @@
 use std::io;
 
-use crate::{BaseExpr, Literal, Op};
+use crate::{BaseExpr, BlockOrStatement, Literal, Op, Statement};
 
 use super::{PPrinter, RefLookup};
 
 impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
+    pub fn format_statement(&mut self, stmt: &Statement<R::From>) -> io::Result<()> {
+        match stmt {
+            Statement::IfStatement {
+                cond,
+                then,
+                or_else,
+            } => {
+                self.w.write_all(b"if (")?;
+                self.format_expr(cond)?;
+                self.w.write_all(b")")?;
+                self.format_block_or_statement(then)?;
+                if let Some(or_else) = or_else {
+                    self.w.write_all(b" else ")?;
+                    self.format_block_or_statement(or_else)?;
+                } else {
+                    self.w.write_all(b"\n")?;
+                }
+            }
+            Statement::ForStatement {
+                init,
+                cond,
+                retry,
+                run,
+            } => {
+                self.w.write_all(b"for (")?;
+                self.format_statement(init)?;
+                self.w.write_all(b" ")?;
+                self.format_expr(cond)?;
+                self.w.write_all(b"; ")?;
+                self.format_statement(retry)?;
+                self.w.write_all(b")")?;
+                self.format_block_or_statement(run)?;
+            }
+            Statement::ForeachStatement { source, dest, run } => todo!(),
+            Statement::WhileStatement { cond, run } => {
+                self.w.write_all(b"if (")?;
+                self.format_expr(cond)?;
+                self.w.write_all(b")")?;
+                self.format_block_or_statement(run)?;
+                self.w.write_all(b"\n")?;
+            }
+            Statement::DoStatement { cond, run } => todo!(),
+            Statement::SwitchStatement { scrutinee, cases } => todo!(),
+            Statement::BreakStatement => todo!(),
+            Statement::ContinueStatement => todo!(),
+            Statement::GotoStatement => todo!(),
+            Statement::ReturnStatement { expr } => {
+                self.w.write_all(b"return ")?;
+                self.format_expr(expr)?;
+                self.w.write_all(b";")?;
+            }
+            Statement::Label(_) => todo!(),
+            Statement::Expression(e) => match e {
+                crate::Expr::AssignmentExpr { lhs, rhs } => {
+                    self.format_expr(lhs)?;
+                    self.w.write_all(b" = ")?;
+                    self.format_expr(rhs)?;
+                    self.w.write_all(b";")?;
+                }
+                crate::Expr::BaseExpr { expr } => {
+                    self.format_expr(expr)?;
+                    self.w.write_all(b";")?;
+                }
+            },
+        }
+
+        Ok(())
+    }
+
+    pub fn format_block_or_statement(
+        &mut self,
+        b_or_s: &BlockOrStatement<R::From>,
+    ) -> io::Result<()> {
+        match b_or_s {
+            BlockOrStatement::Block(stmts) => {
+                self.w.write_all(b" {\n")?;
+                self.indent_incr();
+                for stmt in stmts {
+                    self.indent()?;
+                    self.format_statement(stmt)?;
+                    self.w.write_all(b"\n")?;
+                }
+                self.indent_decr();
+                self.indent()?;
+                self.w.write_all(b"}")?;
+            }
+            BlockOrStatement::Statement(stmt) => {
+                self.w.write_all(b"\n")?;
+                self.indent()?;
+                self.w.write_all(b"    ")?;
+                self.format_statement(stmt)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn format_expr(&mut self, expr: &BaseExpr<R::From>) -> io::Result<()> {
         match expr {
             BaseExpr::IndexExpr { base, idx } => {
