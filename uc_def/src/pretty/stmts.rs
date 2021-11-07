@@ -1,6 +1,6 @@
 use std::io;
 
-use crate::{BlockOrStatement, Expr, Literal, Op, Statement};
+use crate::{Block, Expr, Literal, Op, Statement};
 
 use super::{PPrinter, RefLookup};
 
@@ -15,10 +15,10 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 self.w.write_all(b"if (")?;
                 self.format_expr(cond)?;
                 self.w.write_all(b")")?;
-                self.format_block_or_statement(then, false)?;
+                self.format_block(then)?;
                 if let Some(or_else) = or_else {
                     self.w.write_all(b" else ")?;
-                    self.format_block_or_statement(or_else, true)?;
+                    self.format_block(or_else)?;
                 } else {
                     self.w.write_all(b"\n")?;
                 }
@@ -36,14 +36,14 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 self.w.write_all(b"; ")?;
                 self.format_statement(retry)?;
                 self.w.write_all(b")")?;
-                self.format_block_or_statement(run, false)?;
+                self.format_block(run)?;
             }
             Statement::ForeachStatement { source, run } => todo!(),
             Statement::WhileStatement { cond, run } => {
                 self.w.write_all(b"if (")?;
                 self.format_expr(cond)?;
                 self.w.write_all(b")")?;
-                self.format_block_or_statement(run, false)?;
+                self.format_block(run)?;
                 self.w.write_all(b"\n")?;
             }
             Statement::DoStatement { cond, run } => todo!(),
@@ -75,33 +75,17 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         Ok(())
     }
 
-    pub fn format_block_or_statement(
-        &mut self,
-        b_or_s: &BlockOrStatement<R::From>,
-        glue_if: bool,
-    ) -> io::Result<()> {
-        match b_or_s {
-            BlockOrStatement::Block(stmts) => {
-                self.w.write_all(b" {\n")?;
-                self.indent_incr();
-                for stmt in stmts {
-                    self.indent()?;
-                    self.format_statement(stmt)?;
-                    self.w.write_all(b"\n")?;
-                }
-                self.indent_decr();
-                self.indent()?;
-                self.w.write_all(b"}")?;
-            }
-            BlockOrStatement::Statement(stmt) => {
-                if !glue_if || !matches!(&**stmt, &Statement::IfStatement { .. }) {
-                    self.w.write_all(b"\n")?;
-                    self.indent()?;
-                    self.w.write_all(b"    ")?;
-                }
-                self.format_statement(stmt)?;
-            }
+    pub fn format_block(&mut self, b: &Block<R::From>) -> io::Result<()> {
+        self.w.write_all(b" {\n")?;
+        self.indent_incr();
+        for stmt in &b.stmts {
+            self.indent()?;
+            self.format_statement(stmt)?;
+            self.w.write_all(b"\n")?;
         }
+        self.indent_decr();
+        self.indent()?;
+        self.w.write_all(b"}")?;
         Ok(())
     }
 

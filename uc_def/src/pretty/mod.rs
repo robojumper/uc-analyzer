@@ -1,8 +1,8 @@
 use std::{fmt, io};
 
 use crate::{
-    ClassDef, ClassHeader, ConstDef, DelegateDef, EnumDef, Expr, FuncBody, FuncDef, Hir,
-    Identifier, Local, StructDef, Ty, VarDef, VarInstance,
+    ClassDef, ClassHeader, ConstDef, DelegateDef, EnumDef, Expr, FuncBody, FuncDef, FuncName,
+    FuncSig, Hir, Identifier, Local, StructDef, Ty, VarDef, VarInstance,
 };
 
 mod stmts;
@@ -223,26 +223,10 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
 
     fn format_del(&mut self, f: &DelegateDef<R::From>) -> io::Result<()> {
         self.w.write_all(b"delegate ")?;
-        if let Some(ty) = &f.sig.ret_ty {
-            self.format_ty(ty)?;
-            self.w.write_all(b" ")?;
-        }
-        self.w.write_all(f.name.as_ref().as_bytes())?;
-        self.w.write_all(b"(")?;
-        for (idx, inst) in f.sig.args.iter().enumerate() {
-            self.format_ty(&inst.ty)?;
-            self.w.write_all(b" ")?;
-            self.w.write_all(inst.name.as_ref().as_bytes())?;
-            if let Some(c) = &inst.def {
-                self.w.write_all(b" = ")?;
-                self.w.write_fmt(format_args!("{:?}", c))?;
-            }
 
-            if idx != f.sig.args.len() - 1 {
-                self.w.write_all(b", ")?;
-            }
-        }
-        self.w.write_all(b")")?;
+        let nm = FuncName::Iden(f.name.clone()); // FIXME
+        self.format_sig(&f.sig, &nm)?;
+
         match &f.body {
             Some(b) => {
                 self.format_body(b)?;
@@ -254,17 +238,31 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
 
     fn format_func(&mut self, f: &FuncDef<R::From>) -> io::Result<()> {
         self.w.write_all(b"function ")?;
-        if let Some(ty) = &f.sig.ret_ty {
+
+        self.format_sig(&f.sig, &f.name)?;
+
+        match &f.body {
+            Some(b) => {
+                self.format_body(b)?;
+            }
+            None => self.w.write_all(b";\n")?,
+        }
+        Ok(())
+    }
+
+    fn format_sig(&mut self, f: &FuncSig<R::From>, name: &FuncName) -> io::Result<()> {
+        if let Some(ty) = &f.ret_ty {
             self.format_ty(ty)?;
             self.w.write_all(b" ")?;
         }
-        match &f.name {
-            crate::FuncName::Oper(op) => self.format_op(op)?,
-            crate::FuncName::Iden(i) => self.w.write_all(i.as_ref().as_bytes())?,
+
+        match name {
+            FuncName::Oper(op) => self.format_op(op)?,
+            FuncName::Iden(i) => self.w.write_all(i.as_ref().as_bytes())?,
         }
 
         self.w.write_all(b"(")?;
-        for (idx, inst) in f.sig.args.iter().enumerate() {
+        for (idx, inst) in f.args.iter().enumerate() {
             self.format_ty(&inst.ty)?;
             self.w.write_all(b" ")?;
             self.w.write_all(inst.name.as_ref().as_bytes())?;
@@ -273,18 +271,12 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 self.format_expr(c)?;
             }
 
-            if idx != f.sig.args.len() - 1 {
+            if idx != f.args.len() - 1 {
                 self.w.write_all(b", ")?;
             }
         }
         self.w.write_all(b")")?;
 
-        match &f.body {
-            Some(b) => {
-                self.format_body(b)?;
-            }
-            None => self.w.write_all(b";\n")?,
-        }
         Ok(())
     }
 

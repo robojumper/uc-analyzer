@@ -1,4 +1,4 @@
-use uc_def::{BlockOrStatement, Case, CaseClause, Expr, Identifier, Statement};
+use uc_def::{Block, Case, CaseClause, Expr, Identifier, Statement};
 
 use crate::{
     kw,
@@ -28,18 +28,14 @@ fn stmt_wants_semi<I>(stmt: &Statement<I>) -> bool {
 }
 
 impl Parser<'_> {
-    fn parse_block_or_stmt(
-        &mut self,
-        ctx: &'static str,
-    ) -> Result<BlockOrStatement<Identifier>, String> {
+    fn parse_block_or_stmt(&mut self, ctx: &'static str) -> Result<Block<Identifier>, String> {
         if self.eat(sig!(LBrace)) {
             let stmts = self.parse_statements();
             self.expect(sig!(RBrace))?;
-            Ok(BlockOrStatement::Block(stmts))
+            Ok(Block { stmts })
         } else {
-            Ok(BlockOrStatement::Statement(Box::new(
-                self.expect_one_statement(ctx, true)?,
-            )))
+            let stmt = self.expect_one_statement(ctx, true)?;
+            Ok(Block { stmts: vec![stmt] })
         }
     }
 

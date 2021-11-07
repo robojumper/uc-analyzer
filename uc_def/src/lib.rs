@@ -269,22 +269,22 @@ pub struct FuncBody<T> {
 pub enum Statement<T> {
     IfStatement {
         cond: Expr<T>,
-        then: BlockOrStatement<T>,
-        or_else: Option<BlockOrStatement<T>>,
+        then: Block<T>,
+        or_else: Option<Block<T>>,
     },
     ForStatement {
         init: Box<Statement<T>>,
         cond: Expr<T>,
         retry: Box<Statement<T>>,
-        run: BlockOrStatement<T>,
+        run: Block<T>,
     },
     ForeachStatement {
         source: Expr<T>,
-        run: BlockOrStatement<T>,
+        run: Block<T>,
     },
     WhileStatement {
         cond: Expr<T>,
-        run: BlockOrStatement<T>,
+        run: Block<T>,
     },
     DoStatement {
         cond: Expr<T>,
@@ -322,11 +322,9 @@ pub enum Case<T> {
     Default,
 }
 
-// Todo: Throw this away and just wrap everything in a block?
 #[derive(Debug)]
-pub enum BlockOrStatement<T> {
-    Block(Vec<Statement<T>>),
-    Statement(Box<Statement<T>>),
+pub struct Block<T> {
+    pub stmts: Vec<Statement<T>>,
 }
 
 #[derive(Copy, Clone, Debug)]
