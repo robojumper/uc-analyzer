@@ -1,8 +1,8 @@
 use std::{fmt, io};
 
 use crate::{
-    ClassDef, ClassHeader, ConstDef, DelegateDef, EnumDef, Expr, FuncBody, FuncDef, FuncName,
-    FuncSig, Hir, Identifier, Local, StructDef, Ty, VarDef, VarInstance,
+    ArgFlags, ClassDef, ClassHeader, ConstDef, DelegateDef, EnumDef, Expr, FuncBody, FuncDef,
+    FuncName, FuncSig, Hir, Identifier, Local, StructDef, Ty, VarDef, VarInstance,
 };
 
 mod stmts;
@@ -257,12 +257,18 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         }
 
         match name {
-            FuncName::Oper(op) => self.format_op(op)?,
+            FuncName::Oper(op) => {
+                self.format_op(op)?;
+                self.w.write_all(b" ")?;
+            }
             FuncName::Iden(i) => self.w.write_all(i.as_ref().as_bytes())?,
         }
 
         self.w.write_all(b"(")?;
         for (idx, inst) in f.args.iter().enumerate() {
+            if inst.mods.flags.contains(ArgFlags::OUT) {
+                self.w.write_all(b"out ")?;
+            }
             self.format_ty(&inst.ty)?;
             self.w.write_all(b" ")?;
             self.w.write_all(inst.name.as_ref().as_bytes())?;
