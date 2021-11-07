@@ -15,10 +15,10 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 self.w.write_all(b"if (")?;
                 self.format_expr(cond)?;
                 self.w.write_all(b")")?;
-                self.format_block_or_statement(then)?;
+                self.format_block_or_statement(then, false)?;
                 if let Some(or_else) = or_else {
                     self.w.write_all(b" else ")?;
-                    self.format_block_or_statement(or_else)?;
+                    self.format_block_or_statement(or_else, true)?;
                 } else {
                     self.w.write_all(b"\n")?;
                 }
@@ -36,14 +36,14 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 self.w.write_all(b"; ")?;
                 self.format_statement(retry)?;
                 self.w.write_all(b")")?;
-                self.format_block_or_statement(run)?;
+                self.format_block_or_statement(run, false)?;
             }
             Statement::ForeachStatement { source, run } => todo!(),
             Statement::WhileStatement { cond, run } => {
                 self.w.write_all(b"if (")?;
                 self.format_expr(cond)?;
                 self.w.write_all(b")")?;
-                self.format_block_or_statement(run)?;
+                self.format_block_or_statement(run, false)?;
                 self.w.write_all(b"\n")?;
             }
             Statement::DoStatement { cond, run } => todo!(),
@@ -78,6 +78,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
     pub fn format_block_or_statement(
         &mut self,
         b_or_s: &BlockOrStatement<R::From>,
+        glue_if: bool,
     ) -> io::Result<()> {
         match b_or_s {
             BlockOrStatement::Block(stmts) => {
@@ -93,9 +94,11 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 self.w.write_all(b"}")?;
             }
             BlockOrStatement::Statement(stmt) => {
-                self.w.write_all(b"\n")?;
-                self.indent()?;
-                self.w.write_all(b"    ")?;
+                if !glue_if || !matches!(&**stmt, &Statement::IfStatement { .. }) {
+                    self.w.write_all(b"\n")?;
+                    self.indent()?;
+                    self.w.write_all(b"    ")?;
+                }
                 self.format_statement(stmt)?;
             }
         }
