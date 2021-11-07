@@ -230,8 +230,14 @@ pub struct DelegateDef<T> {
 }
 
 #[derive(Debug)]
+pub enum FuncName {
+    Oper(Op),
+    Iden(Identifier),
+}
+
+#[derive(Debug)]
 pub struct FuncDef<T> {
-    pub name: Identifier,
+    pub name: FuncName,
     pub overrides: Option<T>,
     pub mods: Modifiers<FuncFlags, T>,
     pub sig: FuncSig<T>,
@@ -316,6 +322,48 @@ pub enum BlockOrStatement<T> {
 }
 
 #[derive(Debug)]
+pub enum Op {
+    Add,
+    AddAdd,
+    AddAssign,
+    And,
+    AndAnd,
+    At,
+    AtAssign,
+    Bang,
+    BangEq,
+    Div,
+    DivAssign,
+    Dollar,
+    DollarAssign,
+    Eq,
+    EqEq,
+    Gt,
+    GtEq,
+    GtGt,
+    GtGtGt,
+    Lt,
+    LtEq,
+    LtLt,
+    Mod,
+    Mul,
+    MulMul,
+    MulAssign,
+    Or,
+    OrOr,
+    Pow,
+    PowPow,
+    Sub,
+    SubAssign,
+    SubSub,
+    Tilde,
+    TildeEq,
+
+    VecCross,
+    VecDot,
+}
+
+#[derive(Debug)]
 pub enum Expr<T> {
     AssignmentExpr {
         lhs: BaseExpr<T>,
@@ -323,7 +371,7 @@ pub enum Expr<T> {
     },
     AssignmentOpExpr {
         lhs: BaseExpr<T>,
-        op: T,
+        op: Op,
         rhs: BaseExpr<T>,
     },
 }
@@ -348,16 +396,16 @@ pub enum BaseExpr<T> {
         arch: Option<Box<BaseExpr<T>>>,
     },
     PreOpExpr {
-        op: T,
+        op: Op,
         rhs: Box<BaseExpr<T>>,
     },
     PostOpExpr {
         lhs: Box<BaseExpr<T>>,
-        op: T,
+        op: Op,
     },
     BinOpExpr {
         lhs: Box<BaseExpr<T>>,
-        op: T,
+        op: Op,
         rhs: Box<BaseExpr<T>>,
     },
     TernExpr {

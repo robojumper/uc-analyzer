@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use uc_def::Identifier;
+use uc_def::{Identifier, Op};
 
 use crate::NumberLiteral;
 
@@ -123,6 +123,48 @@ impl Sigil {
             Colon | Dot | Tern | LParen | RParen | LBrack | RBrack | LBrace | RBrace => false,
         }
     }
+
+    pub fn to_op(&self) -> Op {
+        use Sigil::*;
+        match self {
+            Add => Op::Add,
+            AddAdd => Op::AddAdd,
+            AddAssign => Op::AddAssign,
+            And => Op::And,
+            AndAnd => Op::AndAnd,
+            At => Op::At,
+            AtAssign => Op::AtAssign,
+            Bang => Op::Bang,
+            BangEq => Op::BangEq,
+            Div => Op::Div,
+            DivAssign => Op::DivAssign,
+            Dollar => Op::Dollar,
+            DollarAssign => Op::DollarAssign,
+            Eq => Op::Eq,
+            EqEq => Op::EqEq,
+            Gt => Op::Gt,
+            GtEq => Op::GtEq,
+            GtGt => Op::GtGt,
+            GtGtGt => Op::GtGtGt,
+            Lt => Op::Lt,
+            LtEq => Op::LtEq,
+            LtLt => Op::LtLt,
+            Mod => Op::Mod,
+            Mul => Op::Mul,
+            MulMul => Op::MulMul,
+            MulAssign => Op::MulAssign,
+            Or => Op::Or,
+            OrOr => Op::OrOr,
+            Pow => Op::Pow,
+            PowPow => Op::PowPow,
+            Sub => Op::Sub,
+            SubAssign => Op::SubAssign,
+            SubSub => Op::SubSub,
+            Tilde => Op::Tilde,
+            TildeEq => Op::TildeEq,
+            s => panic!("Not an operator: {:?}", s),
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, strum::EnumString, strum::AsRefStr, Eq, PartialEq, Hash)]
@@ -138,6 +180,7 @@ pub enum Keyword {
     CollapseCategories,
     Config,
     Const,
+    Cross,
     CppText,
     DataBinding,
     Default,
@@ -145,6 +188,7 @@ pub enum Keyword {
     Delegate,
     DependsOn,
     Deprecated,
+    Dot,
     DuplicateTransient,
     EditConst,
     EditInline,

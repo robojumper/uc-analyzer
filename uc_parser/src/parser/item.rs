@@ -1,8 +1,6 @@
-use std::str::FromStr;
-
 use uc_def::{
     ClassDef, ClassFlags, ClassHeader, ConstDef, ConstVal, DelegateDef, DimCount, EnumDef, FuncArg,
-    FuncBody, FuncDef, FuncSig, Identifier, Local, StructDef, VarDef, VarInstance,
+    FuncBody, FuncDef, FuncName, FuncSig, Identifier, Local, Op, StructDef, VarDef, VarInstance,
 };
 
 use super::Parser;
@@ -249,16 +247,20 @@ impl Parser<'_> {
     fn parse_function_sig(
         &mut self,
         allow_op_sigil: bool,
-    ) -> Result<(Identifier, FuncSig<Identifier>), String> {
+    ) -> Result<(FuncName, FuncSig<Identifier>), String> {
         let ty_or_name = self.next_any()?;
         let (ret_ty, name) = match (ty_or_name.kind, self.peek_any()?.kind) {
-            (Tk::Sym(_), Tk::Sig(Sigil::LParen)) => (None, self.sym_to_ident(&ty_or_name)),
+            (Tk::Sym(_), Tk::Sig(Sigil::LParen)) => {
+                (None, FuncName::Iden(self.sym_to_ident(&ty_or_name)))
+            }
             _ => (Some(self.parse_ty(Some(ty_or_name))?), {
                 let name_tok = self.next_any()?;
                 match name_tok.kind {
-                    Tk::Sym(_) => self.sym_to_ident(&name_tok),
+                    kw!(Cross) => FuncName::Oper(Op::VecCross),
+                    kw!(Dot) => FuncName::Oper(Op::VecDot),
+                    Tk::Sym(_) => FuncName::Iden(self.sym_to_ident(&name_tok)),
                     Tk::Sig(s) if allow_op_sigil && s.is_overloadable_op() => {
-                        Identifier::from_str(&format!("__op_{}", s.as_ref())).unwrap()
+                        FuncName::Oper(s.to_op())
                     }
                     _ => return Err(format!("expected function name, got {:?}", name_tok)),
                 }
@@ -300,7 +302,7 @@ impl Parser<'_> {
             };
 
             let def = if self.eat(Tk::Sig(Sigil::Eq)) {
-                Some(dbg!(self.parse_base_expression()?))
+                Some(self.parse_base_expression()?)
             } else {
                 None
             };
@@ -412,6 +414,10 @@ impl Parser<'_> {
     fn parse_delegate(&mut self) -> Result<DelegateDef<Identifier>, String> {
         self.expect(kw!(Delegate))?;
         let (name, sig) = self.parse_function_sig(false)?;
+        let name = match name {
+            FuncName::Oper(o) => return Err(format!("Invalid delegate name: {:?}", o)),
+            FuncName::Iden(i) => i,
+        };
 
         let body = if self.eat(Tk::Semi) {
             None

@@ -2,14 +2,14 @@
 //! See https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
 //! for an introduction to Pratt parsing.
 
-use std::str::FromStr;
-
 use uc_def::{BaseExpr, Identifier};
 
 use crate::{
     kw,
     lexer::{Sigil, Token, TokenKind as Tk},
 };
+
+mod test;
 
 use super::Parser;
 
@@ -31,7 +31,7 @@ impl Parser<'_> {
                     Some(((), r_bp)) => {
                         let rhs = self.parse_base_expression_bp(r_bp)?;
                         BaseExpr::PreOpExpr {
-                            op: Identifier::from_str(&format!("__op_{}", sig.as_ref())).unwrap(),
+                            op: sig.to_op(),
                             rhs: Box::new(rhs),
                         }
                     }
@@ -66,7 +66,7 @@ impl Parser<'_> {
                     BaseExpr::NewExpr {
                         args,
                         cls: Box::new(cls),
-                        arch: arch.map(Box::new)
+                        arch: arch.map(Box::new),
                     }
                 }
                 Tk::Sym(_) if matches!(self.peek(), Some(Token { kind: Tk::Name, .. })) => {
@@ -142,7 +142,7 @@ impl Parser<'_> {
                 } else {
                     BaseExpr::PostOpExpr {
                         lhs: Box::new(lhs),
-                        op: Identifier::from_str(&format!("__op_{}", op.as_ref())).unwrap(),
+                        op: op.to_op(),
                     }
                 };
                 continue;
@@ -173,7 +173,7 @@ impl Parser<'_> {
                     } else {
                         BaseExpr::BinOpExpr {
                             lhs: Box::new(lhs),
-                            op: Identifier::from_str(&format!("__op_{}", op.as_ref())).unwrap(),
+                            op: op.to_op(),
                             rhs: Box::new(rhs),
                         }
                     }

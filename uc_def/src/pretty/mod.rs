@@ -5,6 +5,8 @@ use crate::{
     VarDef,
 };
 
+mod expr;
+
 pub trait RefLookup {
     type From: fmt::Debug;
     fn lookup<'a>(&self, i: &'a Self::From) -> &'a str;
@@ -233,7 +235,11 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
             self.format_ty(ty)?;
             self.w.write_all(b" ")?;
         }
-        self.w.write_all(f.name.as_ref().as_bytes())?;
+        match &f.name {
+            crate::FuncName::Oper(op) => self.format_op(op)?,
+            crate::FuncName::Iden(i) => self.w.write_all(i.as_ref().as_bytes())?,
+        }
+
         self.w.write_all(b"(")?;
         for (idx, inst) in f.sig.args.iter().enumerate() {
             self.format_ty(&inst.ty)?;
@@ -241,7 +247,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
             self.w.write_all(inst.name.as_ref().as_bytes())?;
             if let Some(c) = &inst.def {
                 self.w.write_all(b" = ")?;
-                self.w.write_fmt(format_args!("{:?}", c))?;
+                self.format_expr(c)?;
             }
 
             if idx != f.sig.args.len() - 1 {
