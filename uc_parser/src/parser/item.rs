@@ -412,7 +412,7 @@ impl Parser<'_> {
     fn parse_delegate(&mut self) -> Result<DelegateDef<Identifier>, String> {
         self.expect(kw!(Delegate))?;
         let (name, sig) = self.parse_function_sig(false)?;
-        
+
         let body = if self.eat(Tk::Semi) {
             None
         } else if self.eat(Tk::Sig(Sigil::LBrace)) {
@@ -486,7 +486,10 @@ impl Parser<'_> {
                         continue;
                     }
                     Tk::Comment => unreachable!("filtered out in next"),
-                    _ => panic!("Unknown start of item: {:?}, buffered errs: {:?}", tok, self.errs),
+                    _ => panic!(
+                        "Unknown start of item: {:?}, buffered errs: {:?}",
+                        tok, self.errs
+                    ),
                 },
                 None => Ok(None),
             };

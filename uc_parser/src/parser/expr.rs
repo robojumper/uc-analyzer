@@ -38,7 +38,6 @@ impl Parser<'_> {
                     None => return Err(format!("Not a preoperator: {:?}", tok)),
                 },
                 kw!(New) => {
-                    self.next();
                     let mut args = vec![];
                     if self.eat(Tk::Sig(Sigil::LParen)) {
                         loop {
@@ -56,10 +55,18 @@ impl Parser<'_> {
                     let ((), r_bp) = NEW_PREFIX_POWER;
 
                     let cls = self.parse_base_expression_bp(r_bp)?;
+                    let arch = if self.eat(Tk::Sig(Sigil::LParen)) {
+                        let arch = self.parse_base_expression_bp(0)?;
+                        self.expect(Tk::Sig(Sigil::RParen))?;
+                        Some(arch)
+                    } else {
+                        None
+                    };
 
                     BaseExpr::NewExpr {
                         args,
                         cls: Box::new(cls),
+                        arch: arch.map(Box::new)
                     }
                 }
                 Tk::Sym(_) if matches!(self.peek(), Some(Token { kind: Tk::Name, .. })) => {
@@ -68,37 +75,11 @@ impl Parser<'_> {
                         lit: uc_def::Literal::ObjReference,
                     }
                 }
-                Tk::Sym(_)
-                    if matches!(
-                        self.peek(),
-                        Some(Token {
-                            kind: Tk::Sig(Sigil::LParen),
-                            ..
-                        })
-                    ) =>
-                {
-                    let func = self.sym_to_ident(&tok);
-                    self.next();
-                    let mut args = vec![];
-                    loop {
-                        let expr = self.parse_base_expression_bp(0)?;
-                        args.push(expr);
-                        let delim = self.next_any()?;
-                        match delim.kind {
-                            Tk::Comma => continue,
-                            Tk::Sig(Sigil::RParen) => break,
-                            _ => return Err(format!("Expected comma or }}, got {:?}", delim)),
-                        }
-                    }
-                    BaseExpr::CallExpr { func, args }
-                }
                 kw!(None) => BaseExpr::LiteralExpr {
                     lit: uc_def::Literal::None,
                 },
-                Tk::Sym(_) => {
-                    BaseExpr::SymExpr {
-                        sym: self.sym_to_ident(&tok),
-                    }
+                Tk::Sym(_) => BaseExpr::SymExpr {
+                    sym: self.sym_to_ident(&tok),
                 },
                 Tk::Number(_) => BaseExpr::LiteralExpr {
                     lit: uc_def::Literal::Number,
@@ -120,7 +101,7 @@ impl Parser<'_> {
             let op = match self.peek() {
                 Some(Token {
                     kind: Tk::Sig(s), ..
-                }) if is_infix_or_suffix_op(s) => s,
+                }) if is_infix_or_postfix_op(s) => s,
                 // EOF is fine, anything else is fine too. At least for now
                 // TODO: List tokens that could appear after exprs explicitly?
                 // `;` statement delimiter
@@ -141,6 +122,22 @@ impl Parser<'_> {
                     BaseExpr::IndexExpr {
                         base: Box::new(lhs),
                         idx: Box::new(rhs),
+                    }
+                } else if op == Sigil::LParen {
+                    let mut args = vec![];
+                    loop {
+                        let expr = self.parse_base_expression_bp(0)?;
+                        args.push(expr);
+                        let delim = self.next_any()?;
+                        match delim.kind {
+                            Tk::Comma => continue,
+                            Tk::Sig(Sigil::RParen) => break,
+                            _ => return Err(format!("Expected comma or }}, got {:?}", delim)),
+                        }
+                    }
+                    BaseExpr::CallExpr {
+                        lhs: Box::new(lhs),
+                        args,
                     }
                 } else {
                     BaseExpr::PostOpExpr {
@@ -189,7 +186,7 @@ impl Parser<'_> {
     }
 }
 
-fn is_infix_or_suffix_op(op: Sigil) -> bool {
+fn is_infix_or_postfix_op(op: Sigil) -> bool {
     postfix_binding_power(op).is_some() || infix_binding_power(op).is_some()
 }
 
@@ -211,15 +208,21 @@ fn postfix_binding_power(op: Sigil) -> Option<(u8, ())> {
     let res = match op {
         Sigil::AddAdd => (10, ()),
         Sigil::SubSub => (10, ()),
-        Sigil::LBrack => (38, ()),
+        Sigil::LBrack => (40, ()),
+        Sigil::LParen => (40, ()),
         _ => return None,
     };
     Some(res)
 }
 
-// TODO - no idea what constructions are valid after new class''. Just
-// assign something super high so it breaks when anything but a ; or closing parameter appears.
-const NEW_PREFIX_POWER: ((), u8) = ((), 100);
+/// `new` needs to have a lower binding power than `.` and `(`
+/// This is huge sadness because it means that `new class'SomeClass' (Archetype);`
+/// resolves as a function call, but it has to because
+/// `new self.SomeFunction(WithAnArg)` is in fact a function call and
+/// `new self.SomeFunction(WithAnArg) (Archetype)` is also valid.
+/// The AST consumer will have to resolve `self.SomeFunction` and see
+/// if it's a valid function call and pull things apart if not.
+const NEW_PREFIX_POWER: ((), u8) = ((), 38);
 
 fn infix_binding_power(op: Sigil) -> Option<(u8, u8)> {
     let res = match op {
@@ -261,7 +264,7 @@ fn infix_binding_power(op: Sigil) -> Option<(u8, u8)> {
         Sigil::AddAssign => (34, 35),
         Sigil::SubAssign => (34, 35),
 
-        Sigil::Dot => (40, 41),
+        Sigil::Dot => (42, 43),
         _ => return None,
     };
     Some(res)

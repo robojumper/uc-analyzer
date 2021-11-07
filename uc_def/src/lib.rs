@@ -339,12 +339,13 @@ pub enum BaseExpr<T> {
         rhs: Box<BaseExpr<T>>,
     },
     CallExpr {
-        func: T,
+        lhs: Box<BaseExpr<T>>,
         args: Vec<BaseExpr<T>>,
     },
     NewExpr {
         args: Vec<BaseExpr<T>>,
         cls: Box<BaseExpr<T>>,
+        arch: Option<Box<BaseExpr<T>>>,
     },
     PreOpExpr {
         op: T,

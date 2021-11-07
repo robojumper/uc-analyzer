@@ -211,10 +211,13 @@ impl<'a> Parser<'a> {
                     loop {
                         parts.push(self.expect_ident()?);
                         match self.peek() {
-                            Some(Token { kind: Tk::Sig(Sigil::Dot), .. }) => {
+                            Some(Token {
+                                kind: Tk::Sig(Sigil::Dot),
+                                ..
+                            }) => {
                                 self.next();
                                 continue;
-                            },
+                            }
                             _ => break,
                         }
                     }
@@ -222,7 +225,7 @@ impl<'a> Parser<'a> {
                 } else {
                     Ok(Ty::Simple(self.sym_to_ident(&ty_tok)))
                 }
-            },
+            }
             _ => Err(format!("expected type after modifiers, got {:?}", ty_tok)),
         }
     }
