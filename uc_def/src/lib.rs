@@ -139,6 +139,7 @@ pub struct Hir<T> {
     pub consts: Vec<ConstDef>,
     pub vars: Vec<VarDef<T>>,
     pub dels: Vec<DelegateDef<T>>,
+    pub states: Vec<StateDef<T>>,
     pub funcs: Vec<FuncDef<T>>,
 }
 
@@ -233,6 +234,14 @@ pub struct DelegateDef<T> {
 pub enum FuncName {
     Oper(Op),
     Iden(Identifier),
+}
+
+#[derive(Debug)]
+pub struct StateDef<T> {
+    pub name: T,
+    pub extends: Option<T>,
+    pub funcs: Vec<FuncDef<T>>,
+    pub statements: Vec<Statement<T>>,
 }
 
 #[derive(Debug)]
@@ -424,7 +433,7 @@ pub enum Literal {
     Number,
     Bool,
     Name,
-    String,
+    String(String),
 }
 
 #[derive(Debug)]

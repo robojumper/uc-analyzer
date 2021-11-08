@@ -95,6 +95,7 @@ impl Parser<'_> {
     }
 
     fn parse_one_stmt(&mut self) -> Result<Option<Statement<Identifier>>, String> {
+        while self.eat(Tk::Semi) {}
         match self.peek() {
             Some(tok) => match tok.kind {
                 sig!(RBrace) => Ok(None),

@@ -2,7 +2,7 @@ use std::{fmt, io};
 
 use crate::{
     ArgFlags, ClassDef, ClassHeader, ConstDef, DelegateDef, EnumDef, Expr, FuncBody, FuncDef,
-    FuncName, FuncSig, Hir, Identifier, Local, StructDef, Ty, VarDef, VarInstance,
+    FuncName, FuncSig, Hir, Identifier, Local, StateDef, StructDef, Ty, VarDef, VarInstance,
 };
 
 mod stmts;
@@ -237,6 +237,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
     }
 
     fn format_func(&mut self, f: &FuncDef<R::From>) -> io::Result<()> {
+        self.indent()?;
         self.w.write_all(b"function ")?;
 
         self.format_sig(&f.sig, &f.name)?;
@@ -301,6 +302,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         }
 
         self.indent_decr();
+        self.indent()?;
         self.w.write_all(b"}\n")?;
         Ok(())
     }
@@ -314,6 +316,32 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         self.format_instances(&l.names)?;
 
         self.w.write_all(b";\n")?;
+
+        Ok(())
+    }
+
+    fn format_state(&mut self, s: &StateDef<R::From>) -> io::Result<()> {
+        self.w.write_all(b"state ")?;
+        self.format_i(&s.name)?;
+        if let Some(extends) = &s.extends {
+            self.w.write_all(b" extends ")?;
+            self.format_i(extends)?;
+        }
+        self.w.write_all(b" {\n")?;
+        self.indent_incr();
+
+        for f in &s.funcs {
+            self.format_func(f)?;
+        }
+
+        for stmt in &s.statements {
+            self.indent()?;
+            self.format_statement(stmt)?;
+            self.w.write_all(b"\n")?;
+        }
+
+        self.indent_decr();
+        self.w.write_all(b"}\n")?;
 
         Ok(())
     }
@@ -367,6 +395,11 @@ pub fn format_hir<W: io::Write, I, R: RefLookup<From = I>>(
 
     for del in &hir.dels {
         printer.format_del(del)?;
+    }
+    printer.w.write_all(b"\n")?;
+
+    for state in &hir.states {
+        printer.format_state(state)?;
     }
     printer.w.write_all(b"\n")?;
 

@@ -55,7 +55,7 @@ impl<'a> Parser<'a> {
         self.clone().next()
     }
 
-    /// This pretty much only exists to support `simulated state`
+    /// This pretty much only exists to support `simulated state` and labels
     fn peek2(&self) -> Option<Token> {
         let mut s = self.clone();
         s.next();
@@ -253,7 +253,8 @@ pub fn parse(lex: Lexer) -> (Hir<Identifier>, Vec<String>) {
     let mut enums = vec![];
     let mut consts = vec![];
     let mut vars = vec![];
-    let mut delegate_defs = vec![];
+    let mut dels = vec![];
+    let mut states = vec![];
     let mut funcs = vec![];
 
     for i in items {
@@ -262,7 +263,8 @@ pub fn parse(lex: Lexer) -> (Hir<Identifier>, Vec<String>) {
             TopLevelItem::Var(v) => vars.push(v),
             TopLevelItem::Struct(s) => structs.push(s),
             TopLevelItem::Enum(e) => enums.push(e),
-            TopLevelItem::Delegate(d) => delegate_defs.push(d),
+            TopLevelItem::Delegate(d) => dels.push(d),
+            TopLevelItem::State(s) => states.push(s),
             TopLevelItem::Func(f) => funcs.push(f),
         }
     }
@@ -274,7 +276,8 @@ pub fn parse(lex: Lexer) -> (Hir<Identifier>, Vec<String>) {
             enums,
             consts,
             vars,
-            dels: delegate_defs,
+            dels,
+            states,
             funcs,
         },
         parser.errs,

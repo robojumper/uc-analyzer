@@ -139,7 +139,7 @@ impl Parser<'_> {
                     lit: uc_def::Literal::Number,
                 },
                 Tk::String => Expr::LiteralExpr {
-                    lit: uc_def::Literal::String,
+                    lit: uc_def::Literal::String(self.lex.extract_string(&tok)),
                 },
                 Tk::Name => Expr::LiteralExpr {
                     lit: uc_def::Literal::Name,

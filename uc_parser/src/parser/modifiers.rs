@@ -239,7 +239,7 @@ pub static VAR_MODIFIERS: Lazy<ModifierConfig<VarFlags>> = Lazy::new(|| {
     let e = VarFlags::empty();
 
     m.insert(Kw::Native, C::new(VF::NATIVE, DF::Nothing));
-    m.insert(Kw::Config, C::new(VF::CONFIG, DF::Nothing));
+    m.insert(Kw::Config, C::new(VF::CONFIG, DF::IdentModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE)));
     m.insert(Kw::GlobalConfig, C::new(VF::GLOBALCONFIG, DF::Nothing));
     m.insert(Kw::Localized, C::new(VF::LOCALIZED, DF::Nothing));
     m.insert(Kw::Const, C::new(VF::CONST, DF::Nothing));

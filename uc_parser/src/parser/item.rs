@@ -1,7 +1,7 @@
 use uc_def::{
     ClassDef, ClassFlags, ClassHeader, ConstDef, ConstVal, DelegateDef, DimCount, EnumDef, FuncArg,
-    FuncBody, FuncDef, FuncName, FuncSig, Identifier, Local, Op, StructDef, Ty, VarDef,
-    VarInstance,
+    FuncBody, FuncDef, FuncName, FuncSig, Identifier, Local, Op, StateDef, Statement, StructDef,
+    Ty, VarDef, VarInstance,
 };
 
 use super::Parser;
@@ -19,6 +19,7 @@ pub enum TopLevelItem {
     Struct(StructDef<Identifier>),
     Enum(EnumDef),
     Delegate(DelegateDef<Identifier>),
+    State(StateDef<Identifier>),
     Func(FuncDef<Identifier>),
 }
 
@@ -349,7 +350,6 @@ impl Parser<'_> {
 
     fn parse_function(&mut self) -> Result<FuncDef<Identifier>, String> {
         let mods = self.parse_kws(&*modifiers::FUNC_MODIFIERS)?;
-
         let (name, sig) = self.parse_function_sig(true)?;
 
         self.eat(kw!(Const));
@@ -422,23 +422,75 @@ impl Parser<'_> {
         Ok(Local { ty, names })
     }
 
-    fn parse_state(&mut self) -> Result<(), String> {
-        // TODO
+    #[allow(clippy::type_complexity)]
+    fn parse_state_contents(
+        &mut self,
+    ) -> Result<(Vec<FuncDef<Identifier>>, Vec<Statement<Identifier>>), String> {
+        let mut funcs = vec![];
+        let mut stmts = vec![];
+
+        loop {
+            match self.peek_any()?.kind {
+                sig!(RBrace) => {
+                    self.next();
+                    return Ok((funcs, stmts));
+                }
+                Tk::Sym(Symbol::Kw(kw)) if modifiers::FUNC_MODIFIERS.contains(kw) => {
+                    funcs.push(self.parse_function()?);
+                }
+                _ => break, // Not a function
+            }
+        }
+
+        stmts = self.parse_statements();
+        self.expect(sig!(RBrace))?;
+
+        Ok((funcs, stmts))
+    }
+
+    fn parse_state(&mut self) -> Result<StateDef<Identifier>, String> {
         self.eat(kw!(Simulated));
         self.eat(kw!(Auto));
         self.expect(kw!(State))?;
-        self.expect_ident()?;
-        if self.eat(kw!(Extends)) {
-            self.expect_ident()?;
-        }
-        self.expect(sig!(LBrace))?;
-        self.ignore_foreign_block(sig!(LBrace))?;
+        let name = self.expect_ident()?;
+        let extends = if self.eat(kw!(Extends)) {
+            Some(self.expect_ident()?)
+        } else {
+            None
+        };
 
-        Ok(())
+        self.expect(sig!(LBrace))?;
+
+        if self.eat(kw!(Ignores)) {
+            let mut comma = false;
+            loop {
+                if self.eat(Tk::Semi) {
+                    break;
+                }
+                if comma {
+                    self.expect(Tk::Comma)?;
+                }
+                if self.eat(Tk::Semi) {
+                    break;
+                }
+                self.expect_ident()?;
+                comma = true;
+            }
+        }
+
+        let (funcs, statements) = self.parse_state_contents()?;
+
+        Ok(StateDef {
+            name,
+            funcs,
+            statements,
+            extends,
+        })
     }
 
     fn parse_delegate(&mut self) -> Result<DelegateDef<Identifier>, String> {
         self.expect(kw!(Delegate))?;
+        self.eat(kw!(Static)); // TODO: Modifiers
         let (name, sig) = self.parse_function_sig(false)?;
         let name = match name {
             FuncName::Oper(o) => return Err(format!("Invalid delegate name: {:?}", o)),
@@ -496,10 +548,7 @@ impl Parser<'_> {
                         self.ignore_foreign_block(brace.kind)?;
                         continue;
                     }
-                    kw!(State) | kw!(Auto) => {
-                        self.parse_state()?;
-                        continue;
-                    }
+                    kw!(State) | kw!(Auto) => Ok(Some(TopLevelItem::State(self.parse_state()?))),
                     kw!(Simulated)
                         if matches!(
                             self.peek2(),

@@ -104,11 +104,17 @@ pub enum Sigil {
     Tilde,
     TildeEq,
 
+    /// `[`
     LBrack,
+    /// `]`
     RBrack,
+    /// `(`
     LParen,
+    /// `)`
     RParen,
+    /// `{`
     LBrace,
+    /// `}`
     RBrace,
 }
 
@@ -174,16 +180,16 @@ pub enum Keyword {
     Auto,
     Break,
     Case,
-    Client,
     Class,
     ClassGroup,
+    Client,
     Coerce,
     CollapseCategories,
     Config,
     Const,
     Continue,
-    Cross,
     CppText,
+    Cross,
     DataBinding,
     Default,
     DefaultProperties,
@@ -211,6 +217,7 @@ pub enum Keyword {
     Goto,
     HideCategories,
     If,
+    Ignores,
     Immutable,
     Implements,
     Inherits,
@@ -534,6 +541,11 @@ impl<'a> Lexer<'a> {
     pub fn extract_ident(&self, token: &Token) -> Identifier {
         assert_eq!(token.kind, TokenKind::Sym(Symbol::Identifier));
         Identifier::from_str(&self.source.text[token.span.exp_start..token.span.exp_end]).unwrap()
+    }
+
+    pub fn extract_string(&self, token: &Token) -> String {
+        assert_eq!(token.kind, TokenKind::String);
+        self.source.text[token.span.exp_start..token.span.exp_end].to_owned()
     }
 
     pub fn extract_number(&self, token: &Token) -> Result<NumberLiteral, String> {

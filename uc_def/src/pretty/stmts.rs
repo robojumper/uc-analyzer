@@ -103,7 +103,10 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 }
                 self.w.write_all(b";")?;
             }
-            Statement::Label(_) => todo!(),
+            Statement::Label(l) => {
+                self.format_i(l)?;
+                self.w.write_all(b":")?;
+            }
             Statement::Assignment { lhs, rhs } => {
                 self.format_expr(lhs)?;
                 self.w.write_all(b" = ")?;
@@ -237,7 +240,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
             Literal::Number => self.w.write_all(b"`Number`")?,
             Literal::Bool => self.w.write_all(b"`Bool`")?,
             Literal::Name => self.w.write_all(b"`Name`")?,
-            Literal::String => self.w.write_all(b"`String`")?,
+            Literal::String(s) => self.w.write_all(s.as_bytes())?,
         }
         Ok(())
     }
