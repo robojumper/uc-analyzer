@@ -2,7 +2,7 @@
 //! See https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
 //! for an introduction to Pratt parsing.
 
-use uc_def::{Expr, Identifier, Op};
+use uc_def::{Expr, Identifier, Op, Ty};
 
 use crate::{
     kw,
@@ -90,6 +90,18 @@ impl Parser<'_> {
                         args,
                         cls: Box::new(cls),
                         arch: arch.map(Box::new),
+                    }
+                }
+                kw!(Class) if matches!(self.peek(), Some(Token { kind: sig!(Lt), .. })) => {
+                    self.next();
+                    let ident = self.expect_ident()?;
+                    self.expect(sig!(Gt))?;
+                    self.expect(sig!(LParen))?;
+                    let expr = self.parse_base_expression_bp(0)?;
+                    self.expect(sig!(RParen))?;
+                    Expr::ClassMetaCastExpr {
+                        ty: Ty::Class(Some(ident)),
+                        expr: Box::new(expr),
                     }
                 }
                 Tk::Sym(_) if matches!(self.peek(), Some(Token { kind: Tk::Name, .. })) => {
@@ -196,19 +208,18 @@ impl Parser<'_> {
                         then: Box::new(mhs),
                         alt: Box::new(rhs),
                     }
+                } else if let SigilOrVecOp::Sig(Sigil::Dot) = op {
+                    let rhs = self.expect_ident()?;
+                    Expr::FieldExpr {
+                        lhs: Box::new(lhs),
+                        rhs,
+                    }
                 } else {
                     let rhs = self.parse_base_expression_bp(r_bp)?;
-                    if let SigilOrVecOp::Sig(Sigil::Dot) = op {
-                        Expr::FieldExpr {
-                            lhs: Box::new(lhs),
-                            rhs: Box::new(rhs),
-                        }
-                    } else {
-                        Expr::BinOpExpr {
-                            lhs: Box::new(lhs),
-                            op: op.to_op(),
-                            rhs: Box::new(rhs),
-                        }
+                    Expr::BinOpExpr {
+                        lhs: Box::new(lhs),
+                        op: op.to_op(),
+                        rhs: Box::new(rhs),
                     }
                 };
                 continue;

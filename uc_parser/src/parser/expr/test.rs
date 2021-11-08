@@ -25,6 +25,22 @@ fn object_1515() {
     assert_parse_pretty(text, pretty);
 }
 
+#[test]
+fn class_metacast() {
+    let text = "class<Actor>(SomeObject)";
+    // Definitely not "(class < Actor) > SomeObject"
+    let pretty = "class<Actor>(SomeObject)";
+    assert_parse_pretty(text, pretty);
+}
+
+#[test]
+fn class_simplecast() {
+    let text = "Class(SomeObject)";
+    // Just a regular function call
+    let pretty = "Class(SomeObject)";
+    assert_parse_pretty(text, pretty);
+}
+
 fn assert_parse_pretty(text: &str, pretty: &str) {
     let lex = Lexer::new(text);
     let mut p = Parser::new(lex);

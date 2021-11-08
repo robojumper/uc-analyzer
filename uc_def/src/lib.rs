@@ -376,11 +376,15 @@ pub enum Expr<T> {
     },
     FieldExpr {
         lhs: Box<Expr<T>>,
-        rhs: Box<Expr<T>>,
+        rhs: T,
     },
     CallExpr {
         lhs: Box<Expr<T>>,
         args: Vec<Option<Expr<T>>>,
+    },
+    ClassMetaCastExpr {
+        ty: Ty<T>,
+        expr: Box<Expr<T>>,
     },
     NewExpr {
         args: Vec<Expr<T>>,

@@ -110,7 +110,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
             Expr::FieldExpr { lhs, rhs } => {
                 self.format_expr(lhs)?;
                 self.w.write_all(b".")?;
-                self.format_expr(rhs)?;
+                self.format_i(rhs)?;
             }
             Expr::CallExpr { lhs, args } => {
                 self.format_expr(lhs)?;
@@ -123,6 +123,12 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                         self.w.write_all(b", ")?;
                     }
                 }
+                self.w.write_all(b")")?;
+            }
+            Expr::ClassMetaCastExpr { ty, expr } => {
+                self.format_ty(ty)?;
+                self.w.write_all(b"(")?;
+                self.format_expr(expr)?;
                 self.w.write_all(b")")?;
             }
             Expr::NewExpr { args, cls, arch } => {
