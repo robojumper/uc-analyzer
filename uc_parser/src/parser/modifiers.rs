@@ -258,6 +258,7 @@ pub static VAR_MODIFIERS: Lazy<ModifierConfig<VarFlags>> = Lazy::new(|| {
     m.insert(Kw::Deprecated, C::new(e, DF::Nothing));
     m.insert(Kw::NoImport, C::new(e, DF::Nothing));
     m.insert(Kw::Interp, C::new(e, DF::Nothing));
+    m.insert(Kw::Instanced, C::new(e, DF::Nothing));
 
     m.insert(Kw::Public, C::new(VF::PUBLIC, DF::OptForeignBlock));
     m.insert(Kw::Private, C::new(VF::PRIVATE, DF::OptForeignBlock));

@@ -50,8 +50,44 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 self.format_block(run)?;
                 self.w.write_all(b"\n")?;
             }
-            Statement::DoStatement { cond, run } => todo!(),
-            Statement::SwitchStatement { scrutinee, cases } => todo!(),
+            Statement::DoStatement { cond, run } => {
+                self.w.write_all(b"do {\n")?;
+                self.indent_incr();
+                for stmt in run {
+                    self.indent()?;
+                    self.format_statement(stmt)?;
+                    self.w.write_all(b"\n")?
+                }
+                self.indent_decr();
+                self.indent()?;
+                self.w.write_all(b"} until(")?;
+                self.format_expr(cond)?;
+                self.w.write_all(b");\n")?;
+            }
+            Statement::SwitchStatement { scrutinee, cases } => {
+                self.w.write_all(b"switch (")?;
+                self.format_expr(scrutinee)?;
+                self.w.write_all(b") {\n")?;
+                for case in cases {
+                    self.indent()?;
+                    match &case.case {
+                        crate::Case::Case(c) => {
+                            self.format_expr(c)?;
+                            self.w.write_all(b":\n")?
+                        }
+                        crate::Case::Default => self.w.write_all(b"default:\n")?,
+                    }
+                    self.indent_incr();
+                    for stmt in &case.statements {
+                        self.indent()?;
+                        self.format_statement(stmt)?;
+                        self.w.write_all(b"\n")?
+                    }
+                    self.indent_decr();
+                }
+                self.indent()?;
+                self.w.write_all(b"}\n")?
+            }
             Statement::BreakStatement => {
                 self.w.write_all(b"break;")?;
             }
@@ -142,7 +178,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                             self.w.write_all(b", ")?;
                         }
                     }
-                    self.w.write_all(b")")?;
+                    self.w.write_all(b") ")?;
                 }
                 self.format_expr(cls)?;
 
@@ -156,7 +192,6 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
             Expr::PreOpExpr { op, rhs } => {
                 self.w.write_all(b"(")?;
                 self.format_op(op)?;
-                self.w.write_all(b" ")?;
                 self.format_expr(rhs)?;
                 self.w.write_all(b")")?;
             }
@@ -198,11 +233,11 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
     fn format_lit(&mut self, l: &Literal) -> io::Result<()> {
         match l {
             Literal::None => self.w.write_all(b"None")?,
-            Literal::ObjReference => self.w.write_all(b"<ObjectReference>")?,
-            Literal::Number => self.w.write_all(b"<Number>")?,
-            Literal::Bool => self.w.write_all(b"<Bool>")?,
-            Literal::Name => self.w.write_all(b"<Name>")?,
-            Literal::String => self.w.write_all(b"<String>")?,
+            Literal::ObjReference => self.w.write_all(b"`ObjectReference`")?,
+            Literal::Number => self.w.write_all(b"`Number`")?,
+            Literal::Bool => self.w.write_all(b"`Bool`")?,
+            Literal::Name => self.w.write_all(b"`Name`")?,
+            Literal::String => self.w.write_all(b"`String`")?,
         }
         Ok(())
     }

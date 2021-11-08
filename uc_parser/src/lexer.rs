@@ -216,6 +216,7 @@ pub enum Keyword {
     Inherits,
     Init,
     Input,
+    Instanced,
     Interface,
     Interp,
     Iterator,

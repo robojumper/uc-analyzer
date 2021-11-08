@@ -62,6 +62,7 @@ impl Parser<'_> {
         let case = match self.peek_any()?.kind {
             kw!(Default) => {
                 self.next();
+                self.expect(sig!(Colon))?;
                 Case::Default
             }
             kw!(Case) => {
@@ -166,6 +167,7 @@ impl Parser<'_> {
                     Ok(Some(Statement::WhileStatement { cond, run }))
                 }
                 kw!(Do) => {
+                    self.next();
                     self.expect(sig!(LBrace))?;
                     let stmts = self.parse_statements();
                     self.expect(sig!(RBrace))?;

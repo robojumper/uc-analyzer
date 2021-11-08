@@ -58,7 +58,26 @@ impl Parser<'_> {
                             rhs: Box::new(rhs),
                         }
                     }
-                    None => return Err(format!("Not a preoperator: {:?}", tok)),
+                    None => {
+                        // Hack: Simply eat a preoperator + if followed by a number directly. UCC just considers it
+                        // part of the number by feeding info back from the parser to the lexer.
+                        if sig == Sigil::Add
+                            && matches!(
+                                self.peek(),
+                                Some(Token {
+                                    kind: Tk::Number(_),
+                                    ..
+                                })
+                            )
+                        {
+                            self.next();
+                            Expr::LiteralExpr {
+                                lit: uc_def::Literal::Number,
+                            }
+                        } else {
+                            return Err(format!("Not a preoperator: {:?}", tok));
+                        }
+                    }
                 },
                 kw!(New) => {
                     let mut args = vec![];

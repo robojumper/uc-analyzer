@@ -41,6 +41,13 @@ fn class_simplecast() {
     assert_parse_pretty(text, pretty);
 }
 
+#[test]
+fn new_op() {
+    let text = "new(Outer) ModifierClass";
+    let pretty = "(new (Outer) ModifierClass)";
+    assert_parse_pretty(text, pretty);
+}
+
 fn assert_parse_pretty(text: &str, pretty: &str) {
     let lex = Lexer::new(text);
     let mut p = Parser::new(lex);

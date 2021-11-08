@@ -1,6 +1,7 @@
 use uc_def::{
     ClassDef, ClassFlags, ClassHeader, ConstDef, ConstVal, DelegateDef, DimCount, EnumDef, FuncArg,
-    FuncBody, FuncDef, FuncName, FuncSig, Identifier, Local, Op, StructDef, VarDef, VarInstance,
+    FuncBody, FuncDef, FuncName, FuncSig, Identifier, Local, Op, StructDef, Ty, VarDef,
+    VarInstance,
 };
 
 use super::Parser;
@@ -111,7 +112,7 @@ impl Parser<'_> {
         Ok(ConstDef { name, val })
     }
 
-    fn parse_var(&mut self) -> Result<VarDef<Identifier>, String> {
+    fn parse_var(&mut self) -> Result<(Option<EnumDef>, VarDef<Identifier>), String> {
         self.expect(kw!(Var))?;
         if self.eat(sig!(LParen)) {
             self.eat_symbol();
@@ -119,7 +120,20 @@ impl Parser<'_> {
         }
 
         let mods = self.parse_kws(&*modifiers::VAR_MODIFIERS)?;
-        let ty = self.parse_ty(None)?;
+        let (en, ty) = if matches!(
+            self.peek_any()?,
+            Token {
+                kind: kw!(Enum),
+                ..
+            }
+        ) {
+            let en = self.parse_enum(false)?;
+            let ty = Ty::Simple(en.name.clone());
+            (Some(en), ty)
+        } else {
+            let ty = self.parse_ty(None)?;
+            (None, ty)
+        };
 
         let mut names = vec![];
 
@@ -169,10 +183,10 @@ impl Parser<'_> {
 
         self.expect(Tk::Semi)?;
 
-        Ok(VarDef { names, ty, mods })
+        Ok((en, VarDef { names, ty, mods }))
     }
 
-    fn parse_enum(&mut self) -> Result<EnumDef, String> {
+    fn parse_enum(&mut self, expect_semi: bool) -> Result<EnumDef, String> {
         self.expect(kw!(Enum))?;
         let name = self.expect_ident()?;
         self.expect(sig!(LBrace))?;
@@ -202,7 +216,9 @@ impl Parser<'_> {
             }
         }
 
-        self.expect(Tk::Semi)?;
+        if expect_semi {
+            self.expect(Tk::Semi)?;
+        }
 
         Ok(EnumDef { name, variants })
     }
@@ -232,7 +248,11 @@ impl Parser<'_> {
                     break;
                 }
                 kw!(Var) => {
-                    fields.push(self.parse_var()?);
+                    let (opt_enum, var) = self.parse_var()?;
+                    if opt_enum.is_some() {
+                        return Err("enum decl in struct???????".to_owned());
+                    }
+                    fields.push(var);
                 }
                 kw!(StructCppText) | kw!(StructDefaultProperties) => {
                     self.next();
@@ -452,13 +472,22 @@ impl Parser<'_> {
         Ok(())
     }
 
-    fn parse_one_item(&mut self) -> Result<Option<TopLevelItem>, String> {
+    fn parse_one_item(
+        &mut self,
+        items: &mut Vec<TopLevelItem>,
+    ) -> Result<Option<TopLevelItem>, String> {
         loop {
             break match self.peek() {
                 Some(tok) => match tok.kind {
                     kw!(Const) => Ok(Some(TopLevelItem::Const(self.parse_const()?))),
-                    kw!(Var) => Ok(Some(TopLevelItem::Var(self.parse_var()?))),
-                    kw!(Enum) => Ok(Some(TopLevelItem::Enum(self.parse_enum()?))),
+                    kw!(Var) => {
+                        let (opt_enum, var_decl) = self.parse_var()?;
+                        if let Some(en) = opt_enum {
+                            items.push(TopLevelItem::Enum(en));
+                        }
+                        Ok(Some(TopLevelItem::Var(var_decl)))
+                    }
+                    kw!(Enum) => Ok(Some(TopLevelItem::Enum(self.parse_enum(true)?))),
                     kw!(Struct) => Ok(Some(TopLevelItem::Struct(self.parse_struct()?))),
                     kw!(Delegate) => Ok(Some(TopLevelItem::Delegate(self.parse_delegate()?))),
                     kw!(CppText) | kw!(DefaultProperties) | kw!(Replication) => {
@@ -509,7 +538,7 @@ impl Parser<'_> {
     pub fn parse_items(&mut self) -> Vec<TopLevelItem> {
         let mut items = vec![];
         loop {
-            match self.parse_one_item() {
+            match self.parse_one_item(&mut items) {
                 Ok(Some(item)) => items.push(item),
                 Ok(None) => break,
                 Err(e) => {
