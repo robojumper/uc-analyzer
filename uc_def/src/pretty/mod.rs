@@ -1,7 +1,7 @@
 use std::{fmt, io};
 
 use crate::{
-    ArgFlags, ClassDef, ClassHeader, ConstDef, DelegateDef, EnumDef, Expr, FuncBody, FuncDef,
+    ArgFlags, ClassDef, ClassHeader, ConstDef, EnumDef, Expr, FuncBody, FuncDef, FuncFlags,
     FuncName, FuncSig, Hir, Identifier, Local, StateDef, StructDef, Ty, VarDef, VarInstance,
 };
 
@@ -111,7 +111,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         match &s.extends {
             Some(i) => {
                 self.w.write_all(b" extends ")?;
-                self.format_i(i)?;
+                self.format_veci(i, b".")?;
             }
             None => {}
         }
@@ -221,24 +221,17 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         Ok(())
     }
 
-    fn format_del(&mut self, f: &DelegateDef<R::From>) -> io::Result<()> {
-        self.w.write_all(b"delegate ")?;
-
-        let nm = FuncName::Iden(f.name.clone()); // FIXME
-        self.format_sig(&f.sig, &nm)?;
-
-        match &f.body {
-            Some(b) => {
-                self.format_body(b)?;
-            }
-            None => self.w.write_all(b";\n")?,
-        }
-        Ok(())
-    }
-
     fn format_func(&mut self, f: &FuncDef<R::From>) -> io::Result<()> {
         self.indent()?;
-        self.w.write_all(b"function ")?;
+        if f.mods.flags.contains(FuncFlags::OPERATOR) {
+            self.w.write_all(b"operator ")?;
+        } else if f.mods.flags.contains(FuncFlags::ITERATOR) {
+            self.w.write_all(b"iterator ")?;
+        } else if f.mods.flags.contains(FuncFlags::DELEGATE) {
+            self.w.write_all(b"delegate ")?;
+        } else {
+            self.w.write_all(b"function ")?;
+        }
 
         self.format_sig(&f.sig, &f.name)?;
 
@@ -294,6 +287,13 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         for local in &f.locals {
             self.format_local(local)?;
         }
+
+        self.w.write_all(b"\n")?;
+        for c in &f.consts {
+            self.indent()?;
+            self.format_const(c)?;
+        }
+        self.w.write_all(b"\n")?;
 
         for stmt in &f.statements {
             self.indent()?;
@@ -390,11 +390,6 @@ pub fn format_hir<W: io::Write, I, R: RefLookup<From = I>>(
 
     for var in &hir.vars {
         printer.format_var(var)?;
-    }
-    printer.w.write_all(b"\n")?;
-
-    for del in &hir.dels {
-        printer.format_del(del)?;
     }
     printer.w.write_all(b"\n")?;
 

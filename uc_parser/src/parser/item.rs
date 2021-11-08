@@ -1,14 +1,14 @@
 use uc_def::{
-    ClassDef, ClassFlags, ClassHeader, ConstDef, ConstVal, DelegateDef, DimCount, EnumDef, FuncArg,
-    FuncBody, FuncDef, FuncName, FuncSig, Identifier, Local, Op, StateDef, Statement, StructDef,
-    Ty, VarDef, VarInstance,
+    ClassDef, ClassFlags, ClassHeader, ConstDef, ConstVal, DimCount, EnumDef, FuncArg, FuncBody,
+    FuncDef, FuncName, FuncSig, Identifier, Local, Op, StateDef, Statement, StructDef, Ty, VarDef,
+    VarInstance,
 };
 
 use super::Parser;
 use crate::{
     kw,
     lexer::{NumberSyntax, Symbol, Token, TokenKind as Tk},
-    parser::modifiers,
+    parser::modifiers::{self, DeclFollowups, ModifierCount},
     sig,
 };
 
@@ -18,7 +18,6 @@ pub enum TopLevelItem {
     Var(VarDef<Identifier>),
     Struct(StructDef<Identifier>),
     Enum(EnumDef),
-    Delegate(DelegateDef<Identifier>),
     State(StateDef<Identifier>),
     Func(FuncDef<Identifier>),
 }
@@ -115,10 +114,10 @@ impl Parser<'_> {
 
     fn parse_var(&mut self) -> Result<(Option<EnumDef>, VarDef<Identifier>), String> {
         self.expect(kw!(Var))?;
-        if self.eat(sig!(LParen)) {
-            self.eat_symbol();
-            self.expect(sig!(RParen))?;
-        }
+        let followups = DeclFollowups::IdentModifiers(
+            ModifierCount::ALLOW_NONE | ModifierCount::ALLOW_ONE | ModifierCount::ALLOW_MULTIPLE,
+        );
+        self.parse_followups(&followups)?;
 
         let mods = self.parse_kws(&*modifiers::VAR_MODIFIERS)?;
         let (en, ty) = if matches!(
@@ -148,7 +147,8 @@ impl Parser<'_> {
                         DimCount::Number(cnt as u32)
                     }
                     Tk::Sym(_) => {
-                        let parts = self.parse_parts_until(sig!(RBrack))?;
+                        let parts = self.parse_maybe_qualified_path()?;
+                        self.expect(sig!(RBrack))?;
                         DimCount::Complex(parts)
                     }
                     kind => {
@@ -233,7 +233,7 @@ impl Parser<'_> {
         let name = self.expect_ident()?;
 
         let extends = if self.eat(kw!(Extends)) {
-            Some(self.expect_ident()?)
+            Some(self.parse_maybe_qualified_path()?)
         } else {
             None
         };
@@ -318,7 +318,8 @@ impl Parser<'_> {
                         DimCount::Number(cnt as u32)
                     }
                     Tk::Sym(_) => {
-                        let parts = self.parse_parts_until(sig!(RBrack))?;
+                        let parts = self.parse_maybe_qualified_path()?;
+                        self.expect(sig!(RBrack))?;
                         DimCount::Complex(parts)
                     }
                     kind => {
@@ -358,9 +359,19 @@ impl Parser<'_> {
             None
         } else if self.eat(sig!(LBrace)) {
             let locals = self.parse_locals()?;
+            // FIXME: Revert this and handle the one case with a patch
+            let mut consts = vec![];
+            while self.peek_any()?.kind == kw!(Const) {
+                consts.push(self.parse_const()?);
+            }
             let statements = self.parse_statements();
             self.expect(sig!(RBrace))?;
-            Some(FuncBody { locals, statements })
+            while self.eat(Tk::Semi) {} // FIXME: Revert this and handle the one case with a patch
+            Some(FuncBody {
+                locals,
+                consts,
+                statements,
+            })
         } else {
             return Err(format!("expected ; or {{, got {:?}", self.peek_any()));
         };
@@ -376,9 +387,13 @@ impl Parser<'_> {
 
     fn parse_locals(&mut self) -> Result<Vec<Local<Identifier>>, String> {
         let mut locals = vec![];
+        while self.eat(Tk::Semi) {} // FIXME: Revert this and handle existing cases with patches
         while self.eat(kw!(Local)) {
             match self.parse_local() {
-                Ok(l) => locals.push(l),
+                Ok(l) => {
+                    locals.push(l);
+                    while self.eat(Tk::Semi) {}
+                }
                 Err(e) => self.errs.push(e),
             }
         }
@@ -398,7 +413,8 @@ impl Parser<'_> {
                         DimCount::Number(cnt as u32)
                     }
                     Tk::Sym(_) => {
-                        let parts = self.parse_parts_until(sig!(RBrack))?;
+                        let parts = self.parse_maybe_qualified_path()?;
+                        self.expect(sig!(RBrack))?;
                         DimCount::Complex(parts)
                     }
                     kind => {
@@ -449,8 +465,8 @@ impl Parser<'_> {
     }
 
     fn parse_state(&mut self) -> Result<StateDef<Identifier>, String> {
-        self.eat(kw!(Simulated));
         self.eat(kw!(Auto));
+        self.eat(kw!(Simulated));
         self.expect(kw!(State))?;
         let name = self.expect_ident()?;
         let extends = if self.eat(kw!(Extends)) {
@@ -488,29 +504,6 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_delegate(&mut self) -> Result<DelegateDef<Identifier>, String> {
-        self.expect(kw!(Delegate))?;
-        self.eat(kw!(Static)); // TODO: Modifiers
-        let (name, sig) = self.parse_function_sig(false)?;
-        let name = match name {
-            FuncName::Oper(o) => return Err(format!("Invalid delegate name: {:?}", o)),
-            FuncName::Iden(i) => i,
-        };
-
-        let body = if self.eat(Tk::Semi) {
-            None
-        } else if self.eat(sig!(LBrace)) {
-            let locals = self.parse_locals()?;
-            let statements = self.parse_statements();
-            self.expect(sig!(RBrace))?;
-            Some(FuncBody { locals, statements })
-        } else {
-            return Err(format!("expected ; or {{, got {:?}", self.peek_any()));
-        };
-
-        Ok(DelegateDef { name, body, sig })
-    }
-
     fn ignore_directive(&mut self) -> Result<(), String> {
         let directive_name = self.expect_ident()?;
         if directive_name.as_ref().eq_ignore_ascii_case("error") {
@@ -541,7 +534,6 @@ impl Parser<'_> {
                     }
                     kw!(Enum) => Ok(Some(TopLevelItem::Enum(self.parse_enum(true)?))),
                     kw!(Struct) => Ok(Some(TopLevelItem::Struct(self.parse_struct()?))),
-                    kw!(Delegate) => Ok(Some(TopLevelItem::Delegate(self.parse_delegate()?))),
                     kw!(CppText) | kw!(DefaultProperties) | kw!(Replication) => {
                         self.next();
                         let brace = self.expect(sig!(LBrace))?;

@@ -36,7 +36,11 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 self.w.write_all(b"; ")?;
                 self.format_statement(retry)?;
                 self.w.write_all(b")")?;
-                self.format_block(run)?;
+                if let Some(run) = run {
+                    self.format_block(run)?;
+                } else {
+                    self.w.write_all(b";\n")?;
+                }
             }
             Statement::ForeachStatement { source, run } => {
                 self.w.write_all(b"foreach ")?;
@@ -72,6 +76,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                     self.indent()?;
                     match &case.case {
                         crate::Case::Case(c) => {
+                            self.w.write_all(b"case ")?;
                             self.format_expr(c)?;
                             self.w.write_all(b":\n")?
                         }
@@ -94,7 +99,6 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
             Statement::ContinueStatement => {
                 self.w.write_all(b"continue;")?;
             }
-            //Statement::GotoStatement => todo!(),
             Statement::ReturnStatement { expr } => {
                 self.w.write_all(b"return")?;
                 if let Some(expr) = expr {

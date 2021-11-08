@@ -130,20 +130,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn eat_symbol(&mut self) -> bool {
-        match self.peek() {
-            None => false,
-            Some(tok) => {
-                if let Tk::Sym(_) = tok.kind {
-                    self.next();
-                    true
-                } else {
-                    false
-                }
-            }
-        }
-    }
-
     fn recover_to_semi(&mut self) {
         while let Some(Token { kind, .. }) = self.next() {
             if kind == Tk::Semi {
@@ -152,27 +138,17 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_parts_until(&mut self, end_token: Tk) -> Result<Vec<Identifier>, String> {
-        let mut parts = vec![];
-        let mut dot = false;
+    fn parse_maybe_qualified_path(&mut self) -> Result<Vec<Identifier>, String> {
+        let mut parts = vec![self.expect_ident()?];
         loop {
-            let mut tok = self.next_any()?;
+            let tok = self.peek_any()?;
             match tok.kind {
-                tk if tk == end_token => break,
-                sig!(Dot) if dot => {
-                    tok = self.next_any()?;
+                sig!(Dot) => {
+                    self.next_any()?;
                 }
-                _ => {}
+                _ => break,
             }
-            if let Tk::Sym(_) = tok.kind {
-                parts.push(self.sym_to_ident(&tok));
-                dot = true;
-            } else {
-                return Err(format!(
-                    "expected type name or type path part name, got {:?}",
-                    tok
-                ));
-            }
+            parts.push(self.expect_ident()?);
         }
 
         Ok(parts)
@@ -180,8 +156,9 @@ impl<'a> Parser<'a> {
 
     fn parse_angle_type(&mut self) -> Result<Vec<Identifier>, String> {
         self.expect(sig!(Lt))?;
-
-        self.parse_parts_until(sig!(Gt))
+        let parts = self.parse_maybe_qualified_path()?;
+        self.expect(sig!(Gt))?;
+        Ok(parts)
     }
 
     fn parse_ty(&mut self, first_tok: Option<Token>) -> Result<Ty<Identifier>, String> {
@@ -253,7 +230,6 @@ pub fn parse(lex: Lexer) -> (Hir<Identifier>, Vec<String>) {
     let mut enums = vec![];
     let mut consts = vec![];
     let mut vars = vec![];
-    let mut dels = vec![];
     let mut states = vec![];
     let mut funcs = vec![];
 
@@ -263,7 +239,6 @@ pub fn parse(lex: Lexer) -> (Hir<Identifier>, Vec<String>) {
             TopLevelItem::Var(v) => vars.push(v),
             TopLevelItem::Struct(s) => structs.push(s),
             TopLevelItem::Enum(e) => enums.push(e),
-            TopLevelItem::Delegate(d) => dels.push(d),
             TopLevelItem::State(s) => states.push(s),
             TopLevelItem::Func(f) => funcs.push(f),
         }
@@ -276,7 +251,6 @@ pub fn parse(lex: Lexer) -> (Hir<Identifier>, Vec<String>) {
             enums,
             consts,
             vars,
-            dels,
             states,
             funcs,
         },

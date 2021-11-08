@@ -31,6 +31,8 @@ pub enum DeclFollowups {
     Nothing,
     /// `var private{private}`
     OptForeignBlock,
+    /// `ForceScriptOrder(true)`
+    Bool,
     /// `var(Category)`
     IdentModifiers(ModifierCount),
     /// `native(129)`
@@ -97,6 +99,15 @@ impl Parser<'_> {
     ) -> Result<Option<Values<Identifier>>, String> {
         match followups {
             DeclFollowups::Nothing => Ok(None),
+            DeclFollowups::Bool => {
+                self.expect(sig!(LParen))?;
+                match self.next_any()?.kind {
+                    Tk::Bool(_) => {}
+                    _ => return Err("Expected bool".to_owned()),
+                }
+                self.expect(sig!(RParen))?;
+                Ok(None)
+            }
             DeclFollowups::OptForeignBlock => match self.peek() {
                 Some(Token {
                     kind: opener @ sig!(LBrace),
@@ -202,14 +213,18 @@ pub static CLASS_MODIFIERS: Lazy<ModifierConfig<ClassFlags>> = Lazy::new(|| {
 
     m.insert(Kw::NativeReplication, C::new(e, DF::Nothing));
 
-    m.insert(Kw::NoExport, C::new(e, DF::Nothing));
+    m.insert(Kw::AutoExpandCategories, C::new(e, ONE_IDENT));
+    m.insert(Kw::ClassGroup, C::new(e, ONE_IDENT));
     m.insert(Kw::CollapseCategories, C::new(e, DF::Nothing));
-    m.insert(Kw::HideCategories, C::new(e, MORE_IDENTS));
+    m.insert(Kw::DontCollapseCategories, C::new(e, DF::Nothing));
+    m.insert(Kw::DontSortCategories, C::new(e, MORE_IDENTS));
     m.insert(Kw::EditInlineNew, C::new(e, DF::Nothing));
+    m.insert(Kw::ForceScriptOrder, C::new(e, DF::Bool)); // FIXME: Just patch this out?
+    m.insert(Kw::HideCategories, C::new(e, MORE_IDENTS));
+    m.insert(Kw::Inherits, C::new(e, MORE_IDENTS));
+    m.insert(Kw::NoExport, C::new(e, DF::Nothing));
     m.insert(Kw::NotPlaceable, C::new(e, DF::Nothing));
     m.insert(Kw::Placeable, C::new(e, DF::Nothing));
-    m.insert(Kw::ClassGroup, C::new(e, ONE_IDENT));
-    m.insert(Kw::Inherits, C::new(e, MORE_IDENTS));
     m.insert(Kw::ShowCategories, C::new(e, MORE_IDENTS));
 
     ModifierConfig { modifiers: m }
@@ -239,26 +254,42 @@ pub static VAR_MODIFIERS: Lazy<ModifierConfig<VarFlags>> = Lazy::new(|| {
     let e = VarFlags::empty();
 
     m.insert(Kw::Native, C::new(VF::NATIVE, DF::Nothing));
-    m.insert(Kw::Config, C::new(VF::CONFIG, DF::IdentModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE)));
+    m.insert(
+        Kw::Config,
+        C::new(
+            VF::CONFIG,
+            DF::IdentModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE),
+        ),
+    );
     m.insert(Kw::GlobalConfig, C::new(VF::GLOBALCONFIG, DF::Nothing));
     m.insert(Kw::Localized, C::new(VF::LOCALIZED, DF::Nothing));
     m.insert(Kw::Const, C::new(VF::CONST, DF::Nothing));
 
-    m.insert(Kw::EditConst, C::new(e, DF::Nothing));
-    m.insert(Kw::EditInline, C::new(e, DF::Nothing));
-    m.insert(Kw::Export, C::new(e, DF::Nothing));
-    m.insert(Kw::NoExport, C::new(e, DF::Nothing));
-    m.insert(Kw::Transient, C::new(e, DF::Nothing));
-    m.insert(Kw::DuplicateTransient, C::new(e, DF::Nothing));
+    m.insert(Kw::CrossLevelPassive, C::new(e, DF::Nothing));
     m.insert(Kw::DataBinding, C::new(e, DF::Nothing));
-    m.insert(Kw::Init, C::new(e, DF::Nothing));
-    m.insert(Kw::RepNotify, C::new(e, DF::Nothing));
-    m.insert(Kw::Input, C::new(e, DF::Nothing));
-    m.insert(Kw::EditorOnly, C::new(e, DF::Nothing));
     m.insert(Kw::Deprecated, C::new(e, DF::Nothing));
-    m.insert(Kw::NoImport, C::new(e, DF::Nothing));
-    m.insert(Kw::Interp, C::new(e, DF::Nothing));
+    m.insert(Kw::DuplicateTransient, C::new(e, DF::Nothing));
+    m.insert(Kw::EditConst, C::new(e, DF::Nothing));
+    m.insert(Kw::EditFixedSize, C::new(e, DF::Nothing));
+    m.insert(Kw::EditHide, C::new(e, DF::Nothing));
+    m.insert(Kw::EditInline, C::new(e, DF::Nothing));
+    m.insert(Kw::EditInlineUse, C::new(e, DF::Nothing));
+    m.insert(Kw::EditorOnly, C::new(e, DF::Nothing));
+    m.insert(Kw::EditTextBox, C::new(e, DF::Nothing));
+    m.insert(Kw::Export, C::new(e, DF::Nothing));
+    m.insert(Kw::Init, C::new(e, DF::Nothing));
+    m.insert(Kw::Input, C::new(e, DF::Nothing));
     m.insert(Kw::Instanced, C::new(e, DF::Nothing));
+    m.insert(Kw::Interp, C::new(e, DF::Nothing));
+    m.insert(Kw::NoClear, C::new(e, DF::Nothing));
+    m.insert(Kw::NoExport, C::new(e, DF::Nothing));
+    m.insert(Kw::NoImport, C::new(e, DF::Nothing));
+    m.insert(Kw::NonTransactional, C::new(e, DF::Nothing));
+    m.insert(Kw::NotForConsole, C::new(e, DF::Nothing));
+    m.insert(Kw::RepNotify, C::new(e, DF::Nothing));
+    m.insert(Kw::RepRetry, C::new(e, DF::Nothing));
+    m.insert(Kw::SerializeText, C::new(e, DF::Nothing));
+    m.insert(Kw::Transient, C::new(e, DF::Nothing));
 
     m.insert(Kw::Public, C::new(VF::PUBLIC, DF::OptForeignBlock));
     m.insert(Kw::Private, C::new(VF::PRIVATE, DF::OptForeignBlock));
@@ -295,10 +326,11 @@ pub static STRUCT_MODIFIERS: Lazy<ModifierConfig<StructFlags>> = Lazy::new(|| {
     let mut m = HashMap::new();
     let e = StructFlags::empty();
 
-    m.insert(Kw::Native, C::new(e, DF::Nothing));
-    m.insert(Kw::Immutable, C::new(e, DF::Nothing));
-    m.insert(Kw::Transient, C::new(e, DF::Nothing));
     m.insert(Kw::Export, C::new(e, DF::Nothing));
+    m.insert(Kw::Immutable, C::new(e, DF::Nothing));
+    m.insert(Kw::ImmutableWhenCooked, C::new(e, DF::Nothing));
+    m.insert(Kw::Native, C::new(e, DF::Nothing));
+    m.insert(Kw::Transient, C::new(e, DF::Nothing));
 
     ModifierConfig { modifiers: m }
 });
@@ -326,6 +358,7 @@ pub static FUNC_MODIFIERS: Lazy<ModifierConfig<FuncFlags>> = Lazy::new(|| {
     );
     m.insert(Kw::PreOperator, C::new(FF::PREOPERATOR, DF::Nothing));
     m.insert(Kw::PostOperator, C::new(FF::POSTOPERATOR, DF::Nothing));
+    m.insert(Kw::Delegate, C::new(FF::DELEGATE, DF::Nothing));
 
     m.insert(Kw::Static, C::new(FF::STATIC, DF::Nothing));
     m.insert(Kw::Final, C::new(FF::FINAL, DF::Nothing));
@@ -333,11 +366,12 @@ pub static FUNC_MODIFIERS: Lazy<ModifierConfig<FuncFlags>> = Lazy::new(|| {
     m.insert(Kw::Latent, C::new(FF::LATENT, DF::Nothing));
     m.insert(Kw::Iterator, C::new(FF::ITERATOR, DF::Nothing));
 
-    m.insert(Kw::Simulated, C::new(e, DF::Nothing));
-    m.insert(Kw::Reliable, C::new(e, DF::Nothing));
     m.insert(Kw::Client, C::new(e, DF::Nothing));
+    m.insert(Kw::Reliable, C::new(e, DF::Nothing));
     m.insert(Kw::Server, C::new(e, DF::Nothing));
+    m.insert(Kw::Simulated, C::new(e, DF::Nothing));
     m.insert(Kw::Singular, C::new(e, DF::Nothing));
+    m.insert(Kw::StateOnly, C::new(e, DF::Nothing));
     m.insert(Kw::Unreliable, C::new(e, DF::Nothing));
 
     m.insert(Kw::NoExport, C::new(e, DF::Nothing));

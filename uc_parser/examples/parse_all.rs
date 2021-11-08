@@ -31,6 +31,20 @@ fn main() {
             continue;
         }
 
+        let name = entry.file_name().to_str().unwrap();
+        let exclusions = [
+            // defaultproperties { } and_then_something_here
+            "UISimpleCommodityScreen",
+            "UIUFOAttack",
+            // array<const native transient pointer>
+            "NxForceField.",
+            "NxForceFieldComponent.",
+            "NxGenericForceFieldBrush.",
+        ];
+        if exclusions.iter().any(|e| name.contains(e)) {
+            continue;
+        }
+
         let contents = match read_to_string(entry.path()) {
             Ok(c) => c,
             Err(e) if e.kind() == io::ErrorKind::InvalidData => {
@@ -43,10 +57,14 @@ fn main() {
             }
         };
 
+        if contents.contains('`') {
+            continue; // will be expanded
+        }
+
         let lexer = lexer::Lexer::new(&contents);
         let (hir, errs) = parser::parse(lexer);
-        dbg!(&errs);
         if !errs.is_empty() {
+            dbg!(&errs);
             panic!();
         }
         let out = std::io::stdout();

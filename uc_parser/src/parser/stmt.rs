@@ -19,7 +19,6 @@ fn stmt_wants_semi<I>(stmt: &Statement<I>) -> bool {
         Statement::SwitchStatement { .. } => false,
         Statement::BreakStatement => true,
         Statement::ContinueStatement => true,
-        //Statement::GotoStatement => true,
         Statement::ReturnStatement { .. } => true,
         Statement::Label(_) => false,
         Statement::Assignment { .. } => true,
@@ -142,7 +141,11 @@ impl Parser<'_> {
                     let retry = self.expect_one_statement("for retry", false)?;
                     self.expect(sig!(RParen))?;
 
-                    let run = self.parse_block_or_stmt("for")?;
+                    let run = if self.eat(Tk::Semi) {
+                        None
+                    } else {
+                        Some(self.parse_block_or_stmt("for")?)
+                    };
 
                     Ok(Some(Statement::ForStatement {
                         init: Box::new(init),
@@ -214,7 +217,6 @@ impl Parser<'_> {
                     self.next();
                     Ok(Some(Statement::ContinueStatement))
                 }
-                kw!(Goto) => panic!("goto isn't used???"),
                 kw!(Return) => {
                     self.next();
                     let expr = match self.peek_any()?.kind {
@@ -244,7 +246,8 @@ impl Parser<'_> {
             match self.parse_one_stmt() {
                 Ok(Some(stmt)) => {
                     if stmt_wants_semi(&stmt) && !self.eat(Tk::Semi) {
-                        self.errs.push("Error, missing semicolon".to_owned());
+                        self.errs
+                            .push(format!("Error, missing semicolon, got {:?}", self.peek()));
                     }
                     while self.eat(Tk::Semi) {}
                     stmts.push(stmt);

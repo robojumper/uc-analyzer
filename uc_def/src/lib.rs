@@ -34,6 +34,7 @@ bitflags! {
         const PROTECTED = 1 << 12;
         const COERCE = 1 << 13;
         const ITERATOR = 1 << 14;
+        const DELEGATE = 1 << 15;
     }
 
     pub struct VarFlags: u32 {
@@ -138,7 +139,6 @@ pub struct Hir<T> {
     pub enums: Vec<EnumDef>,
     pub consts: Vec<ConstDef>,
     pub vars: Vec<VarDef<T>>,
-    pub dels: Vec<DelegateDef<T>>,
     pub states: Vec<StateDef<T>>,
     pub funcs: Vec<FuncDef<T>>,
 }
@@ -218,16 +218,9 @@ pub struct EnumDef {
 #[derive(Debug)]
 pub struct StructDef<T> {
     pub name: Identifier,
-    pub extends: Option<T>,
+    pub extends: Option<Vec<T>>,
     pub fields: Vec<VarDef<T>>,
     pub mods: Modifiers<StructFlags, T>,
-}
-
-#[derive(Debug)]
-pub struct DelegateDef<T> {
-    pub name: Identifier,
-    pub body: Option<FuncBody<T>>,
-    pub sig: FuncSig<T>,
 }
 
 #[derive(Debug)]
@@ -271,6 +264,7 @@ pub struct FuncArg<T> {
 #[derive(Debug)]
 pub struct FuncBody<T> {
     pub locals: Vec<Local<T>>,
+    pub consts: Vec<ConstDef>,
     pub statements: Vec<Statement<T>>,
 }
 
@@ -285,7 +279,7 @@ pub enum Statement<T> {
         init: Box<Statement<T>>,
         cond: Expr<T>,
         retry: Box<Statement<T>>,
-        run: Block<T>,
+        run: Option<Block<T>>,
     },
     ForeachStatement {
         source: Expr<T>,
@@ -305,7 +299,6 @@ pub enum Statement<T> {
     },
     BreakStatement,
     ContinueStatement,
-    //GotoStatement,
     ReturnStatement {
         expr: Option<Expr<T>>,
     },
