@@ -1,4 +1,7 @@
-use uc_def::{Block, Case, CaseClause, Identifier, Statement};
+use std::vec;
+
+use uc_def::{Block, Case, CaseClause, Statement};
+use uc_name::Identifier;
 
 use crate::{
     kw,
@@ -28,7 +31,9 @@ fn stmt_wants_semi<I>(stmt: &Statement<I>) -> bool {
 
 impl Parser<'_> {
     fn parse_block_or_stmt(&mut self, ctx: &'static str) -> Result<Block<Identifier>, String> {
-        if self.eat(sig!(LBrace)) {
+        if self.eat(Tk::Semi) {
+            Ok(Block { stmts: vec![] })
+        } else if self.eat(sig!(LBrace)) {
             let stmts = self.parse_statements();
             self.expect(sig!(RBrace))?;
             Ok(Block { stmts })
@@ -73,7 +78,7 @@ impl Parser<'_> {
             sig!(RBrace) => return Ok(None),
             _ => return Err("switch must be followed by case or default clause".to_owned()),
         };
-        while self.eat(Tk::Semi) {}
+        while self.eat(Tk::Semi) {} // FIXME: Where is this hit?
         let mut statements = vec![];
 
         loop {
@@ -84,7 +89,7 @@ impl Parser<'_> {
                     // thing that can appear here is a closing brace, another
                     // case label, or a statement
                     let stmt = self.expect_one_statement("switch clause", true)?;
-                    while self.eat(Tk::Semi) {}
+                    while self.eat(Tk::Semi) {} // FIXME: Where is this hit?
                     statements.push(stmt);
                 }
             }
@@ -94,7 +99,7 @@ impl Parser<'_> {
     }
 
     fn parse_one_stmt(&mut self) -> Result<Option<Statement<Identifier>>, String> {
-        while self.eat(Tk::Semi) {}
+        while self.eat(Tk::Semi) {} // FIXME: Where is this hit?
         match self.peek() {
             Some(tok) => match tok.kind {
                 sig!(RBrace) => Ok(None),
@@ -141,11 +146,7 @@ impl Parser<'_> {
                     let retry = self.expect_one_statement("for retry", false)?;
                     self.expect(sig!(RParen))?;
 
-                    let run = if self.eat(Tk::Semi) {
-                        None
-                    } else {
-                        Some(self.parse_block_or_stmt("for")?)
-                    };
+                    let run = self.parse_block_or_stmt("for")?;
 
                     Ok(Some(Statement::ForStatement {
                         init: Box::new(init),
@@ -249,7 +250,7 @@ impl Parser<'_> {
                         self.errs
                             .push(format!("Error, missing semicolon, got {:?}", self.peek()));
                     }
-                    while self.eat(Tk::Semi) {}
+                    while self.eat(Tk::Semi) {} // FIXME: Where is this hit?
                     stmts.push(stmt);
                 }
                 Ok(None) => break,

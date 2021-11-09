@@ -1,8 +1,7 @@
-use std::str::FromStr;
+use std::str::{self, FromStr};
 
-use uc_def::{Identifier, Op};
-
-use crate::NumberLiteral;
+use uc_def::Op;
+use uc_name::Identifier;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct ExpSpan {
@@ -21,7 +20,7 @@ pub enum TokenKind {
     /// A block or EOL comment
     Comment,
     /// An unknown start of a token
-    Error(char),
+    Error(u8),
     /// A token that hit EOF or an invalid character before being terminated
     Incomplete(IncompleteReason),
     /// The statement and item delimiter `;`
@@ -42,6 +41,12 @@ pub enum TokenKind {
     Name,
     /// A bool literal
     Bool(bool),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum NumberLiteral {
+    Int(i32),
+    Float(f32),
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -314,12 +319,13 @@ pub struct Lexer<'a> {
     source: Source<'a>,
 }
 
-fn is_uc_whitespace(c: char) -> bool {
-    matches!(c, ' ' | '\t' | '\r' | '\n')
+fn is_uc_whitespace(c: u8) -> bool {
+    matches!(c, b' ' | b'\t' | b'\r' | b'\n')
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(text: &'a str) -> Self {
+    /// Lex an UnrealScript source file.
+    pub fn new(text: &'a [u8]) -> Self {
         Self {
             source: Source::new(text),
         }
@@ -346,121 +352,123 @@ impl<'a> Lexer<'a> {
             use self::Sigil::*;
             use self::TokenKind::*;
             match (c, c_) {
-                ('+', Some('+')) => {
+                (b'+', Some(b'+')) => {
                     self.source.next();
                     Sig(AddAdd)
                 }
-                ('+', Some('=')) => {
+                (b'+', Some(b'=')) => {
                     self.source.next();
                     Sig(AddAssign)
                 }
-                ('-', Some('=')) => {
+                (b'-', Some(b'=')) => {
                     self.source.next();
                     Sig(SubAssign)
                 }
-                ('-', Some('-')) => {
+                (b'-', Some(b'-')) => {
                     self.source.next();
                     Sig(SubSub)
                 }
-                ('*', Some('=')) => {
+                (b'*', Some(b'=')) => {
                     self.source.next();
                     Sig(MulAssign)
                 }
-                ('/', Some('=')) => {
+                (b'/', Some(b'=')) => {
                     self.source.next();
                     Sig(DivAssign)
                 }
-                ('@', Some('=')) => {
+                (b'@', Some(b'=')) => {
                     self.source.next();
                     Sig(AtAssign)
                 }
-                ('$', Some('=')) => {
+                (b'$', Some(b'=')) => {
                     self.source.next();
                     Sig(DollarAssign)
                 }
-                ('<', Some('<')) => {
+                (b'<', Some(b'<')) => {
                     self.source.next();
                     Sig(LtLt)
                 }
-                ('<', Some('=')) => {
+                (b'<', Some(b'=')) => {
                     self.source.next();
                     Sig(LtEq)
                 }
-                ('>', Some('>')) => {
+                (b'>', Some(b'>')) => {
                     self.source.next();
-                    if let Some('>') = self.source.peek() {
+                    if let Some(b'>') = self.source.peek() {
                         self.source.next();
                         Sig(GtGtGt)
                     } else {
                         Sig(GtGt)
                     }
                 }
-                ('>', Some('=')) => {
+                (b'>', Some(b'=')) => {
                     self.source.next();
                     Sig(GtEq)
                 }
-                ('|', Some('|')) => {
+                (b'|', Some(b'|')) => {
                     self.source.next();
                     Sig(OrOr)
                 }
-                ('&', Some('&')) => {
+                (b'&', Some(b'&')) => {
                     self.source.next();
                     Sig(AndAnd)
                 }
-                ('=', Some('=')) => {
+                (b'=', Some(b'=')) => {
                     self.source.next();
                     Sig(EqEq)
                 }
-                ('!', Some('=')) => {
+                (b'!', Some(b'=')) => {
                     self.source.next();
                     Sig(BangEq)
                 }
-                ('~', Some('=')) => {
+                (b'~', Some(b'=')) => {
                     self.source.next();
                     Sig(TildeEq)
                 }
-                ('^', Some('^')) => {
+                (b'^', Some(b'^')) => {
                     self.source.next();
                     Sig(PowPow)
                 }
-                ('*', Some('*')) => {
+                (b'*', Some(b'*')) => {
                     self.source.next();
                     Sig(MulMul)
                 }
-                ('/', Some('/')) => return Some(self.parse_eol_comment(pos)),
-                ('/', Some('*')) => return Some(self.parse_block_comment(pos)),
-                ('0'..='9', _) | ('.', Some('0'..='9')) => return Some(self.parse_number(pos)),
+                (b'/', Some(b'/')) => return Some(self.parse_eol_comment(pos)),
+                (b'/', Some(b'*')) => return Some(self.parse_block_comment(pos)),
+                (b'0'..=b'9', _) | (b'.', Some(b'0'..=b'9')) => {
+                    return Some(self.parse_number(pos))
+                }
                 (c, _) => match c {
-                    '(' => Sig(LParen),
-                    ')' => Sig(RParen),
-                    '[' => Sig(LBrack),
-                    ']' => Sig(RBrack),
-                    '{' => Sig(LBrace),
-                    '}' => Sig(RBrace),
-                    '.' => Sig(Dot),
-                    ',' => Comma,
-                    ':' => Sig(Colon),
-                    ';' => Semi,
-                    '+' => Sig(Add),
-                    '-' => Sig(Sub),
-                    '*' => Sig(Mul),
-                    '/' => Sig(Div),
-                    '&' => Sig(And),
-                    '|' => Sig(Or),
-                    '@' => Sig(At),
-                    '$' => Sig(Dollar),
-                    '%' => Sig(Mod),
-                    '^' => Sig(Pow),
-                    '<' => Sig(Lt),
-                    '>' => Sig(Gt),
-                    '~' => Sig(Tilde),
-                    '!' => Sig(Bang),
-                    '=' => Sig(Eq),
-                    '?' => Sig(Tern),
-                    '#' => Directive,
-                    'a'..='z' | 'A'..='Z' | '_' => return Some(self.parse_ident(pos)),
-                    '\'' => return Some(self.parse_name(pos)),
-                    '\"' => return Some(self.parse_string(pos)),
+                    b'(' => Sig(LParen),
+                    b')' => Sig(RParen),
+                    b'[' => Sig(LBrack),
+                    b']' => Sig(RBrack),
+                    b'{' => Sig(LBrace),
+                    b'}' => Sig(RBrace),
+                    b'.' => Sig(Dot),
+                    b',' => Comma,
+                    b':' => Sig(Colon),
+                    b';' => Semi,
+                    b'+' => Sig(Add),
+                    b'-' => Sig(Sub),
+                    b'*' => Sig(Mul),
+                    b'/' => Sig(Div),
+                    b'&' => Sig(And),
+                    b'|' => Sig(Or),
+                    b'@' => Sig(At),
+                    b'$' => Sig(Dollar),
+                    b'%' => Sig(Mod),
+                    b'^' => Sig(Pow),
+                    b'<' => Sig(Lt),
+                    b'>' => Sig(Gt),
+                    b'~' => Sig(Tilde),
+                    b'!' => Sig(Bang),
+                    b'=' => Sig(Eq),
+                    b'?' => Sig(Tern),
+                    b'#' => Directive,
+                    b'a'..=b'z' | b'A'..=b'Z' | b'_' => return Some(self.parse_ident(pos)),
+                    b'\'' => return Some(self.parse_name(pos)),
+                    b'\"' => return Some(self.parse_string(pos)),
                     any => {
                         return Some(Token {
                             kind: TokenKind::Error(any),
@@ -487,8 +495,8 @@ impl<'a> Lexer<'a> {
     /// from a variable declaration. Returns Err(Incomplete) if incomplete.
     pub fn ignore_foreign_block(&mut self, opener: TokenKind) -> Result<(), Token> {
         let (recurser, closer) = match opener {
-            TokenKind::Sig(Sigil::LBrace) => (Some('{'), Some('}')),
-            TokenKind::Sig(Sigil::Lt) => (None, Some('>')),
+            TokenKind::Sig(Sigil::LBrace) => (Some(b'{'), Some(b'}')),
+            TokenKind::Sig(Sigil::Lt) => (None, Some(b'>')),
             _ => panic!(
                 "TokenKind {:?} is not a valid opener for foreign block",
                 opener
@@ -529,7 +537,7 @@ impl<'a> Lexer<'a> {
     fn parse_ident(&mut self, first: usize) -> Token {
         while matches!(
             self.source.peek(),
-            Some('a'..='z' | 'A'..='Z' | '_' | '0'..='9')
+            Some(b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'0'..=b'9')
         ) {
             self.source.next();
         }
@@ -538,7 +546,8 @@ impl<'a> Lexer<'a> {
             exp_start: first,
             exp_end: self.source.pos(),
         };
-        let text = &self.source.text[span.exp_start..span.exp_end];
+        let text = str::from_utf8(&self.source.text[span.exp_start..span.exp_end])
+            .expect("just checked for ASCII subset");
 
         let kind = if text.eq_ignore_ascii_case("true") {
             TokenKind::Bool(true)
@@ -556,25 +565,28 @@ impl<'a> Lexer<'a> {
 
     pub fn extract_ident(&self, token: &Token) -> Identifier {
         assert_eq!(token.kind, TokenKind::Sym(Symbol::Identifier));
-        Identifier::from_str(&self.source.text[token.span.exp_start..token.span.exp_end]).unwrap()
+        Identifier::from_str(
+            str::from_utf8(&self.source.text[token.span.exp_start..token.span.exp_end]).unwrap(),
+        )
+        .unwrap()
     }
 
     pub fn extract_string(&self, token: &Token) -> String {
         assert_eq!(token.kind, TokenKind::String);
-        self.source.text[token.span.exp_start..token.span.exp_end].to_owned()
+        let string =
+            String::from_utf8_lossy(&self.source.text[token.span.exp_start..token.span.exp_end]);
+        string.into_owned()
     }
 
     pub fn extract_number(&self, token: &Token) -> Result<NumberLiteral, String> {
+        let text =
+            str::from_utf8(&self.source.text[token.span.exp_start..token.span.exp_end]).unwrap();
         match token.kind {
             TokenKind::Number(NumberSyntax::Int | NumberSyntax::Hex) => Ok(NumberLiteral::Int(
-                self.source.text[token.span.exp_start..token.span.exp_end]
-                    .parse::<i32>()
-                    .map_err(|e| e.to_string())?,
+                text.parse::<i32>().map_err(|e| e.to_string())?,
             )),
             TokenKind::Number(NumberSyntax::Float) => Ok(NumberLiteral::Float(
-                self.source.text[token.span.exp_start..token.span.exp_end]
-                    .parse::<f32>()
-                    .map_err(|e| e.to_string())?,
+                text.parse::<f32>().map_err(|e| e.to_string())?,
             )),
             TokenKind::Number(NumberSyntax::Wild) => Err("unrecognized number format".to_owned()),
             _ => panic!("not a number: {:?}", token),
@@ -582,7 +594,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn parse_eol_comment(&mut self, first: usize) -> Token {
-        while !matches!(self.source.peek(), Some('\r' | '\n') | None) {
+        while !matches!(self.source.peek(), Some(b'\r' | b'\n') | None) {
             self.source.next();
         }
 
@@ -600,8 +612,8 @@ impl<'a> Lexer<'a> {
         let mut level = 1;
         loop {
             match self.source.next() {
-                Some('*') => match self.source.peek() {
-                    Some('/') => {
+                Some(b'*') => match self.source.peek() {
+                    Some(b'/') => {
                         self.source.next();
                         level -= 1;
                         if level == 0 {
@@ -619,8 +631,8 @@ impl<'a> Lexer<'a> {
                         }
                     }
                 },
-                Some('/') => match self.source.peek() {
-                    Some('*') => {
+                Some(b'/') => match self.source.peek() {
+                    Some(b'*') => {
                         self.source.next();
                         level += 1;
                     }
@@ -660,11 +672,11 @@ impl<'a> Lexer<'a> {
     fn parse_number(&mut self, first: usize) -> Token {
         let mut hex = false;
         let mut float = false;
-        while let Some(c @ ('0'..='9' | 'a'..='f' | 'A'..='F' | '.' | 'x' | 'X')) =
+        while let Some(c @ (b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' | b'.' | b'x' | b'X')) =
             self.source.peek()
         {
-            float |= c == '.';
-            hex |= c == 'x' || c == 'X';
+            float |= c == b'.';
+            hex |= c == b'x' || c == b'X';
             self.source.next();
         }
 
@@ -685,14 +697,14 @@ impl<'a> Lexer<'a> {
     }
 
     fn parse_name(&mut self, first: usize) -> Token {
-        while let Some('0'..='9' | 'a'..='z' | 'A'..='Z' | '_' | '-' | '.' | ' ') =
+        while let Some(b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'-' | b'.' | b' ') =
             self.source.peek()
         {
             self.source.next();
         }
 
         let kind = match self.source.peek() {
-            Some('\'') => {
+            Some(b'\'') => {
                 self.source.next();
                 TokenKind::Name
             }
@@ -711,7 +723,7 @@ impl<'a> Lexer<'a> {
     fn parse_string(&mut self, first: usize) -> Token {
         loop {
             match self.source.peek() {
-                Some('"') => {
+                Some(b'"') => {
                     self.source.next();
                     return Token {
                         kind: TokenKind::String,
@@ -721,10 +733,10 @@ impl<'a> Lexer<'a> {
                         },
                     };
                 }
-                Some('\\') => {
+                Some(b'\\') => {
                     self.source.next();
                     match self.source.peek() {
-                        Some('\r' | '\n') | None => {
+                        Some(b'\r' | b'\n') | None => {
                             return Token {
                                 kind: TokenKind::Incomplete(IncompleteReason::Eol),
                                 span: ExpSpan {
@@ -757,31 +769,31 @@ impl<'a> Lexer<'a> {
 
 #[derive(Clone, Debug)]
 struct Source<'a> {
-    text: &'a str,
-    chars: std::str::Chars<'a>,
+    text: &'a [u8],
+    bytes: std::slice::Iter<'a, u8>,
 }
 
 impl<'a> Source<'a> {
-    fn new(text: &'a str) -> Self {
+    fn new(text: &'a [u8]) -> Self {
         Source {
             text,
-            chars: text.chars(),
+            bytes: text.iter(),
         }
     }
 
     fn pos(&self) -> usize {
-        self.text.len() - self.chars.as_str().len()
+        self.text.len() - self.bytes.as_slice().len()
     }
 
-    fn peek(&self) -> Option<char> {
-        self.chars.clone().next()
+    fn peek(&self) -> Option<u8> {
+        self.bytes.clone().next().copied()
     }
 }
 
 impl<'a> Iterator for Source<'a> {
-    type Item = char;
+    type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.chars.next()
+        self.bytes.next().copied()
     }
 }

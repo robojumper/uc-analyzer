@@ -1,6 +1,7 @@
-use std::{collections::HashMap, fmt::Display, hash::Hash, str::FromStr};
+use std::{collections::HashMap, hash::Hash};
 
 use bitflags::bitflags;
+use uc_name::Identifier;
 
 pub mod pretty;
 
@@ -102,34 +103,6 @@ pub enum Values<T> {
 pub struct Modifiers<F: Flags, T> {
     pub flags: F,
     pub followups: HashMap<F, Option<Values<T>>>,
-}
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Identifier(unicase::Ascii<String>);
-
-impl FromStr for Identifier {
-    type Err = <unicase::Ascii<String> as FromStr>::Err;
-    fn from_str(t: &str) -> Result<Self, Self::Err> {
-        Ok(Self(unicase::Ascii::from_str(t)?))
-    }
-}
-
-impl Display for Identifier {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(self.0.as_str(), f)
-    }
-}
-
-impl std::fmt::Debug for Identifier {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(self.0.as_str(), f)
-    }
-}
-
-impl AsRef<str> for Identifier {
-    fn as_ref(&self) -> &str {
-        self.0.as_ref()
-    }
 }
 
 #[derive(Debug)]
@@ -279,7 +252,7 @@ pub enum Statement<T> {
         init: Box<Statement<T>>,
         cond: Expr<T>,
         retry: Box<Statement<T>>,
-        run: Option<Block<T>>,
+        run: Block<T>,
     },
     ForeachStatement {
         source: Expr<T>,

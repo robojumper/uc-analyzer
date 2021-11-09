@@ -7,12 +7,12 @@ mod item;
 mod modifiers;
 mod stmt;
 
-use uc_def::{Hir, Identifier, Ty};
+use uc_def::{Hir, Ty};
+use uc_name::Identifier;
 
 use crate::{
-    lexer::{Lexer, Symbol, Token, TokenKind as Tk},
+    lexer::{Lexer, NumberLiteral, Symbol, Token, TokenKind as Tk},
     parser::item::TopLevelItem,
-    NumberLiteral,
 };
 
 #[macro_export]
@@ -103,10 +103,15 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn expect_number(&mut self) -> Result<NumberLiteral, String> {
+    fn expect_nonnegative_integer(&mut self) -> Result<i32, String> {
         let tok = self.next().ok_or_else(|| "eof".to_owned())?;
         if let Tk::Number(_) = tok.kind {
-            self.lex.extract_number(&tok)
+            let num = self.lex.extract_number(&tok)?;
+            match num {
+                NumberLiteral::Int(i @ 0..) => Ok(i),
+                NumberLiteral::Int(_) => Err("integer is negative".to_owned()),
+                NumberLiteral::Float(_) => Err("not an integer".to_owned()),
+            }
         } else {
             Err(format!("expected number, got {:?}", tok.kind))
         }
@@ -170,6 +175,15 @@ impl<'a> Parser<'a> {
         match &ty_tok.kind {
             kw!(Array) => {
                 self.expect(sig!(Lt))?;
+
+                {
+                    // A grand total of 3 files have `// array<const native transient pointer>`,
+                    // which we just eat here:
+                    self.eat(kw!(Const));
+                    self.eat(kw!(Native));
+                    self.eat(kw!(Transient));
+                }
+
                 let ty = self.parse_ty(None)?;
                 self.expect(sig!(Gt))?;
                 Ok(Ty::Array(Box::new(ty)))

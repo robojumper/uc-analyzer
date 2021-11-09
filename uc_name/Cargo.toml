@@ -1,9 +1,9 @@
 [package]
-name = "uc_files"
+name = "uc_name"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-codespan-reporting = "0.11.1"
+unicase = "2.6.0"

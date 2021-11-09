@@ -2,9 +2,8 @@ use std::{collections::HashMap, hash::Hash};
 
 use bitflags::bitflags;
 use once_cell::sync::Lazy;
-use uc_def::{
-    ArgFlags, ClassFlags, Flags, FuncFlags, Identifier, Modifiers, StructFlags, Values, VarFlags,
-};
+use uc_def::{ArgFlags, ClassFlags, Flags, FuncFlags, Modifiers, StructFlags, Values, VarFlags};
+use uc_name::Identifier;
 
 use crate::{
     lexer::{Keyword as Kw, Symbol, Token, TokenKind as Tk},
@@ -130,7 +129,7 @@ impl Parser<'_> {
                                     .parse_list(|p| p.expect_ident())
                                     .map(|l| Some(Values::Idents(l))),
                                 DeclFollowups::NumberModifiers(_) => self
-                                    .parse_list(|p| p.expect_number()?.expect_int())
+                                    .parse_list(|p| p.expect_nonnegative_integer())
                                     .map(|l| Some(Values::Nums(l))),
                                 _ => unreachable!("checked in outer match"),
                             }

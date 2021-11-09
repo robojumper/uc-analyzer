@@ -1,8 +1,8 @@
 use uc_def::{
     ClassDef, ClassFlags, ClassHeader, ConstDef, ConstVal, DimCount, EnumDef, FuncArg, FuncBody,
-    FuncDef, FuncName, FuncSig, Identifier, Local, Op, StateDef, Statement, StructDef, Ty, VarDef,
-    VarInstance,
+    FuncDef, FuncName, FuncSig, Local, Op, StateDef, Statement, StructDef, Ty, VarDef, VarInstance,
 };
+use uc_name::Identifier;
 
 use super::Parser;
 use crate::{
@@ -142,7 +142,7 @@ impl Parser<'_> {
             let count = if self.eat(sig!(LBrack)) {
                 match self.peek_any()?.kind {
                     Tk::Number(_) => {
-                        let cnt = self.expect_number()?.expect_int()?;
+                        let cnt = self.expect_nonnegative_integer()?;
                         self.expect(sig!(RBrack))?;
                         DimCount::Number(cnt as u32)
                     }
@@ -313,7 +313,7 @@ impl Parser<'_> {
             let count = if self.eat(sig!(LBrack)) {
                 match self.peek_any()?.kind {
                     Tk::Number(_) => {
-                        let cnt = self.expect_number()?.expect_int()?;
+                        let cnt = self.expect_nonnegative_integer()?;
                         self.expect(sig!(RBrack))?;
                         DimCount::Number(cnt as u32)
                     }
@@ -359,14 +359,14 @@ impl Parser<'_> {
             None
         } else if self.eat(sig!(LBrace)) {
             let locals = self.parse_locals()?;
-            // FIXME: Revert this and handle the one case with a patch
+            // FIXME: Revert this and handle the one case with a patch?
             let mut consts = vec![];
             while self.peek_any()?.kind == kw!(Const) {
                 consts.push(self.parse_const()?);
             }
             let statements = self.parse_statements();
             self.expect(sig!(RBrace))?;
-            while self.eat(Tk::Semi) {} // FIXME: Revert this and handle the one case with a patch
+            while self.eat(Tk::Semi) {} // FIXME: Where is this hit?
             Some(FuncBody {
                 locals,
                 consts,
@@ -387,12 +387,12 @@ impl Parser<'_> {
 
     fn parse_locals(&mut self) -> Result<Vec<Local<Identifier>>, String> {
         let mut locals = vec![];
-        while self.eat(Tk::Semi) {} // FIXME: Revert this and handle existing cases with patches
+        while self.eat(Tk::Semi) {} // FIXME: Where is this hit?
         while self.eat(kw!(Local)) {
             match self.parse_local() {
                 Ok(l) => {
                     locals.push(l);
-                    while self.eat(Tk::Semi) {}
+                    while self.eat(Tk::Semi) {} // FIXME: Where is this hit?
                 }
                 Err(e) => self.errs.push(e),
             }
@@ -408,7 +408,7 @@ impl Parser<'_> {
             let count = if self.eat(sig!(LBrack)) {
                 match self.peek_any()?.kind {
                     Tk::Number(_) => {
-                        let cnt = self.expect_number()?.expect_int()?;
+                        let cnt = self.expect_nonnegative_integer()?;
                         self.expect(sig!(RBrack))?;
                         DimCount::Number(cnt as u32)
                     }

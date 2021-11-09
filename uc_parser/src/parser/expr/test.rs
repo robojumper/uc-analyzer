@@ -49,7 +49,7 @@ fn new_op() {
 }
 
 fn assert_parse_pretty(text: &str, pretty: &str) {
-    let lex = Lexer::new(text);
+    let lex = Lexer::new(text.as_bytes());
     let mut p = Parser::new(lex);
     let expr = p.parse_base_expression().unwrap();
     let mut out = vec![];

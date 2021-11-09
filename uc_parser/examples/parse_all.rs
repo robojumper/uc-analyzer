@@ -1,7 +1,7 @@
 use core::panic;
-use std::fs::read_to_string;
-use std::io;
+use std::fs;
 
+use uc_parser::fix_defects;
 use uc_parser::{lexer, parser};
 use walkdir::{DirEntry, WalkDir};
 
@@ -15,55 +15,50 @@ fn is_uc(entry: &DirEntry) -> bool {
 
 fn main() {
     let dir = std::env::args().nth(1).expect("missing directory");
+    let preprocessed = if dir.contains("PreProcessedFiles") {
+        true
+    } else if dir.contains("Development") {
+        false
+    } else {
+        panic!("Don't know if preprocessed or not.");
+    };
+
     let walker = WalkDir::new(dir).into_iter();
     for entry in walker {
         let entry = match entry {
             Ok(d) => d,
             Err(e) => {
-                println!("{:?}", e);
+                eprintln!("{:?}", e);
                 continue;
             }
         };
-
-        eprintln!("{}", entry.path().display());
 
         if !is_uc(&entry) {
             continue;
         }
 
         let name = entry.file_name().to_str().unwrap();
-        let exclusions = [
-            // defaultproperties { } and_then_something_here
-            "UISimpleCommodityScreen",
-            "UIUFOAttack",
-            // array<const native transient pointer>
-            "NxForceField.",
-            "NxForceFieldComponent.",
-            "NxGenericForceFieldBrush.",
-        ];
-        if exclusions.iter().any(|e| name.contains(e)) {
-            continue;
-        }
 
-        let contents = match read_to_string(entry.path()) {
+        let contents = match fs::read(entry.path()) {
             Ok(c) => c,
-            Err(e) if e.kind() == io::ErrorKind::InvalidData => {
-                eprintln!("{:?}: Invalid UTF-8 - {:?}", entry.path(), e);
-                continue;
-            }
             Err(e) => {
                 eprintln!("{:?}: I/O Error {:?}", entry.path(), e);
                 continue;
             }
         };
 
-        if contents.contains('`') {
+        if !preprocessed && contents.contains(&b'`') {
             continue; // will be expanded
         }
 
-        let lexer = lexer::Lexer::new(&contents);
+        let pre_fixed = fix_defects(name, &contents).expect("aaaaaaah");
+
+        eprintln!("{}", name);
+
+        let lexer = lexer::Lexer::new(&pre_fixed);
         let (hir, errs) = parser::parse(lexer);
         if !errs.is_empty() {
+            dbg!(&name);
             dbg!(&errs);
             panic!();
         }

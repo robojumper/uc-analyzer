@@ -2,7 +2,8 @@
 //! See https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
 //! for an introduction to Pratt parsing.
 
-use uc_def::{Expr, Identifier, Op, Ty};
+use uc_def::{Expr, Op, Ty};
+use uc_name::Identifier;
 
 use crate::{
     kw,

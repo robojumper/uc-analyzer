@@ -36,11 +36,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 self.w.write_all(b"; ")?;
                 self.format_statement(retry)?;
                 self.w.write_all(b")")?;
-                if let Some(run) = run {
-                    self.format_block(run)?;
-                } else {
-                    self.w.write_all(b";\n")?;
-                }
+                self.format_block(run)?;
             }
             Statement::ForeachStatement { source, run } => {
                 self.w.write_all(b"foreach ")?;
