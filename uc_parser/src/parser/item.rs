@@ -110,7 +110,7 @@ impl Parser<'_> {
         let name = self.expect_ident()?;
         self.expect(sig!(Eq))?;
         let val = self.parse_const_val()?;
-        let end = self.expect(Tk::Semi)?;
+        self.expect(Tk::Semi)?;
 
         Ok(ConstDef {
             name,
@@ -160,7 +160,7 @@ impl Parser<'_> {
                         self.expect(sig!(RBrack))?;
                         DimCount::Complex(parts)
                     }
-                    kind => {
+                    _ => {
                         return Err(
                             self.fmt_err("expected number or identifier, got", Some(peeked))
                         );
@@ -234,7 +234,7 @@ impl Parser<'_> {
         }
 
         if expect_semi {
-            Some(self.expect(Tk::Semi)?);
+            self.expect(Tk::Semi)?;
         }
 
         Ok(EnumDef {
@@ -454,7 +454,7 @@ impl Parser<'_> {
                         self.expect(sig!(RBrack))?;
                         DimCount::Complex(parts)
                     }
-                    kind => {
+                    _ => {
                         return Err(self.fmt_err("expected number or identifier", Some(peeked)));
                     }
                 }

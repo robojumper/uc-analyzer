@@ -1,11 +1,11 @@
 use std::str::{self, FromStr};
 
-use uc_def::{ExpSpan, Op};
+use uc_def::{Op, Span};
 use uc_name::Identifier;
 
 #[derive(Clone, Debug)]
 pub struct Token {
-    pub span: ExpSpan,
+    pub span: Span,
     pub kind: TokenKind,
 }
 
@@ -466,9 +466,9 @@ impl<'a> Lexer<'a> {
                     any => {
                         return Some(Token {
                             kind: TokenKind::Error(any),
-                            span: ExpSpan {
-                                exp_start: pos,
-                                exp_end: self.source.pos(),
+                            span: Span {
+                                start: pos,
+                                end: self.source.pos(),
                             },
                         })
                     }
@@ -478,9 +478,9 @@ impl<'a> Lexer<'a> {
 
         Some(Token {
             kind,
-            span: ExpSpan {
-                exp_start: pos,
-                exp_end: self.source.pos(),
+            span: Span {
+                start: pos,
+                end: self.source.pos(),
             },
         })
     }
@@ -509,9 +509,9 @@ impl<'a> Lexer<'a> {
                 next
             } else {
                 return Err(Token {
-                    span: ExpSpan {
-                        exp_start: first,
-                        exp_end: self.source.pos(),
+                    span: Span {
+                        start: first,
+                        end: self.source.pos(),
                     },
                     kind: TokenKind::Incomplete(IncompleteReason::Eol),
                 });
@@ -536,11 +536,11 @@ impl<'a> Lexer<'a> {
             self.source.next();
         }
 
-        let span = ExpSpan {
-            exp_start: first,
-            exp_end: self.source.pos(),
+        let span = Span {
+            start: first,
+            end: self.source.pos(),
         };
-        let text = str::from_utf8(&self.source.text[span.exp_start..span.exp_end])
+        let text = str::from_utf8(&self.source.text[span.start..span.end])
             .expect("just checked for ASCII subset");
 
         let kind = if text.eq_ignore_ascii_case("true") {
@@ -560,21 +560,19 @@ impl<'a> Lexer<'a> {
     pub fn extract_ident(&self, token: &Token) -> Identifier {
         assert_eq!(token.kind, TokenKind::Sym(Symbol::Identifier));
         Identifier::from_str(
-            str::from_utf8(&self.source.text[token.span.exp_start..token.span.exp_end]).unwrap(),
+            str::from_utf8(&self.source.text[token.span.start..token.span.end]).unwrap(),
         )
         .unwrap()
     }
 
     pub fn extract_string(&self, token: &Token) -> String {
         assert_eq!(token.kind, TokenKind::String);
-        let string =
-            String::from_utf8_lossy(&self.source.text[token.span.exp_start..token.span.exp_end]);
+        let string = String::from_utf8_lossy(&self.source.text[token.span.start..token.span.end]);
         string.into_owned()
     }
 
     pub fn extract_number(&self, token: &Token) -> Result<NumberLiteral, String> {
-        let text =
-            str::from_utf8(&self.source.text[token.span.exp_start..token.span.exp_end]).unwrap();
+        let text = str::from_utf8(&self.source.text[token.span.start..token.span.end]).unwrap();
         match token.kind {
             TokenKind::Number(NumberSyntax::Int | NumberSyntax::Hex) => Ok(NumberLiteral::Int(
                 text.parse::<i32>().map_err(|e| e.to_string())?,
@@ -592,9 +590,9 @@ impl<'a> Lexer<'a> {
             self.source.next();
         }
 
-        let span = ExpSpan {
-            exp_start: first,
-            exp_end: self.source.pos(),
+        let span = Span {
+            start: first,
+            end: self.source.pos(),
         };
         Token {
             kind: TokenKind::Comment,
@@ -618,9 +616,9 @@ impl<'a> Lexer<'a> {
                     None => {
                         return Token {
                             kind: TokenKind::Incomplete(IncompleteReason::Eol),
-                            span: ExpSpan {
-                                exp_start: first,
-                                exp_end: self.source.pos(),
+                            span: Span {
+                                start: first,
+                                end: self.source.pos(),
                             },
                         }
                     }
@@ -634,9 +632,9 @@ impl<'a> Lexer<'a> {
                     None => {
                         return Token {
                             kind: TokenKind::Incomplete(IncompleteReason::Eol),
-                            span: ExpSpan {
-                                exp_start: first,
-                                exp_end: self.source.pos(),
+                            span: Span {
+                                start: first,
+                                end: self.source.pos(),
                             },
                         }
                     }
@@ -645,9 +643,9 @@ impl<'a> Lexer<'a> {
                 None => {
                     return Token {
                         kind: TokenKind::Incomplete(IncompleteReason::Eol),
-                        span: ExpSpan {
-                            exp_start: first,
-                            exp_end: self.source.pos(),
+                        span: Span {
+                            start: first,
+                            end: self.source.pos(),
                         },
                     }
                 }
@@ -656,9 +654,9 @@ impl<'a> Lexer<'a> {
 
         Token {
             kind: TokenKind::Comment,
-            span: ExpSpan {
-                exp_start: first,
-                exp_end: self.source.pos(),
+            span: Span {
+                start: first,
+                end: self.source.pos(),
             },
         }
     }
@@ -674,9 +672,9 @@ impl<'a> Lexer<'a> {
             self.source.next();
         }
 
-        let span = ExpSpan {
-            exp_start: first,
-            exp_end: self.source.pos(),
+        let span = Span {
+            start: first,
+            end: self.source.pos(),
         };
         let num_kind = match (float, hex) {
             (true, true) => NumberSyntax::Wild,
@@ -707,9 +705,9 @@ impl<'a> Lexer<'a> {
         };
         Token {
             kind,
-            span: ExpSpan {
-                exp_start: first,
-                exp_end: self.source.pos(),
+            span: Span {
+                start: first,
+                end: self.source.pos(),
             },
         }
     }
@@ -721,9 +719,9 @@ impl<'a> Lexer<'a> {
                     self.source.next();
                     return Token {
                         kind: TokenKind::String,
-                        span: ExpSpan {
-                            exp_start: first,
-                            exp_end: self.source.pos(),
+                        span: Span {
+                            start: first,
+                            end: self.source.pos(),
                         },
                     };
                 }
@@ -733,9 +731,9 @@ impl<'a> Lexer<'a> {
                         Some(b'\r' | b'\n') | None => {
                             return Token {
                                 kind: TokenKind::Incomplete(IncompleteReason::Eol),
-                                span: ExpSpan {
-                                    exp_start: first,
-                                    exp_end: self.source.pos(),
+                                span: Span {
+                                    start: first,
+                                    end: self.source.pos(),
                                 },
                             }
                         }
@@ -750,9 +748,9 @@ impl<'a> Lexer<'a> {
                 None => {
                     return Token {
                         kind: TokenKind::Incomplete(IncompleteReason::Eol),
-                        span: ExpSpan {
-                            exp_start: first,
-                            exp_end: self.source.pos(),
+                        span: Span {
+                            start: first,
+                            end: self.source.pos(),
                         },
                     }
                 }

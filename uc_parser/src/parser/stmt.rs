@@ -1,6 +1,6 @@
 use std::vec;
 
-use uc_def::{Block, Case, CaseClause, ExpSpan, Statement, StatementKind};
+use uc_def::{Block, Case, CaseClause, Span, Statement, StatementKind};
 use uc_name::Identifier;
 
 use crate::{
@@ -32,7 +32,7 @@ fn stmt_wants_semi<I>(stmt: &StatementKind<I>) -> bool {
 impl Parser<'_> {
     fn parse_block_or_stmt(
         &mut self,
-        ctx: (&'static str, ExpSpan),
+        ctx: (&'static str, Span),
     ) -> Result<Block<Identifier>, ParseError> {
         if self.eat(Tk::Semi) {
             Ok(Block { stmts: vec![] })
@@ -48,7 +48,7 @@ impl Parser<'_> {
 
     fn expect_one_statement(
         &mut self,
-        ctx: (&'static str, ExpSpan),
+        ctx: (&'static str, Span),
         expect_semi: bool,
     ) -> Result<Statement<Identifier>, ParseError> {
         let stmt = self.parse_one_stmt()?.ok_or_else(|| {

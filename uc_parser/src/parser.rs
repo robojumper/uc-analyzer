@@ -7,7 +7,7 @@ mod item;
 mod modifiers;
 mod stmt;
 
-use uc_def::{ExpSpan, Hir, Ty};
+use uc_def::{Hir, Span, Ty};
 use uc_name::Identifier;
 
 use crate::{
@@ -43,10 +43,10 @@ struct SpanMarker {
 }
 
 impl SpanMarker {
-    fn complete(self, parser: &Parser<'_>) -> ExpSpan {
-        ExpSpan {
-            exp_start: self.pos.unwrap(),
-            exp_end: parser.last_end.unwrap(),
+    fn complete(self, parser: &Parser<'_>) -> Span {
+        Span {
+            start: self.pos.unwrap(),
+            end: parser.last_end.unwrap(),
         }
     }
 }
@@ -63,7 +63,7 @@ pub struct ParseErrorInner {
     /// Token that caused us to realize there's an error.
     bad_token: Option<Token>,
     /// Reason this token is bad, if any.
-    ctx_token: Option<(String, ExpSpan)>,
+    ctx_token: Option<(String, Span)>,
     /// Expected kind
     expected_token: Option<Tk>,
 }
@@ -84,7 +84,7 @@ impl<'a> Parser<'a> {
                     kind: Tk::Comment, ..
                 } => {}
                 x => {
-                    self.last_end = Some(x.span.exp_end);
+                    self.last_end = Some(x.span.end);
                     return Some(x);
                 }
             }
@@ -104,7 +104,7 @@ impl<'a> Parser<'a> {
 
     fn marker(&self) -> SpanMarker {
         SpanMarker {
-            pos: self.peek().map(|t| t.span.exp_start),
+            pos: self.peek().map(|t| t.span.start),
         }
     }
 
@@ -279,14 +279,14 @@ impl<'a> Parser<'a> {
                     Ok(Ty::Simple(self.sym_to_ident(&ty_tok)))
                 }
             }
-            _ => Err(self.fmt_err("expected type after modifiers, got {:?}", Some(ty_tok))),
+            _ => Err(self.fmt_err("expected type after modifiers", Some(ty_tok))),
         }
     }
 
     fn ignore_foreign_block(&mut self, opener: Tk) -> Result<(), ParseError> {
         self.lex
             .ignore_foreign_block(opener)
-            .map_err(|e| self.fmt_err("Unclosed foreign block", None))
+            .map_err(|e| self.fmt_err("Unclosed foreign block", Some(e)))
     }
 }
 
