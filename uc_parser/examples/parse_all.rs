@@ -24,6 +24,7 @@ fn main() {
     };
 
     let walker = WalkDir::new(dir).into_iter();
+    let mut hirs = vec![];
     for entry in walker {
         let entry = match entry {
             Ok(d) => d,
@@ -67,5 +68,9 @@ fn main() {
         let mut out = out.lock();
         uc_def::pretty::format_hir(&hir, &mut out, uc_def::pretty::IdentifierFormat).unwrap();
         */
+        hirs.push(hir);
     }
+    let mut buffer = String::new();
+    let stdin = std::io::stdin(); // We get `Stdin` here.
+    stdin.read_line(&mut buffer).unwrap();
 }
