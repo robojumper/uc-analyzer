@@ -7,7 +7,7 @@ mod item;
 mod modifiers;
 mod stmt;
 
-use uc_def::{Hir, Ty};
+use uc_def::{ExpSpan, Hir, Ty};
 use uc_name::Identifier;
 
 use crate::{
@@ -32,12 +32,49 @@ macro_rules! sig {
 #[derive(Clone, Debug)]
 struct Parser<'a> {
     lex: Lexer<'a>,
-    errs: Vec<String>,
+    errs: Vec<ParseError>,
+    last_end: Option<usize>,
+}
+
+// pretty much stolen from rust-analyzer
+#[derive(Debug)]
+struct SpanMarker {
+    pos: Option<usize>,
+}
+
+impl SpanMarker {
+    fn complete(self, parser: &Parser<'_>) -> ExpSpan {
+        ExpSpan {
+            exp_start: self.pos.unwrap(),
+            exp_end: parser.last_end.unwrap(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ParseError {
+    err: Box<ParseErrorInner>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ParseErrorInner {
+    /// Message.
+    error_message: &'static str,
+    /// Token that caused us to realize there's an error.
+    bad_token: Option<Token>,
+    /// Reason this token is bad, if any.
+    ctx_token: Option<(String, ExpSpan)>,
+    /// Expected kind
+    expected_token: Option<Tk>,
 }
 
 impl<'a> Parser<'a> {
     fn new(lex: Lexer<'a>) -> Self {
-        Self { lex, errs: vec![] }
+        Self {
+            lex,
+            errs: vec![],
+            last_end: None,
+        }
     }
 
     fn next(&mut self) -> Option<Token> {
@@ -46,7 +83,10 @@ impl<'a> Parser<'a> {
                 Token {
                     kind: Tk::Comment, ..
                 } => {}
-                x => return Some(x),
+                x => {
+                    self.last_end = Some(x.span.exp_end);
+                    return Some(x);
+                }
             }
         }
     }
@@ -62,12 +102,20 @@ impl<'a> Parser<'a> {
         s.next()
     }
 
-    fn peek_any(&self) -> Result<Token, String> {
-        self.peek().ok_or_else(|| "eof".to_owned())
+    fn marker(&self) -> SpanMarker {
+        SpanMarker {
+            pos: self.peek().map(|t| t.span.exp_start),
+        }
     }
 
-    fn next_any(&mut self) -> Result<Token, String> {
-        self.next().ok_or_else(|| "eof".to_owned())
+    fn peek_any(&self) -> Result<Token, ParseError> {
+        self.peek()
+            .ok_or_else(|| self.fmt_err("Unexpected end of file", None))
+    }
+
+    fn next_any(&mut self) -> Result<Token, ParseError> {
+        self.next()
+            .ok_or_else(|| self.fmt_err("Unexpected end of file", None))
     }
 
     fn sym_to_ident(&self, tok: &Token) -> Identifier {
@@ -78,47 +126,54 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn expect(&mut self, kind: Tk) -> Result<Token, String> {
-        let tok = self.next().ok_or_else(|| "eof".to_owned())?;
+    fn expect(&mut self, kind: Tk) -> Result<Token, ParseError> {
+        let tok = self.next_any()?;
         if tok.kind == kind {
             Ok(tok)
-        } else if tok.kind == Tk::Sym(Symbol::Identifier) {
-            Err(format!(
-                "expected {:?}, got {:?} ({})",
-                kind,
-                tok,
-                self.lex.extract_ident(&tok)
-            ))
         } else {
-            Err(format!("expected {:?}, got {:?}", kind, tok))
+            let mut err = self.fmt_err("Unexpected token", Some(tok));
+            err.err.expected_token = Some(kind);
+            Err(err)
         }
     }
 
-    fn expect_ident(&mut self) -> Result<Identifier, String> {
-        let tok = self.next().ok_or_else(|| "eof".to_owned())?;
+    fn expect_ident(&mut self) -> Result<Identifier, ParseError> {
+        let tok = self.next_any()?;
         if let Tk::Sym(_) = tok.kind {
             Ok(self.sym_to_ident(&tok))
         } else {
-            Err(format!("expected symbol, got {:?}", tok))
+            Err(self.fmt_err("Unexpected token, expected identifier", Some(tok)))
         }
     }
 
-    fn expect_nonnegative_integer(&mut self) -> Result<i32, String> {
-        let tok = self.next().ok_or_else(|| "eof".to_owned())?;
+    fn expect_nonnegative_integer(&mut self) -> Result<i32, ParseError> {
+        let tok = self.next_any()?;
         if let Tk::Number(_) = tok.kind {
-            let num = self.lex.extract_number(&tok)?;
+            let num = self
+                .lex
+                .extract_number(&tok)
+                .map_err(|_| self.fmt_err("Malformed integer", Some(tok.clone())))?;
             match num {
                 NumberLiteral::Int(i @ 0..) => Ok(i),
-                NumberLiteral::Int(_) => Err("integer is negative".to_owned()),
-                NumberLiteral::Float(_) => Err("not an integer".to_owned()),
+                NumberLiteral::Int(_) => Err(self.fmt_err("integer is negative", Some(tok))),
+                NumberLiteral::Float(_) => {
+                    Err(self.fmt_err("expected int but got float", Some(tok)))
+                }
             }
         } else {
-            Err(format!("expected number, got {:?}", tok.kind))
+            Err(self.fmt_err("Expected number", Some(tok)))
         }
     }
 
-    fn fmt_unexpected(&self, token: &Token) -> String {
-        format!("unexpected token: {:?}", token)
+    fn fmt_err(&self, msg: &'static str, token: Option<Token>) -> ParseError {
+        ParseError {
+            err: Box::new(ParseErrorInner {
+                error_message: msg,
+                bad_token: token,
+                ctx_token: None,
+                expected_token: None,
+            }),
+        }
     }
 
     pub fn eat(&mut self, kind: Tk) -> bool {
@@ -143,7 +198,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_maybe_qualified_path(&mut self) -> Result<Vec<Identifier>, String> {
+    fn parse_maybe_qualified_path(&mut self) -> Result<Vec<Identifier>, ParseError> {
         let mut parts = vec![self.expect_ident()?];
         loop {
             let tok = self.peek_any()?;
@@ -159,14 +214,14 @@ impl<'a> Parser<'a> {
         Ok(parts)
     }
 
-    fn parse_angle_type(&mut self) -> Result<Vec<Identifier>, String> {
+    fn parse_angle_type(&mut self) -> Result<Vec<Identifier>, ParseError> {
         self.expect(sig!(Lt))?;
         let parts = self.parse_maybe_qualified_path()?;
         self.expect(sig!(Gt))?;
         Ok(parts)
     }
 
-    fn parse_ty(&mut self, first_tok: Option<Token>) -> Result<Ty<Identifier>, String> {
+    fn parse_ty(&mut self, first_tok: Option<Token>) -> Result<Ty<Identifier>, ParseError> {
         let ty_tok = match first_tok {
             Some(t) => t,
             _ => self.next_any()?,
@@ -224,18 +279,18 @@ impl<'a> Parser<'a> {
                     Ok(Ty::Simple(self.sym_to_ident(&ty_tok)))
                 }
             }
-            _ => Err(format!("expected type after modifiers, got {:?}", ty_tok)),
+            _ => Err(self.fmt_err("expected type after modifiers, got {:?}", Some(ty_tok))),
         }
     }
 
-    fn ignore_foreign_block(&mut self, opener: Tk) -> Result<(), String> {
+    fn ignore_foreign_block(&mut self, opener: Tk) -> Result<(), ParseError> {
         self.lex
             .ignore_foreign_block(opener)
-            .map_err(|e| format!("{:?}", e))
+            .map_err(|e| self.fmt_err("Unclosed foreign block", None))
     }
 }
 
-pub fn parse(lex: Lexer) -> (Hir<Identifier>, Vec<String>) {
+pub fn parse(lex: Lexer) -> (Hir<Identifier>, Vec<ParseError>) {
     let mut parser = Parser::new(lex);
     let header = parser.parse_class_def().unwrap();
     let items = parser.parse_items();

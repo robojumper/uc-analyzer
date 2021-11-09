@@ -10,7 +10,7 @@ use crate::{
     sig,
 };
 
-use super::Parser;
+use super::{ParseError, Parser};
 
 bitflags! {
     pub struct ModifierCount: u32 {
@@ -73,10 +73,10 @@ impl<F: Flags> ModifierConfig<F> {
 }
 
 impl Parser<'_> {
-    fn parse_list<T, F: Fn(&mut Parser) -> Result<T, String>>(
+    fn parse_list<T, F: Fn(&mut Parser) -> Result<T, ParseError>>(
         &mut self,
         f: F,
-    ) -> Result<Box<[T]>, String> {
+    ) -> Result<Box<[T]>, ParseError> {
         let mut list = vec![];
         self.next();
         let mut comma = false;
@@ -95,14 +95,15 @@ impl Parser<'_> {
     pub fn parse_followups(
         &mut self,
         followups: &DeclFollowups,
-    ) -> Result<Option<Values<Identifier>>, String> {
+    ) -> Result<Option<Values<Identifier>>, ParseError> {
         match followups {
             DeclFollowups::Nothing => Ok(None),
             DeclFollowups::Bool => {
                 self.expect(sig!(LParen))?;
-                match self.next_any()?.kind {
+                let next = self.next_any()?;
+                match next.kind {
                     Tk::Bool(_) => {}
-                    _ => return Err("Expected bool".to_owned()),
+                    _ => return Err(self.fmt_err("Expected boolean", Some(next))),
                 }
                 self.expect(sig!(RParen))?;
                 Ok(None)
@@ -141,7 +142,7 @@ impl Parser<'_> {
                         if mods.contains(ModifierCount::ALLOW_NONE) {
                             Ok(Some(Values::Absent))
                         } else {
-                            Err(format!("missing followups: {:?}, got {:?}", followups, t))
+                            Err(self.fmt_err("Expected modifiers", t))
                         }
                     }
                 }
@@ -152,7 +153,7 @@ impl Parser<'_> {
     pub fn parse_kws<F: Flags>(
         &mut self,
         mods: &ModifierConfig<F>,
-    ) -> Result<Modifiers<F, Identifier>, String> {
+    ) -> Result<Modifiers<F, Identifier>, ParseError> {
         let mut flags = 0u32;
         let mut followups = HashMap::new();
         loop {

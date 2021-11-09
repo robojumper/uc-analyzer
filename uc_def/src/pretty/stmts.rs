@@ -1,13 +1,13 @@
 use std::io;
 
-use crate::{Block, Expr, Literal, Op, Statement};
+use crate::{Block, Expr, Literal, Op, Statement, StatementKind};
 
 use super::{PPrinter, RefLookup};
 
 impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
     pub fn format_statement(&mut self, stmt: &Statement<R::From>) -> io::Result<()> {
-        match stmt {
-            Statement::IfStatement {
+        match &stmt.kind {
+            StatementKind::IfStatement {
                 cond,
                 then,
                 or_else,
@@ -23,7 +23,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                     self.w.write_all(b"\n")?;
                 }
             }
-            Statement::ForStatement {
+            StatementKind::ForStatement {
                 init,
                 cond,
                 retry,
@@ -38,19 +38,19 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 self.w.write_all(b")")?;
                 self.format_block(run)?;
             }
-            Statement::ForeachStatement { source, run } => {
+            StatementKind::ForeachStatement { source, run } => {
                 self.w.write_all(b"foreach ")?;
                 self.format_expr(source)?;
                 self.format_block(run)?;
             }
-            Statement::WhileStatement { cond, run } => {
+            StatementKind::WhileStatement { cond, run } => {
                 self.w.write_all(b"if (")?;
                 self.format_expr(cond)?;
                 self.w.write_all(b")")?;
                 self.format_block(run)?;
                 self.w.write_all(b"\n")?;
             }
-            Statement::DoStatement { cond, run } => {
+            StatementKind::DoStatement { cond, run } => {
                 self.w.write_all(b"do {\n")?;
                 self.indent_incr();
                 for stmt in run {
@@ -64,7 +64,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 self.format_expr(cond)?;
                 self.w.write_all(b");\n")?;
             }
-            Statement::SwitchStatement { scrutinee, cases } => {
+            StatementKind::SwitchStatement { scrutinee, cases } => {
                 self.w.write_all(b"switch (")?;
                 self.format_expr(scrutinee)?;
                 self.w.write_all(b") {\n")?;
@@ -89,13 +89,13 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 self.indent()?;
                 self.w.write_all(b"}\n")?
             }
-            Statement::BreakStatement => {
+            StatementKind::BreakStatement => {
                 self.w.write_all(b"break;")?;
             }
-            Statement::ContinueStatement => {
+            StatementKind::ContinueStatement => {
                 self.w.write_all(b"continue;")?;
             }
-            Statement::ReturnStatement { expr } => {
+            StatementKind::ReturnStatement { expr } => {
                 self.w.write_all(b"return")?;
                 if let Some(expr) = expr {
                     self.w.write_all(b" ")?;
@@ -103,17 +103,17 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
                 }
                 self.w.write_all(b";")?;
             }
-            Statement::Label(l) => {
+            StatementKind::Label(l) => {
                 self.format_i(l)?;
                 self.w.write_all(b":")?;
             }
-            Statement::Assignment { lhs, rhs } => {
+            StatementKind::Assignment { lhs, rhs } => {
                 self.format_expr(lhs)?;
                 self.w.write_all(b" = ")?;
                 self.format_expr(rhs)?;
                 self.w.write_all(b";")?;
             }
-            Statement::Expr { expr } => {
+            StatementKind::Expr { expr } => {
                 self.format_expr(expr)?;
                 self.w.write_all(b";")?;
             }

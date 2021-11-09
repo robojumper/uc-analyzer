@@ -13,7 +13,7 @@ use crate::{
 
 mod test;
 
-use super::Parser;
+use super::{ParseError, Parser};
 
 /// Slightly annoying: Operators on the parser level don't neatly correspond
 /// to sigils but also not to operators on the HIR. We need to give parens and
@@ -38,11 +38,11 @@ impl SigilOrVecOp {
 }
 
 impl Parser<'_> {
-    pub fn parse_base_expression(&mut self) -> Result<Expr<Identifier>, String> {
+    pub fn parse_base_expression(&mut self) -> Result<Expr<Identifier>, ParseError> {
         self.parse_base_expression_bp(0)
     }
 
-    fn parse_base_expression_bp(&mut self, min_bp: u8) -> Result<Expr<Identifier>, String> {
+    fn parse_base_expression_bp(&mut self, min_bp: u8) -> Result<Expr<Identifier>, ParseError> {
         let mut lhs = {
             let tok = self.next_any()?;
             match tok.kind {
@@ -76,7 +76,7 @@ impl Parser<'_> {
                                 lit: uc_def::Literal::Number,
                             }
                         } else {
-                            return Err(format!("Not a preoperator: {:?}", tok));
+                            return Err(self.fmt_err("Not a preoperator", Some(tok)));
                         }
                     }
                 },
@@ -90,7 +90,7 @@ impl Parser<'_> {
                             match delim.kind {
                                 Tk::Comma => continue,
                                 sig!(RParen) => break,
-                                _ => return Err(format!("Expected comma or }}, got {:?}", delim)),
+                                _ => return Err(self.fmt_err("Expected comma or )", Some(delim))),
                             }
                         }
                     }
@@ -148,7 +148,7 @@ impl Parser<'_> {
                 Tk::Bool(_) => Expr::LiteralExpr {
                     lit: uc_def::Literal::Bool,
                 },
-                _ => return Err(format!("Unknown start of expression: {:?}", tok)),
+                _ => return Err(self.fmt_err("Unknown start of expression", Some(tok))),
             }
         };
 
@@ -197,7 +197,7 @@ impl Parser<'_> {
                         match delim.kind {
                             Tk::Comma => continue,
                             sig!(RParen) => break,
-                            _ => return Err(format!("Expected comma or }}, got {:?}", delim)),
+                            _ => return Err(self.fmt_err("Expected comma or )", Some(delim))),
                         }
                     }
                     Expr::CallExpr {

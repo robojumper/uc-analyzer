@@ -134,6 +134,7 @@ pub struct ClassDef<T> {
     pub name: Identifier,
     pub kind: ClassHeader<T>,
     pub mods: Modifiers<ClassFlags, T>,
+    pub span: ExpSpan,
 }
 
 #[derive(Debug)]
@@ -156,6 +157,7 @@ pub enum Ty<T> {
 pub struct ConstDef {
     pub name: Identifier,
     pub val: ConstVal,
+    pub span: ExpSpan,
 }
 
 #[derive(Debug)]
@@ -180,12 +182,14 @@ pub struct VarDef<T> {
     pub ty: Ty<T>,
     pub names: Vec<VarInstance<T>>,
     pub mods: Modifiers<VarFlags, T>,
+    pub span: ExpSpan,
 }
 
 #[derive(Debug)]
 pub struct EnumDef {
     pub name: Identifier,
     pub variants: Vec<Identifier>,
+    pub span: ExpSpan,
 }
 
 #[derive(Debug)]
@@ -194,6 +198,7 @@ pub struct StructDef<T> {
     pub extends: Option<Vec<T>>,
     pub fields: Vec<VarDef<T>>,
     pub mods: Modifiers<StructFlags, T>,
+    pub span: ExpSpan,
 }
 
 #[derive(Debug)]
@@ -208,6 +213,7 @@ pub struct StateDef<T> {
     pub extends: Option<T>,
     pub funcs: Vec<FuncDef<T>>,
     pub statements: Vec<Statement<T>>,
+    pub span: ExpSpan,
 }
 
 #[derive(Debug)]
@@ -217,6 +223,7 @@ pub struct FuncDef<T> {
     pub mods: Modifiers<FuncFlags, T>,
     pub sig: FuncSig<T>,
     pub body: Option<FuncBody<T>>,
+    pub span: ExpSpan,
 }
 
 #[derive(Debug)]
@@ -242,7 +249,13 @@ pub struct FuncBody<T> {
 }
 
 #[derive(Debug)]
-pub enum Statement<T> {
+pub struct Statement<T> {
+    pub span: ExpSpan,
+    pub kind: StatementKind<T>,
+}
+
+#[derive(Debug)]
+pub enum StatementKind<T> {
     IfStatement {
         cond: Expr<T>,
         then: Block<T>,
@@ -288,6 +301,7 @@ pub enum Statement<T> {
 #[derive(Debug)]
 pub struct CaseClause<T> {
     pub case: Case<T>,
+    pub case_span: ExpSpan,
     pub statements: Vec<Statement<T>>,
 }
 
@@ -341,6 +355,12 @@ pub enum Op {
 
     VecCross,
     VecDot,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct ExpSpan {
+    pub exp_start: usize,
+    pub exp_end: usize,
 }
 
 #[derive(Debug)]

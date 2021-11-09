@@ -1,13 +1,7 @@
 use std::str::{self, FromStr};
 
-use uc_def::Op;
+use uc_def::{ExpSpan, Op};
 use uc_name::Identifier;
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct ExpSpan {
-    pub exp_start: usize,
-    pub exp_end: usize,
-}
 
 #[derive(Clone, Debug)]
 pub struct Token {

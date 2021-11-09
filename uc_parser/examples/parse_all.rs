@@ -62,8 +62,10 @@ fn main() {
             dbg!(&errs);
             panic!();
         }
+        /*
         let out = std::io::stdout();
         let mut out = out.lock();
         uc_def::pretty::format_hir(&hir, &mut out, uc_def::pretty::IdentifierFormat).unwrap();
+        */
     }
 }

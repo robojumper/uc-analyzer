@@ -4,7 +4,7 @@ use uc_def::{
 };
 use uc_name::Identifier;
 
-use super::Parser;
+use super::{ParseError, Parser};
 use crate::{
     kw,
     lexer::{NumberSyntax, Symbol, Token, TokenKind as Tk},
@@ -23,12 +23,13 @@ pub enum TopLevelItem {
 }
 
 impl Parser<'_> {
-    pub fn parse_class_def(&mut self) -> Result<ClassDef<Identifier>, String> {
-        let token = self.next_any()?;
-        let class = match token.kind {
+    pub fn parse_class_def(&mut self) -> Result<ClassDef<Identifier>, ParseError> {
+        let class_m = self.marker();
+        let start = self.next_any()?;
+        let class = match start.kind {
             kw!(Class) => true,
             kw!(Interface) => false,
-            _ => return Err(self.fmt_unexpected(&token)),
+            _ => return Err(self.fmt_err("Expected class or interface", Some(start))),
         };
 
         let name = self.expect_ident()?;
@@ -78,10 +79,11 @@ impl Parser<'_> {
             kind: def,
             name,
             mods,
+            span: class_m.complete(self),
         })
     }
 
-    fn parse_const_val(&mut self) -> Result<ConstVal, String> {
+    fn parse_const_val(&mut self) -> Result<ConstVal, ParseError> {
         let tok = self.next_any()?;
         match tok.kind {
             Tk::Name => Ok(ConstVal::Name),
@@ -95,24 +97,30 @@ impl Parser<'_> {
                 match next.kind {
                     Tk::Number(NumberSyntax::Int | NumberSyntax::Hex) => Ok(ConstVal::Int),
                     Tk::Number(NumberSyntax::Float) => Ok(ConstVal::Float),
-                    _ => Err(format!("expected number after -, got {:?}", tok)),
+                    _ => Err(self.fmt_err("expected number after -", Some(tok))),
                 }
             }
-            _ => Err(format!("expected const value, got {:?}", tok)),
+            _ => Err(self.fmt_err("expected const value, got", Some(tok))),
         }
     }
 
-    fn parse_const(&mut self) -> Result<ConstDef, String> {
+    fn parse_const(&mut self) -> Result<ConstDef, ParseError> {
+        let const_m = self.marker();
         self.expect(kw!(Const))?;
         let name = self.expect_ident()?;
         self.expect(sig!(Eq))?;
         let val = self.parse_const_val()?;
-        self.expect(Tk::Semi)?;
+        let end = self.expect(Tk::Semi)?;
 
-        Ok(ConstDef { name, val })
+        Ok(ConstDef {
+            name,
+            val,
+            span: const_m.complete(self),
+        })
     }
 
-    fn parse_var(&mut self) -> Result<(Option<EnumDef>, VarDef<Identifier>), String> {
+    fn parse_var(&mut self) -> Result<(Option<EnumDef>, VarDef<Identifier>), ParseError> {
+        let var_m = self.marker();
         self.expect(kw!(Var))?;
         let followups = DeclFollowups::IdentModifiers(
             ModifierCount::ALLOW_NONE | ModifierCount::ALLOW_ONE | ModifierCount::ALLOW_MULTIPLE,
@@ -140,7 +148,8 @@ impl Parser<'_> {
         loop {
             let var_name = self.expect_ident()?;
             let count = if self.eat(sig!(LBrack)) {
-                match self.peek_any()?.kind {
+                let peeked = self.peek_any()?;
+                match peeked.kind {
                     Tk::Number(_) => {
                         let cnt = self.expect_nonnegative_integer()?;
                         self.expect(sig!(RBrack))?;
@@ -152,7 +161,9 @@ impl Parser<'_> {
                         DimCount::Complex(parts)
                     }
                     kind => {
-                        return Err(format!("expected number or identifier, got {:?}", kind));
+                        return Err(
+                            self.fmt_err("expected number or identifier, got", Some(peeked))
+                        );
                     }
                 }
             } else {
@@ -161,15 +172,11 @@ impl Parser<'_> {
 
             // Native export text
             if self.eat(sig!(LBrace)) {
-                self.lex
-                    .ignore_foreign_block(sig!(LBrace))
-                    .map_err(|e| format!("{:?}", e))?;
+                self.ignore_foreign_block(sig!(LBrace))?;
             }
             // Editor metadata
             if self.eat(sig!(Lt)) {
-                self.lex
-                    .ignore_foreign_block(sig!(Lt))
-                    .map_err(|e| format!("{:?}", e))?;
+                self.ignore_foreign_block(sig!(Lt))?;
             }
 
             names.push(VarInstance {
@@ -184,10 +191,19 @@ impl Parser<'_> {
 
         self.expect(Tk::Semi)?;
 
-        Ok((en, VarDef { names, ty, mods }))
+        Ok((
+            en,
+            VarDef {
+                names,
+                ty,
+                mods,
+                span: var_m.complete(self),
+            },
+        ))
     }
 
-    fn parse_enum(&mut self, expect_semi: bool) -> Result<EnumDef, String> {
+    fn parse_enum(&mut self, expect_semi: bool) -> Result<EnumDef, ParseError> {
+        let en_m = self.marker();
         self.expect(kw!(Enum))?;
         let name = self.expect_ident()?;
         self.expect(sig!(LBrace))?;
@@ -213,18 +229,23 @@ impl Parser<'_> {
                 }
                 comma = true;
             } else {
-                return Err(format!("expected enum variant name, got {:?}", tok));
+                return Err(self.fmt_err("expected enum variant name", Some(tok)));
             }
         }
 
         if expect_semi {
-            self.expect(Tk::Semi)?;
+            Some(self.expect(Tk::Semi)?);
         }
 
-        Ok(EnumDef { name, variants })
+        Ok(EnumDef {
+            name,
+            variants,
+            span: en_m.complete(self),
+        })
     }
 
-    fn parse_struct(&mut self) -> Result<StructDef<Identifier>, String> {
+    fn parse_struct(&mut self) -> Result<StructDef<Identifier>, ParseError> {
+        let struct_m = self.marker();
         self.expect(kw!(Struct))?;
         if self.eat(sig!(LBrace)) {
             self.ignore_foreign_block(sig!(LBrace))?;
@@ -243,15 +264,19 @@ impl Parser<'_> {
         let mut fields = vec![];
 
         loop {
-            match self.peek_any()?.kind {
+            let peeked = self.peek_any()?;
+            match peeked.kind {
                 sig!(RBrace) => {
                     self.next();
                     break;
                 }
                 kw!(Var) => {
                     let (opt_enum, var) = self.parse_var()?;
-                    if opt_enum.is_some() {
-                        return Err("enum decl in struct???????".to_owned());
+                    if let Some(e) = opt_enum {
+                        let mut err = self.fmt_err("enum decl in struct???????", None);
+                        err.err.ctx_token =
+                            Some(("this is an enum declaration".to_owned(), e.span));
+                        return Err(err);
                     }
                     fields.push(var);
                 }
@@ -260,7 +285,12 @@ impl Parser<'_> {
                     let opener = self.expect(sig!(LBrace))?;
                     self.ignore_foreign_block(opener.kind)?;
                 }
-                t => return Err(format!("unexpected token: {:?}", t)),
+                _ => {
+                    return Err(self.fmt_err(
+                        "expected variable declaration or foreign block",
+                        Some(peeked),
+                    ))
+                }
             }
         }
 
@@ -271,13 +301,14 @@ impl Parser<'_> {
             extends,
             fields,
             mods,
+            span: struct_m.complete(self),
         })
     }
 
     fn parse_function_sig(
         &mut self,
         allow_op_sigil: bool,
-    ) -> Result<(FuncName, FuncSig<Identifier>), String> {
+    ) -> Result<(FuncName, FuncSig<Identifier>), ParseError> {
         let ty_or_name = self.next_any()?;
         let (ret_ty, name) = match (ty_or_name.kind, self.peek_any()?.kind) {
             (Tk::Sym(_), sig!(LParen)) => (None, FuncName::Iden(self.sym_to_ident(&ty_or_name))),
@@ -290,7 +321,7 @@ impl Parser<'_> {
                     Tk::Sig(s) if allow_op_sigil && s.is_overloadable_op() => {
                         FuncName::Oper(s.to_op())
                     }
-                    _ => return Err(format!("expected function name, got {:?}", name_tok)),
+                    _ => return Err(self.fmt_err("expected function name", Some(name_tok))),
                 }
             }),
         };
@@ -311,7 +342,8 @@ impl Parser<'_> {
             let name = self.expect_ident()?;
 
             let count = if self.eat(sig!(LBrack)) {
-                match self.peek_any()?.kind {
+                let peeked = self.peek_any()?;
+                match peeked.kind {
                     Tk::Number(_) => {
                         let cnt = self.expect_nonnegative_integer()?;
                         self.expect(sig!(RBrack))?;
@@ -322,8 +354,8 @@ impl Parser<'_> {
                         self.expect(sig!(RBrack))?;
                         DimCount::Complex(parts)
                     }
-                    kind => {
-                        return Err(format!("expected number or identifier, got {:?}", kind));
+                    _ => {
+                        return Err(self.fmt_err("expected number or identifier", Some(peeked)));
                     }
                 }
             } else {
@@ -349,31 +381,34 @@ impl Parser<'_> {
         Ok((name, FuncSig { ret_ty, args }))
     }
 
-    fn parse_function(&mut self) -> Result<FuncDef<Identifier>, String> {
+    fn parse_function(&mut self) -> Result<FuncDef<Identifier>, ParseError> {
+        let func_m = self.marker();
         let mods = self.parse_kws(&*modifiers::FUNC_MODIFIERS)?;
         let (name, sig) = self.parse_function_sig(true)?;
 
         self.eat(kw!(Const));
 
-        let body = if self.eat(Tk::Semi) {
-            None
-        } else if self.eat(sig!(LBrace)) {
-            let locals = self.parse_locals()?;
-            // FIXME: Revert this and handle the one case with a patch?
-            let mut consts = vec![];
-            while self.peek_any()?.kind == kw!(Const) {
-                consts.push(self.parse_const()?);
+        let next = self.next_any()?;
+
+        let body = match &next.kind {
+            Tk::Semi => None,
+            sig!(LBrace) => {
+                let locals = self.parse_locals()?;
+                // FIXME: Revert this and handle the one case with a patch?
+                let mut consts = vec![];
+                while self.peek_any()?.kind == kw!(Const) {
+                    consts.push(self.parse_const()?);
+                }
+                let statements = self.parse_statements();
+                self.expect(sig!(RBrace))?;
+                while self.eat(Tk::Semi) {} // FIXME: Where is this hit?
+                Some(FuncBody {
+                    locals,
+                    consts,
+                    statements,
+                })
             }
-            let statements = self.parse_statements();
-            self.expect(sig!(RBrace))?;
-            while self.eat(Tk::Semi) {} // FIXME: Where is this hit?
-            Some(FuncBody {
-                locals,
-                consts,
-                statements,
-            })
-        } else {
-            return Err(format!("expected ; or {{, got {:?}", self.peek_any()));
+            _ => return Err(self.fmt_err("expected ; or {", Some(next))),
         };
 
         Ok(FuncDef {
@@ -382,10 +417,11 @@ impl Parser<'_> {
             mods,
             sig,
             body,
+            span: func_m.complete(self),
         })
     }
 
-    fn parse_locals(&mut self) -> Result<Vec<Local<Identifier>>, String> {
+    fn parse_locals(&mut self) -> Result<Vec<Local<Identifier>>, ParseError> {
         let mut locals = vec![];
         while self.eat(Tk::Semi) {} // FIXME: Where is this hit?
         while self.eat(kw!(Local)) {
@@ -400,13 +436,14 @@ impl Parser<'_> {
         Ok(locals)
     }
 
-    fn parse_local(&mut self) -> Result<Local<Identifier>, String> {
+    fn parse_local(&mut self) -> Result<Local<Identifier>, ParseError> {
         let ty = self.parse_ty(None)?;
         let mut names = vec![];
         loop {
             let var_name = self.expect_ident()?;
             let count = if self.eat(sig!(LBrack)) {
-                match self.peek_any()?.kind {
+                let peeked = self.peek_any()?;
+                match peeked.kind {
                     Tk::Number(_) => {
                         let cnt = self.expect_nonnegative_integer()?;
                         self.expect(sig!(RBrack))?;
@@ -418,7 +455,7 @@ impl Parser<'_> {
                         DimCount::Complex(parts)
                     }
                     kind => {
-                        return Err(format!("expected number or identifier, got {:?}", kind));
+                        return Err(self.fmt_err("expected number or identifier", Some(peeked)));
                     }
                 }
             } else {
@@ -441,14 +478,13 @@ impl Parser<'_> {
     #[allow(clippy::type_complexity)]
     fn parse_state_contents(
         &mut self,
-    ) -> Result<(Vec<FuncDef<Identifier>>, Vec<Statement<Identifier>>), String> {
+    ) -> Result<(Vec<FuncDef<Identifier>>, Vec<Statement<Identifier>>), ParseError> {
         let mut funcs = vec![];
         let mut stmts = vec![];
 
         loop {
             match self.peek_any()?.kind {
                 sig!(RBrace) => {
-                    self.next();
                     return Ok((funcs, stmts));
                 }
                 Tk::Sym(Symbol::Kw(kw)) if modifiers::FUNC_MODIFIERS.contains(kw) => {
@@ -459,12 +495,12 @@ impl Parser<'_> {
         }
 
         stmts = self.parse_statements();
-        self.expect(sig!(RBrace))?;
 
         Ok((funcs, stmts))
     }
 
-    fn parse_state(&mut self) -> Result<StateDef<Identifier>, String> {
+    fn parse_state(&mut self) -> Result<StateDef<Identifier>, ParseError> {
+        let state_m = self.marker();
         self.eat(kw!(Auto));
         self.eat(kw!(Simulated));
         self.expect(kw!(State))?;
@@ -496,22 +532,26 @@ impl Parser<'_> {
 
         let (funcs, statements) = self.parse_state_contents()?;
 
+        self.expect(sig!(RBrace))?;
+        self.eat(Tk::Semi);
+
         Ok(StateDef {
             name,
             funcs,
             statements,
             extends,
+            span: state_m.complete(self),
         })
     }
 
-    fn ignore_directive(&mut self) -> Result<(), String> {
+    fn ignore_directive(&mut self) -> Result<(), ParseError> {
         let directive_name = self.expect_ident()?;
         if directive_name.as_ref().eq_ignore_ascii_case("error") {
-            return Err("error directive".to_owned());
+            return Err(self.fmt_err("error directive", None)); // FIXME
         } else if directive_name.as_ref().eq_ignore_ascii_case("linenumber") {
             self.expect(Tk::Number(NumberSyntax::Int))?;
         } else {
-            return Err("unknown directive".to_owned());
+            return Err(self.fmt_err("unknown directive", None)); // FIXME
         }
         self.eat(Tk::Semi);
         Ok(())
@@ -520,7 +560,7 @@ impl Parser<'_> {
     fn parse_one_item(
         &mut self,
         items: &mut Vec<TopLevelItem>,
-    ) -> Result<Option<TopLevelItem>, String> {
+    ) -> Result<Option<TopLevelItem>, ParseError> {
         loop {
             break match self.peek() {
                 Some(tok) => match tok.kind {

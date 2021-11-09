@@ -28,9 +28,13 @@ pub fn fix_defects<'a>(file_name: &str, input: &'a [u8]) -> Result<Cow<'a, [u8]>
         assert!(input.ends_with(bad_end));
         Ok(Cow::Borrowed(&input[0..input.len() - bad_end.len() + 1]))
     } else if input.starts_with(&[0xFF, 0xFE]) {
-        Ok(Cow::Owned(decode_utf16_from_u8s(&input[2..], ByteOrder::LE)?.into_bytes()))
+        Ok(Cow::Owned(
+            decode_utf16_from_u8s(&input[2..], ByteOrder::LE)?.into_bytes(),
+        ))
     } else if input.starts_with(&[0xFE, 0xFF]) {
-        Ok(Cow::Owned(decode_utf16_from_u8s(&input[2..], ByteOrder::BE)?.into_bytes()))
+        Ok(Cow::Owned(
+            decode_utf16_from_u8s(&input[2..], ByteOrder::BE)?.into_bytes(),
+        ))
     } else {
         Ok(Cow::Borrowed(input))
     }
@@ -41,12 +45,12 @@ fn decode_utf16_from_u8s(input: &[u8], order: ByteOrder) -> Result<String, Input
         return Err(InputError::Utf16BomBadLength);
     }
     let len = input.len() / 2;
-    let iter = (0..len).map(|i| u16::from_le_bytes(
-        match order {
+    let iter = (0..len).map(|i| {
+        u16::from_le_bytes(match order {
             ByteOrder::LE => [input[2 * i], input[2 * i + 1]],
             ByteOrder::BE => [input[2 * i + 1], input[2 * i]],
-        }
-    ));
+        })
+    });
 
     char::decode_utf16(iter)
         .collect::<Result<String, _>>()
