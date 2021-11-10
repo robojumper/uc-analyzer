@@ -124,7 +124,15 @@ impl Parser<'_> {
                         expr: Box::new(expr),
                     }
                 }
-                Tk::Sym(_) if matches!(self.peek(), Some(Token { kind: Tk::Name, .. })) => {
+                Tk::Sym(_)
+                    if matches!(
+                        self.peek(),
+                        Some(Token {
+                            kind: Tk::Name | Tk::DotName,
+                            ..
+                        })
+                    ) =>
+                {
                     self.next();
                     Expr::LiteralExpr {
                         lit: uc_def::Literal::ObjReference,

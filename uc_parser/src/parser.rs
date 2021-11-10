@@ -7,7 +7,8 @@ mod item;
 mod modifiers;
 mod stmt;
 
-use uc_def::{Hir, Span, Ty};
+use uc_def::{Hir, Ty};
+use uc_files::Span;
 use uc_name::Identifier;
 
 use crate::{
@@ -33,13 +34,13 @@ macro_rules! sig {
 struct Parser<'a> {
     lex: Lexer<'a>,
     errs: Vec<ParseError>,
-    last_end: Option<usize>,
+    last_end: Option<u32>,
 }
 
 // pretty much stolen from rust-analyzer
 #[derive(Debug)]
 struct SpanMarker {
-    pos: Option<usize>,
+    pos: Option<u32>,
 }
 
 impl SpanMarker {

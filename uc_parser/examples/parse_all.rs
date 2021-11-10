@@ -1,7 +1,9 @@
 use core::panic;
 use std::fs;
+use std::str::FromStr;
 
-use uc_parser::fix_defects;
+use uc_files::Sources;
+use uc_name::Identifier;
 use uc_parser::{lexer, parser};
 use walkdir::{DirEntry, WalkDir};
 
@@ -25,6 +27,8 @@ fn main() {
 
     let walker = WalkDir::new(dir).into_iter();
     let mut hirs = vec![];
+    let mut sources = Sources::new();
+
     for entry in walker {
         let entry = match entry {
             Ok(d) => d,
@@ -52,11 +56,16 @@ fn main() {
             continue; // will be expanded
         }
 
-        let pre_fixed = fix_defects(name, &contents).expect("aaaaaaah");
+        let id = sources
+            .add_file(
+                Identifier::from_str(&name[0..name.find('.').unwrap()]).unwrap(),
+                &contents,
+            )
+            .expect("invalid encoding");
 
         eprintln!("{}", name);
 
-        let lexer = lexer::Lexer::new(&pre_fixed);
+        let lexer = lexer::Lexer::new(&sources, id);
         let (hir, errs) = parser::parse(lexer);
         if !errs.is_empty() {
             dbg!(&name);

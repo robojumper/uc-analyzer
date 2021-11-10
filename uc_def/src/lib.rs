@@ -1,6 +1,7 @@
 use std::{collections::HashMap, hash::Hash};
 
 use bitflags::bitflags;
+use uc_files::Span;
 use uc_name::Identifier;
 
 pub mod pretty;
@@ -357,12 +358,6 @@ pub enum Op {
     VecDot,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct Span {
-    pub start: usize,
-    pub end: usize,
-}
-
 #[derive(Debug)]
 pub enum Expr<T> {
     IndexExpr {
@@ -419,7 +414,7 @@ pub enum Literal {
     Number,
     Bool,
     Name,
-    String(String),
+    String(Box<str>),
 }
 
 #[derive(Debug)]

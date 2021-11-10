@@ -7,25 +7,32 @@
 
 use std::{fmt::Display, str::FromStr};
 
+#[derive(Clone, Copy, Debug)]
+pub struct NotAscii;
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Identifier(unicase::Ascii<String>);
+pub struct Identifier(unicase::Ascii<Box<str>>);
 
 impl FromStr for Identifier {
-    type Err = <unicase::Ascii<String> as FromStr>::Err;
+    type Err = NotAscii;
     fn from_str(t: &str) -> Result<Self, Self::Err> {
-        Ok(Self(unicase::Ascii::from_str(t)?))
+        if !t.is_ascii() {
+            Err(NotAscii)
+        } else {
+            Ok(Self(unicase::Ascii::new(t.to_owned().into_boxed_str())))
+        }
     }
 }
 
 impl Display for Identifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(self.0.as_str(), f)
+        std::fmt::Display::fmt(self.0.as_ref(), f)
     }
 }
 
 impl std::fmt::Debug for Identifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(self.0.as_str(), f)
+        std::fmt::Debug::fmt(self.0.as_ref(), f)
     }
 }
 

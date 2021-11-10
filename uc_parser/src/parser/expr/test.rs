@@ -1,6 +1,10 @@
 #![cfg(test)]
 
+use std::str::FromStr;
+
 use uc_def::pretty;
+use uc_files::Sources;
+use uc_name::Identifier;
 
 use crate::{lexer::Lexer, parser::Parser};
 
@@ -49,7 +53,11 @@ fn new_op() {
 }
 
 fn assert_parse_pretty(text: &str, pretty: &str) {
-    let lex = Lexer::new(text.as_bytes());
+    let mut sources = Sources::new();
+    let id = sources
+        .add_file(Identifier::from_str("TestFile").unwrap(), text.as_bytes())
+        .unwrap();
+    let lex = Lexer::new(&sources, id);
     let mut p = Parser::new(lex);
     let expr = p.parse_base_expression().unwrap();
     let mut out = vec![];
