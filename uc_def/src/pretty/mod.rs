@@ -1,4 +1,4 @@
-use std::{fmt, io};
+use std::io;
 
 use crate::{
     ArgFlags, ClassDef, ClassHeader, ConstDef, EnumDef, Expr, FuncBody, FuncDef, FuncFlags,
@@ -7,28 +7,12 @@ use crate::{
 
 mod stmts;
 
-pub trait RefLookup {
-    type From: fmt::Debug;
-    fn lookup<'a>(&self, i: &'a Self::From) -> &'a str;
-}
-
-pub struct IdentifierFormat;
-
-impl RefLookup for IdentifierFormat {
-    type From = Identifier;
-
-    fn lookup<'a>(&self, i: &'a Self::From) -> &'a str {
-        i.as_ref()
-    }
-}
-
-struct PPrinter<W: io::Write, R: RefLookup> {
-    lk: R,
+struct PPrinter<W: io::Write> {
     w: W,
     indent: Vec<u8>,
 }
 
-impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
+impl<W: io::Write> PPrinter<W> {
     fn indent_incr(&mut self) {
         self.indent.extend_from_slice(b"    ");
     }
@@ -41,20 +25,20 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         self.w.write_all(&self.indent)
     }
 
-    fn format_i(&mut self, i: &R::From) -> io::Result<()> {
-        self.w.write_all(self.lk.lookup(i).as_bytes())
+    fn format_i(&mut self, i: &Identifier) -> io::Result<()> {
+        self.w.write_all(i.as_ref().as_bytes())
     }
 
-    fn format_veci(&mut self, veci: &[R::From], sep: &'static [u8]) -> io::Result<()> {
+    fn format_veci(&mut self, veci: &[Identifier], sep: &'static [u8]) -> io::Result<()> {
         veci.iter()
-            .map(|i| self.lk.lookup(i).as_bytes())
+            .map(|i| i.as_ref().as_bytes())
             .intersperse(sep)
             .map(|s| self.w.write_all(s))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(())
     }
 
-    fn format_class(&mut self, header: &ClassDef<R::From>) -> io::Result<()> {
+    fn format_class(&mut self, header: &ClassDef) -> io::Result<()> {
         match &header.kind {
             ClassHeader::Class {
                 extends,
@@ -105,7 +89,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         Ok(())
     }
 
-    fn format_struct(&mut self, s: &StructDef<R::From>) -> io::Result<()> {
+    fn format_struct(&mut self, s: &StructDef) -> io::Result<()> {
         self.w.write_all(b"struct ")?;
         self.w.write_all(s.name.as_ref().as_bytes())?;
         match &s.extends {
@@ -128,7 +112,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         Ok(())
     }
 
-    fn format_ty(&mut self, s: &Ty<R::From>) -> io::Result<()> {
+    fn format_ty(&mut self, s: &Ty) -> io::Result<()> {
         match s {
             Ty::Simple(i) => {
                 self.format_i(i)?;
@@ -185,7 +169,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         Ok(())
     }
 
-    fn format_var(&mut self, s: &VarDef<R::From>) -> io::Result<()> {
+    fn format_var(&mut self, s: &VarDef) -> io::Result<()> {
         self.indent()?;
         self.w.write_all(b"var ")?;
         self.format_ty(&s.ty)?;
@@ -198,7 +182,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         Ok(())
     }
 
-    fn format_instances(&mut self, i: &[VarInstance<R::From>]) -> io::Result<()> {
+    fn format_instances(&mut self, i: &[VarInstance]) -> io::Result<()> {
         for (idx, inst) in i.iter().enumerate() {
             self.w.write_all(inst.name.as_ref().as_bytes())?;
             match &inst.count {
@@ -221,7 +205,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         Ok(())
     }
 
-    fn format_func(&mut self, f: &FuncDef<R::From>) -> io::Result<()> {
+    fn format_func(&mut self, f: &FuncDef) -> io::Result<()> {
         self.indent()?;
         if f.mods.flags.contains(FuncFlags::OPERATOR) {
             self.w.write_all(b"operator ")?;
@@ -244,7 +228,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         Ok(())
     }
 
-    fn format_sig(&mut self, f: &FuncSig<R::From>, name: &FuncName) -> io::Result<()> {
+    fn format_sig(&mut self, f: &FuncSig, name: &FuncName) -> io::Result<()> {
         if let Some(ty) = &f.ret_ty {
             self.format_ty(ty)?;
             self.w.write_all(b" ")?;
@@ -280,7 +264,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         Ok(())
     }
 
-    fn format_body(&mut self, f: &FuncBody<R::From>) -> io::Result<()> {
+    fn format_body(&mut self, f: &FuncBody) -> io::Result<()> {
         self.w.write_all(b" {\n")?;
         self.indent_incr();
 
@@ -307,7 +291,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         Ok(())
     }
 
-    fn format_local(&mut self, l: &Local<R::From>) -> io::Result<()> {
+    fn format_local(&mut self, l: &Local) -> io::Result<()> {
         self.indent()?;
         self.w.write_all(b"local ")?;
         self.format_ty(&l.ty)?;
@@ -320,7 +304,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         Ok(())
     }
 
-    fn format_state(&mut self, s: &StateDef<R::From>) -> io::Result<()> {
+    fn format_state(&mut self, s: &StateDef) -> io::Result<()> {
         self.w.write_all(b"state ")?;
         self.format_i(&s.name)?;
         if let Some(extends) = &s.extends {
@@ -347,29 +331,13 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
     }
 }
 
-pub fn format_base_expr<W: io::Write, I, R: RefLookup<From = I>>(
-    expr: &Expr<I>,
-    w: &mut W,
-    r: R,
-) -> io::Result<()> {
-    let mut printer = PPrinter {
-        lk: r,
-        w,
-        indent: vec![],
-    };
+pub fn format_base_expr<W: io::Write>(expr: &Expr, w: &mut W) -> io::Result<()> {
+    let mut printer = PPrinter { w, indent: vec![] };
     printer.format_expr(expr)
 }
 
-pub fn format_hir<W: io::Write, I, R: RefLookup<From = I>>(
-    hir: &Hir<I>,
-    w: &mut W,
-    r: R,
-) -> io::Result<()> {
-    let mut printer = PPrinter {
-        lk: r,
-        w,
-        indent: vec![],
-    };
+pub fn format_hir<W: io::Write>(hir: &Hir, w: &mut W) -> io::Result<()> {
+    let mut printer = PPrinter { w, indent: vec![] };
     printer.format_class(&hir.header)?;
     printer.w.write_all(b"\n")?;
 

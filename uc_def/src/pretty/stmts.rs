@@ -2,10 +2,10 @@ use std::io;
 
 use crate::{Block, Expr, Literal, Op, Statement, StatementKind};
 
-use super::{PPrinter, RefLookup};
+use super::PPrinter;
 
-impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
-    pub fn format_statement(&mut self, stmt: &Statement<R::From>) -> io::Result<()> {
+impl<W: io::Write> PPrinter<W> {
+    pub fn format_statement(&mut self, stmt: &Statement) -> io::Result<()> {
         match &stmt.kind {
             StatementKind::IfStatement {
                 cond,
@@ -122,7 +122,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         Ok(())
     }
 
-    pub fn format_block(&mut self, b: &Block<R::From>) -> io::Result<()> {
+    pub fn format_block(&mut self, b: &Block) -> io::Result<()> {
         self.w.write_all(b" {\n")?;
         self.indent_incr();
         for stmt in &b.stmts {
@@ -136,7 +136,7 @@ impl<W: io::Write, R: RefLookup> PPrinter<W, R> {
         Ok(())
     }
 
-    pub fn format_expr(&mut self, expr: &Expr<R::From>) -> io::Result<()> {
+    pub fn format_expr(&mut self, expr: &Expr) -> io::Result<()> {
         match expr {
             Expr::IndexExpr { base, idx } => {
                 self.w.write_all(b"(")?;

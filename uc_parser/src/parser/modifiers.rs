@@ -3,7 +3,6 @@ use std::{collections::HashMap, hash::Hash};
 use bitflags::bitflags;
 use once_cell::sync::Lazy;
 use uc_def::{ArgFlags, ClassFlags, Flags, FuncFlags, Modifiers, StructFlags, Values, VarFlags};
-use uc_name::Identifier;
 
 use crate::{
     lexer::{Keyword as Kw, Symbol, Token, TokenKind as Tk},
@@ -95,7 +94,7 @@ impl Parser<'_> {
     pub fn parse_followups(
         &mut self,
         followups: &DeclFollowups,
-    ) -> Result<Option<Values<Identifier>>, ParseError> {
+    ) -> Result<Option<Values>, ParseError> {
         match followups {
             DeclFollowups::Nothing => Ok(None),
             DeclFollowups::Bool => {
@@ -153,7 +152,7 @@ impl Parser<'_> {
     pub fn parse_kws<F: Flags>(
         &mut self,
         mods: &ModifierConfig<F>,
-    ) -> Result<Modifiers<F, Identifier>, ParseError> {
+    ) -> Result<Modifiers<F>, ParseError> {
         let mut flags = 0u32;
         let mut followups = HashMap::new();
         loop {

@@ -62,7 +62,7 @@ fn assert_parse_pretty(text: &str, pretty: &str) {
     let expr = p.parse_base_expression().unwrap();
     let mut out = vec![];
 
-    pretty::format_base_expr(&expr, &mut out, pretty::IdentifierFormat).unwrap();
+    pretty::format_base_expr(&expr, &mut out).unwrap();
     let parse_pretty = std::str::from_utf8(&out).unwrap();
     assert_eq!(parse_pretty, pretty)
 }

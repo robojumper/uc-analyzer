@@ -2,7 +2,6 @@ use uc_def::{
     ClassDef, ClassFlags, ClassHeader, ConstDef, ConstVal, DimCount, EnumDef, FuncArg, FuncBody,
     FuncDef, FuncName, FuncSig, Local, Op, StateDef, Statement, StructDef, Ty, VarDef, VarInstance,
 };
-use uc_name::Identifier;
 
 use super::{ParseError, Parser};
 use crate::{
@@ -15,15 +14,15 @@ use crate::{
 #[derive(Debug)]
 pub enum TopLevelItem {
     Const(ConstDef),
-    Var(VarDef<Identifier>),
-    Struct(StructDef<Identifier>),
+    Var(VarDef),
+    Struct(StructDef),
     Enum(EnumDef),
-    State(StateDef<Identifier>),
-    Func(FuncDef<Identifier>),
+    State(StateDef),
+    Func(FuncDef),
 }
 
 impl Parser<'_> {
-    pub fn parse_class_def(&mut self) -> Result<ClassDef<Identifier>, ParseError> {
+    pub fn parse_class_def(&mut self) -> Result<ClassDef, ParseError> {
         let class_m = self.marker();
         let start = self.next_any()?;
         let class = match start.kind {
@@ -119,7 +118,7 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_var(&mut self) -> Result<(Option<EnumDef>, VarDef<Identifier>), ParseError> {
+    fn parse_var(&mut self) -> Result<(Option<EnumDef>, VarDef), ParseError> {
         let var_m = self.marker();
         self.expect(kw!(Var))?;
         let followups = DeclFollowups::IdentModifiers(
@@ -244,7 +243,7 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_struct(&mut self) -> Result<StructDef<Identifier>, ParseError> {
+    fn parse_struct(&mut self) -> Result<StructDef, ParseError> {
         let struct_m = self.marker();
         self.expect(kw!(Struct))?;
         if self.eat(sig!(LBrace)) {
@@ -308,7 +307,7 @@ impl Parser<'_> {
     fn parse_function_sig(
         &mut self,
         allow_op_sigil: bool,
-    ) -> Result<(FuncName, FuncSig<Identifier>), ParseError> {
+    ) -> Result<(FuncName, FuncSig), ParseError> {
         let ty_or_name = self.next_any()?;
         let (ret_ty, name) = match (ty_or_name.kind, self.peek_any()?.kind) {
             (Tk::Sym(_), sig!(LParen)) => (None, FuncName::Iden(self.sym_to_ident(&ty_or_name))),
@@ -381,7 +380,7 @@ impl Parser<'_> {
         Ok((name, FuncSig { ret_ty, args }))
     }
 
-    fn parse_function(&mut self) -> Result<FuncDef<Identifier>, ParseError> {
+    fn parse_function(&mut self) -> Result<FuncDef, ParseError> {
         let func_m = self.marker();
         let mods = self.parse_kws(&*modifiers::FUNC_MODIFIERS)?;
         let (name, sig) = self.parse_function_sig(true)?;
@@ -421,7 +420,7 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_locals(&mut self) -> Result<Vec<Local<Identifier>>, ParseError> {
+    fn parse_locals(&mut self) -> Result<Vec<Local>, ParseError> {
         let mut locals = vec![];
         while self.eat(Tk::Semi) {} // FIXME: Where is this hit?
         while self.eat(kw!(Local)) {
@@ -436,7 +435,7 @@ impl Parser<'_> {
         Ok(locals)
     }
 
-    fn parse_local(&mut self) -> Result<Local<Identifier>, ParseError> {
+    fn parse_local(&mut self) -> Result<Local, ParseError> {
         let ty = self.parse_ty(None)?;
         let mut names = vec![];
         loop {
@@ -476,9 +475,7 @@ impl Parser<'_> {
     }
 
     #[allow(clippy::type_complexity)]
-    fn parse_state_contents(
-        &mut self,
-    ) -> Result<(Vec<FuncDef<Identifier>>, Vec<Statement<Identifier>>), ParseError> {
+    fn parse_state_contents(&mut self) -> Result<(Vec<FuncDef>, Vec<Statement>), ParseError> {
         let mut funcs = vec![];
         let mut stmts = vec![];
 
@@ -499,7 +496,7 @@ impl Parser<'_> {
         Ok((funcs, stmts))
     }
 
-    fn parse_state(&mut self) -> Result<StateDef<Identifier>, ParseError> {
+    fn parse_state(&mut self) -> Result<StateDef, ParseError> {
         let state_m = self.marker();
         self.eat(kw!(Auto));
         self.eat(kw!(Simulated));

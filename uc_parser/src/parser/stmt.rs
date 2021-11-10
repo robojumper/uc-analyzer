@@ -2,7 +2,6 @@ use std::vec;
 
 use uc_def::{Block, Case, CaseClause, Statement, StatementKind};
 use uc_files::Span;
-use uc_name::Identifier;
 
 use crate::{
     kw,
@@ -13,7 +12,7 @@ use crate::{
 use super::{ParseError, Parser};
 
 /// Does this statement usually want to be terminated by a semicolon?
-fn stmt_wants_semi<I>(stmt: &StatementKind<I>) -> bool {
+fn stmt_wants_semi(stmt: &StatementKind) -> bool {
     match stmt {
         StatementKind::IfStatement { .. } => false,
         StatementKind::ForStatement { .. } => false,
@@ -31,10 +30,7 @@ fn stmt_wants_semi<I>(stmt: &StatementKind<I>) -> bool {
 }
 
 impl Parser<'_> {
-    fn parse_block_or_stmt(
-        &mut self,
-        ctx: (&'static str, Span),
-    ) -> Result<Block<Identifier>, ParseError> {
+    fn parse_block_or_stmt(&mut self, ctx: (&'static str, Span)) -> Result<Block, ParseError> {
         if self.eat(Tk::Semi) {
             Ok(Block { stmts: vec![] })
         } else if self.eat(sig!(LBrace)) {
@@ -51,7 +47,7 @@ impl Parser<'_> {
         &mut self,
         ctx: (&'static str, Span),
         expect_semi: bool,
-    ) -> Result<Statement<Identifier>, ParseError> {
+    ) -> Result<Statement, ParseError> {
         let stmt = self.parse_one_stmt()?.ok_or_else(|| {
             let mut err = self.fmt_err("missing statement", None);
             err.err.ctx_token = Some(("statement follows ".to_owned() + ctx.0, ctx.1));
@@ -65,7 +61,7 @@ impl Parser<'_> {
         Ok(stmt)
     }
 
-    fn parse_single_case(&mut self) -> Result<Option<CaseClause<Identifier>>, ParseError> {
+    fn parse_single_case(&mut self) -> Result<Option<CaseClause>, ParseError> {
         let (case, case_span) = match self.peek_any()?.kind {
             kw!(Default) => {
                 let m = self.marker();
@@ -112,7 +108,7 @@ impl Parser<'_> {
         }))
     }
 
-    fn parse_one_stmt(&mut self) -> Result<Option<Statement<Identifier>>, ParseError> {
+    fn parse_one_stmt(&mut self) -> Result<Option<Statement>, ParseError> {
         while self.eat(Tk::Semi) {} // FIXME: Where is this hit?
         match self.peek() {
             Some(tok) => match tok.kind {
@@ -304,7 +300,7 @@ impl Parser<'_> {
         }
     }
 
-    pub fn parse_statements(&mut self) -> Vec<Statement<Identifier>> {
+    pub fn parse_statements(&mut self) -> Vec<Statement> {
         let mut stmts = vec![];
         loop {
             match self.parse_one_stmt() {

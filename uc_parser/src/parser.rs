@@ -222,7 +222,7 @@ impl<'a> Parser<'a> {
         Ok(parts)
     }
 
-    fn parse_ty(&mut self, first_tok: Option<Token>) -> Result<Ty<Identifier>, ParseError> {
+    fn parse_ty(&mut self, first_tok: Option<Token>) -> Result<Ty, ParseError> {
         let ty_tok = match first_tok {
             Some(t) => t,
             _ => self.next_any()?,
@@ -291,7 +291,7 @@ impl<'a> Parser<'a> {
     }
 }
 
-pub fn parse(lex: Lexer) -> (Hir<Identifier>, Vec<ParseError>) {
+pub fn parse(lex: Lexer) -> (Hir, Vec<ParseError>) {
     let mut parser = Parser::new(lex);
     let header = parser.parse_class_def().unwrap();
     let items = parser.parse_items();

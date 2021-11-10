@@ -3,7 +3,6 @@
 //! for an introduction to Pratt parsing.
 
 use uc_def::{Expr, Op, Ty};
-use uc_name::Identifier;
 
 use crate::{
     kw,
@@ -38,11 +37,11 @@ impl SigilOrVecOp {
 }
 
 impl Parser<'_> {
-    pub fn parse_base_expression(&mut self) -> Result<Expr<Identifier>, ParseError> {
+    pub fn parse_base_expression(&mut self) -> Result<Expr, ParseError> {
         self.parse_base_expression_bp(0)
     }
 
-    fn parse_base_expression_bp(&mut self, min_bp: u8) -> Result<Expr<Identifier>, ParseError> {
+    fn parse_base_expression_bp(&mut self, min_bp: u8) -> Result<Expr, ParseError> {
         let mut lhs = {
             let tok = self.next_any()?;
             match tok.kind {

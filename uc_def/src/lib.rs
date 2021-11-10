@@ -94,64 +94,64 @@ impl_flags_for_bitflags! {
 }
 
 #[derive(Debug)]
-pub enum Values<T> {
+pub enum Values {
     Absent,
     Nums(Box<[i32]>),
-    Idents(Box<[T]>),
+    Idents(Box<[Identifier]>),
 }
 
 #[derive(Debug)]
-pub struct Modifiers<F: Flags, T> {
+pub struct Modifiers<F: Flags> {
     pub flags: F,
-    pub followups: HashMap<F, Option<Values<T>>>,
+    pub followups: HashMap<F, Option<Values>>,
 }
 
 #[derive(Debug)]
-pub struct Hir<T> {
-    pub header: ClassDef<T>,
-    pub structs: Vec<StructDef<T>>,
+pub struct Hir {
+    pub header: ClassDef,
+    pub structs: Vec<StructDef>,
     pub enums: Vec<EnumDef>,
     pub consts: Vec<ConstDef>,
-    pub vars: Vec<VarDef<T>>,
-    pub states: Vec<StateDef<T>>,
-    pub funcs: Vec<FuncDef<T>>,
+    pub vars: Vec<VarDef>,
+    pub states: Vec<StateDef>,
+    pub funcs: Vec<FuncDef>,
 }
 
 #[derive(Debug)]
-pub enum ClassHeader<T> {
+pub enum ClassHeader {
     Class {
-        extends: Option<T>,
-        implements: Vec<T>,
-        within: Option<T>,
+        extends: Option<Identifier>,
+        implements: Vec<Identifier>,
+        within: Option<Identifier>,
         flags: ClassFlags,
     },
     Interface {
-        extends: Option<T>,
+        extends: Option<Identifier>,
     },
 }
 
 #[derive(Debug)]
-pub struct ClassDef<T> {
+pub struct ClassDef {
     pub name: Identifier,
-    pub kind: ClassHeader<T>,
-    pub mods: Modifiers<ClassFlags, T>,
+    pub kind: ClassHeader,
+    pub mods: Modifiers<ClassFlags>,
     pub span: Span,
 }
 
 #[derive(Debug)]
-pub enum DimCount<T> {
+pub enum DimCount {
     None,
     Number(u32),
-    Complex(Vec<T>),
+    Complex(Vec<Identifier>),
 }
 
 #[derive(Debug)]
-pub enum Ty<T> {
-    Simple(T),
-    Qualified(Vec<T>),
-    Array(Box<Ty<T>>),
-    Class(Option<T>),
-    Delegate(Vec<T>),
+pub enum Ty {
+    Simple(Identifier),
+    Qualified(Vec<Identifier>),
+    Array(Box<Ty>),
+    Class(Option<Identifier>),
+    Delegate(Vec<Identifier>),
 }
 
 #[derive(Debug)]
@@ -173,16 +173,16 @@ pub enum ConstVal {
 }
 
 #[derive(Debug)]
-pub struct VarInstance<T> {
+pub struct VarInstance {
     pub name: Identifier,
-    pub count: DimCount<T>,
+    pub count: DimCount,
 }
 
 #[derive(Debug)]
-pub struct VarDef<T> {
-    pub ty: Ty<T>,
-    pub names: Vec<VarInstance<T>>,
-    pub mods: Modifiers<VarFlags, T>,
+pub struct VarDef {
+    pub ty: Ty,
+    pub names: Vec<VarInstance>,
+    pub mods: Modifiers<VarFlags>,
     pub span: Span,
 }
 
@@ -194,11 +194,11 @@ pub struct EnumDef {
 }
 
 #[derive(Debug)]
-pub struct StructDef<T> {
+pub struct StructDef {
     pub name: Identifier,
-    pub extends: Option<Vec<T>>,
-    pub fields: Vec<VarDef<T>>,
-    pub mods: Modifiers<StructFlags, T>,
+    pub extends: Option<Vec<Identifier>>,
+    pub fields: Vec<VarDef>,
+    pub mods: Modifiers<StructFlags>,
     pub span: Span,
 }
 
@@ -209,112 +209,112 @@ pub enum FuncName {
 }
 
 #[derive(Debug)]
-pub struct StateDef<T> {
-    pub name: T,
-    pub extends: Option<T>,
-    pub funcs: Vec<FuncDef<T>>,
-    pub statements: Vec<Statement<T>>,
-    pub span: Span,
-}
-
-#[derive(Debug)]
-pub struct FuncDef<T> {
-    pub name: FuncName,
-    pub overrides: Option<T>,
-    pub mods: Modifiers<FuncFlags, T>,
-    pub sig: FuncSig<T>,
-    pub body: Option<FuncBody<T>>,
-    pub span: Span,
-}
-
-#[derive(Debug)]
-pub struct FuncSig<T> {
-    pub ret_ty: Option<Ty<T>>,
-    pub args: Vec<FuncArg<T>>,
-}
-
-#[derive(Debug)]
-pub struct FuncArg<T> {
-    pub ty: Ty<T>,
+pub struct StateDef {
     pub name: Identifier,
-    pub count: DimCount<T>,
-    pub def: Option<Expr<T>>,
-    pub mods: Modifiers<ArgFlags, T>,
-}
-
-#[derive(Debug)]
-pub struct FuncBody<T> {
-    pub locals: Vec<Local<T>>,
-    pub consts: Vec<ConstDef>,
-    pub statements: Vec<Statement<T>>,
-}
-
-#[derive(Debug)]
-pub struct Statement<T> {
+    pub extends: Option<Identifier>,
+    pub funcs: Vec<FuncDef>,
+    pub statements: Vec<Statement>,
     pub span: Span,
-    pub kind: StatementKind<T>,
 }
 
 #[derive(Debug)]
-pub enum StatementKind<T> {
+pub struct FuncDef {
+    pub name: FuncName,
+    pub overrides: Option<Identifier>,
+    pub mods: Modifiers<FuncFlags>,
+    pub sig: FuncSig,
+    pub body: Option<FuncBody>,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub struct FuncSig {
+    pub ret_ty: Option<Ty>,
+    pub args: Vec<FuncArg>,
+}
+
+#[derive(Debug)]
+pub struct FuncArg {
+    pub ty: Ty,
+    pub name: Identifier,
+    pub count: DimCount,
+    pub def: Option<Expr>,
+    pub mods: Modifiers<ArgFlags>,
+}
+
+#[derive(Debug)]
+pub struct FuncBody {
+    pub locals: Vec<Local>,
+    pub consts: Vec<ConstDef>,
+    pub statements: Vec<Statement>,
+}
+
+#[derive(Debug)]
+pub struct Statement {
+    pub span: Span,
+    pub kind: StatementKind,
+}
+
+#[derive(Debug)]
+pub enum StatementKind {
     IfStatement {
-        cond: Expr<T>,
-        then: Block<T>,
-        or_else: Option<Block<T>>,
+        cond: Expr,
+        then: Block,
+        or_else: Option<Block>,
     },
     ForStatement {
-        init: Box<Statement<T>>,
-        cond: Expr<T>,
-        retry: Box<Statement<T>>,
-        run: Block<T>,
+        init: Box<Statement>,
+        cond: Expr,
+        retry: Box<Statement>,
+        run: Block,
     },
     ForeachStatement {
-        source: Expr<T>,
-        run: Block<T>,
+        source: Expr,
+        run: Block,
     },
     WhileStatement {
-        cond: Expr<T>,
-        run: Block<T>,
+        cond: Expr,
+        run: Block,
     },
     DoStatement {
-        cond: Expr<T>,
-        run: Vec<Statement<T>>,
+        cond: Expr,
+        run: Vec<Statement>,
     },
     SwitchStatement {
-        scrutinee: Expr<T>,
-        cases: Vec<CaseClause<T>>,
+        scrutinee: Expr,
+        cases: Vec<CaseClause>,
     },
     BreakStatement,
     ContinueStatement,
     ReturnStatement {
-        expr: Option<Expr<T>>,
+        expr: Option<Expr>,
     },
-    Label(T),
+    Label(Identifier),
     Assignment {
-        lhs: Expr<T>,
-        rhs: Expr<T>,
+        lhs: Expr,
+        rhs: Expr,
     },
     Expr {
-        expr: Expr<T>,
+        expr: Expr,
     },
 }
 
 #[derive(Debug)]
-pub struct CaseClause<T> {
-    pub case: Case<T>,
+pub struct CaseClause {
+    pub case: Case,
     pub case_span: Span,
-    pub statements: Vec<Statement<T>>,
+    pub statements: Vec<Statement>,
 }
 
 #[derive(Debug)]
-pub enum Case<T> {
-    Case(Expr<T>),
+pub enum Case {
+    Case(Expr),
     Default,
 }
 
 #[derive(Debug)]
-pub struct Block<T> {
-    pub stmts: Vec<Statement<T>>,
+pub struct Block {
+    pub stmts: Vec<Statement>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -359,48 +359,48 @@ pub enum Op {
 }
 
 #[derive(Debug)]
-pub enum Expr<T> {
+pub enum Expr {
     IndexExpr {
-        base: Box<Expr<T>>,
-        idx: Box<Expr<T>>,
+        base: Box<Expr>,
+        idx: Box<Expr>,
     },
     FieldExpr {
-        lhs: Box<Expr<T>>,
-        rhs: T,
+        lhs: Box<Expr>,
+        rhs: Identifier,
     },
     CallExpr {
-        lhs: Box<Expr<T>>,
-        args: Vec<Option<Expr<T>>>,
+        lhs: Box<Expr>,
+        args: Vec<Option<Expr>>,
     },
     ClassMetaCastExpr {
-        ty: Ty<T>,
-        expr: Box<Expr<T>>,
+        ty: Ty,
+        expr: Box<Expr>,
     },
     NewExpr {
-        args: Vec<Expr<T>>,
-        cls: Box<Expr<T>>,
-        arch: Option<Box<Expr<T>>>,
+        args: Vec<Expr>,
+        cls: Box<Expr>,
+        arch: Option<Box<Expr>>,
     },
     PreOpExpr {
         op: Op,
-        rhs: Box<Expr<T>>,
+        rhs: Box<Expr>,
     },
     PostOpExpr {
-        lhs: Box<Expr<T>>,
+        lhs: Box<Expr>,
         op: Op,
     },
     BinOpExpr {
-        lhs: Box<Expr<T>>,
+        lhs: Box<Expr>,
         op: Op,
-        rhs: Box<Expr<T>>,
+        rhs: Box<Expr>,
     },
     TernExpr {
-        cond: Box<Expr<T>>,
-        then: Box<Expr<T>>,
-        alt: Box<Expr<T>>,
+        cond: Box<Expr>,
+        then: Box<Expr>,
+        alt: Box<Expr>,
     },
     SymExpr {
-        sym: T,
+        sym: Identifier,
     },
     LiteralExpr {
         lit: Literal,
@@ -418,7 +418,7 @@ pub enum Literal {
 }
 
 #[derive(Debug)]
-pub struct Local<T> {
-    pub ty: Ty<T>,
-    pub names: Vec<VarInstance<T>>,
+pub struct Local {
+    pub ty: Ty,
+    pub names: Vec<VarInstance>,
 }
