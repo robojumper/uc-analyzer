@@ -6,7 +6,7 @@ use uc_def::{Expr, Op, Ty};
 
 use crate::{
     kw,
-    lexer::{Keyword, Sigil, Symbol, Token, TokenKind as Tk},
+    lexer::{Sigil, Token, TokenKind as Tk},
     sig,
 };
 
@@ -18,20 +18,33 @@ use super::{ParseError, Parser};
 /// to sigils but also not to operators on the HIR. We need to give parens and
 /// the ternary op a binding power, but also have the vector operators
 /// cross and dot. This might not be the best way to handle this.
-/// TODO: Investigate eagerly converting Sig to Op and create a FakeOp variant?
 #[derive(Copy, Clone, Debug)]
-enum SigilOrVecOp {
-    Sig(Sigil),
-    VecOp(Keyword),
+enum OpLike {
+    Op(Op),
+    Tern,
+    Dot,
+    LBrack,
+    LParen,
 }
 
-impl SigilOrVecOp {
-    fn to_op(self) -> Op {
+impl OpLike {
+    fn from_token(token: &Token) -> Option<Self> {
+        match token.kind {
+            sig!(Tern) => Some(OpLike::Tern),
+            sig!(Dot) => Some(OpLike::Dot),
+            sig!(LBrack) => Some(OpLike::LBrack),
+            sig!(LParen) => Some(OpLike::LParen),
+            kw!(Cross) => Some(OpLike::Op(Op::VecCross)),
+            kw!(Dot) => Some(OpLike::Op(Op::VecDot)),
+            Tk::Sig(s) => s.to_op().map(OpLike::Op),
+            _ => None,
+        }
+    }
+
+    fn unwrap_op(&self) -> Op {
         match self {
-            SigilOrVecOp::Sig(s) => s.to_op().unwrap(),
-            SigilOrVecOp::VecOp(Keyword::Cross) => Op::VecCross,
-            SigilOrVecOp::VecOp(Keyword::Dot) => Op::VecDot,
-            _ => unreachable!("only constructed with cross or dot"),
+            OpLike::Op(o) => *o,
+            _ => panic!("not an operator: {:?}", self),
         }
     }
 }
@@ -50,35 +63,37 @@ impl Parser<'_> {
                     self.expect(sig!(RParen))?;
                     lhs
                 }
-                Tk::Sig(sig) => match prefix_binding_power(SigilOrVecOp::Sig(sig)) {
-                    Some(((), r_bp)) => {
-                        let rhs = self.parse_base_expression_bp(r_bp)?;
-                        Expr::PreOpExpr {
-                            op: sig.to_op().unwrap(),
-                            rhs: Box::new(rhs),
-                        }
-                    }
-                    None => {
-                        // Hack: Simply eat a preoperator + if followed by a number directly. UCC just considers it
-                        // part of the number by feeding info back from the parser to the lexer.
-                        if sig == Sigil::Add
-                            && matches!(
-                                self.peek(),
-                                Some(Token {
-                                    kind: Tk::Number(_),
-                                    ..
-                                })
-                            )
-                        {
-                            self.next();
-                            Expr::LiteralExpr {
-                                lit: uc_def::Literal::Number,
+                Tk::Sig(sig) => {
+                    match OpLike::from_token(&tok).and_then(prefix_binding_power) {
+                        Some(((), r_bp)) => {
+                            let rhs = self.parse_base_expression_bp(r_bp)?;
+                            Expr::PreOpExpr {
+                                op: sig.to_op().unwrap(),
+                                rhs: Box::new(rhs),
                             }
-                        } else {
-                            return Err(self.fmt_err("Not a preoperator", Some(tok)));
+                        }
+                        None => {
+                            // Hack: Simply eat a preoperator + if followed by a number directly. UCC just considers it
+                            // part of the number by feeding info back from the parser to the lexer.
+                            if sig == Sigil::Add
+                                && matches!(
+                                    self.peek(),
+                                    Some(Token {
+                                        kind: Tk::Number(_),
+                                        ..
+                                    })
+                                )
+                            {
+                                self.next();
+                                Expr::LiteralExpr {
+                                    lit: uc_def::Literal::Number,
+                                }
+                            } else {
+                                return Err(self.fmt_err("Not a preoperator", Some(tok)));
+                            }
                         }
                     }
-                },
+                }
                 kw!(New) => {
                     let mut args = vec![];
                     if self.eat(sig!(LParen)) {
@@ -159,21 +174,13 @@ impl Parser<'_> {
             }
         };
 
+        #[allow(clippy::while_let_loop)]
         loop {
-            let op = match self.peek() {
-                Some(Token {
-                    kind: Tk::Sig(s), ..
-                }) if is_infix_or_postfix_op(s) => SigilOrVecOp::Sig(s),
-                Some(Token {
-                    kind: Tk::Sym(Symbol::Kw(k @ (Keyword::Cross | Keyword::Dot))),
-                    ..
-                }) => SigilOrVecOp::VecOp(k),
-                // EOF is fine, anything else is fine too. At least for now
-                // TODO: List tokens that could appear after exprs explicitly?
-                // `;` statement delimiter
-                // `,` arg delimiter (in case of optional arg expr)
-                // EOF file end
-                _ => break,
+            let op = if let Some(op) = self.peek().and_then(|t| OpLike::from_token(&t)) {
+                op
+            } else {
+                // break conditions: EOF, non-op token, or token that's not prefix or postfix op (break below)
+                break;
             };
 
             if let Some((l_bp, ())) = postfix_binding_power(op) {
@@ -182,14 +189,14 @@ impl Parser<'_> {
                 }
                 self.next();
 
-                lhs = if let SigilOrVecOp::Sig(Sigil::LBrack) = op {
+                lhs = if let OpLike::LBrack = op {
                     let rhs = self.parse_base_expression_bp(0)?;
                     self.expect(sig!(RBrack))?;
                     Expr::IndexExpr {
                         base: Box::new(lhs),
                         idx: Box::new(rhs),
                     }
-                } else if let SigilOrVecOp::Sig(Sigil::LParen) = op {
+                } else if let OpLike::LParen = op {
                     let mut args = vec![];
                     loop {
                         while self.eat(Tk::Comma) {
@@ -214,19 +221,16 @@ impl Parser<'_> {
                 } else {
                     Expr::PostOpExpr {
                         lhs: Box::new(lhs),
-                        op: op.to_op(),
+                        op: op.unwrap_op(),
                     }
                 };
-                continue;
-            }
-
-            if let Some((l_bp, r_bp)) = infix_binding_power(op) {
+            } else if let Some((l_bp, r_bp)) = infix_binding_power(op) {
                 if l_bp < min_bp {
                     break;
                 }
                 self.next();
 
-                lhs = if let SigilOrVecOp::Sig(Sigil::Tern) = op {
+                lhs = if let OpLike::Tern = op {
                     let mhs = self.parse_base_expression_bp(0)?;
                     self.expect(sig!(Colon))?;
                     let rhs = self.parse_base_expression_bp(r_bp)?;
@@ -235,7 +239,7 @@ impl Parser<'_> {
                         then: Box::new(mhs),
                         alt: Box::new(rhs),
                     }
-                } else if let SigilOrVecOp::Sig(Sigil::Dot) = op {
+                } else if let OpLike::Dot = op {
                     let rhs = self.expect_ident()?;
                     Expr::FieldExpr {
                         lhs: Box::new(lhs),
@@ -245,11 +249,12 @@ impl Parser<'_> {
                     let rhs = self.parse_base_expression_bp(r_bp)?;
                     Expr::BinOpExpr {
                         lhs: Box::new(lhs),
-                        op: op.to_op(),
+                        op: op.unwrap_op(),
                         rhs: Box::new(rhs),
                     }
                 };
-                continue;
+            } else {
+                break;
             }
         }
 
@@ -257,39 +262,34 @@ impl Parser<'_> {
     }
 }
 
-fn is_infix_or_postfix_op(op: Sigil) -> bool {
-    postfix_binding_power(SigilOrVecOp::Sig(op)).is_some()
-        || infix_binding_power(SigilOrVecOp::Sig(op)).is_some()
-}
-
 // Todo: is this correct?
-fn prefix_binding_power(op: SigilOrVecOp) -> Option<((), u8)> {
+fn prefix_binding_power(op: OpLike) -> Option<((), u8)> {
     let op = match op {
-        SigilOrVecOp::Sig(s) => s,
-        SigilOrVecOp::VecOp(_) => return None,
+        OpLike::Op(op) => op,
+        _ => return None,
     };
     let res = match op {
-        Sigil::Bang => ((), 11),
-        Sigil::AddAdd => ((), 11),
-        Sigil::SubSub => ((), 11),
-        Sigil::Tilde => ((), 11),
-        Sigil::Sub => ((), 11),
+        Op::Bang => ((), 11),
+        Op::AddAdd => ((), 11),
+        Op::SubSub => ((), 11),
+        Op::Tilde => ((), 11),
+        Op::Sub => ((), 11),
         _ => return None,
     };
     Some(res)
 }
 
 // Todo: is this correct?
-fn postfix_binding_power(op: SigilOrVecOp) -> Option<(u8, ())> {
+fn postfix_binding_power(op: OpLike) -> Option<(u8, ())> {
     let op = match op {
-        SigilOrVecOp::Sig(s) => s,
-        SigilOrVecOp::VecOp(_) => return None,
+        OpLike::LBrack => return Some((40, ())),
+        OpLike::LParen => return Some((40, ())),
+        OpLike::Op(op) => op,
+        _ => return None,
     };
     let res = match op {
-        Sigil::AddAdd => (10, ()),
-        Sigil::SubSub => (10, ()),
-        Sigil::LBrack => (40, ()),
-        Sigil::LParen => (40, ()),
+        Op::AddAdd => (10, ()),
+        Op::SubSub => (10, ()),
         _ => return None,
     };
     Some(res)
@@ -307,60 +307,60 @@ const NEW_PREFIX_POWER: ((), u8) = ((), 38);
 // The UC number in the () is the opposite of the binding power, i.e. lower number
 // binds stronger. The lowest specified binding power is 12, the highest is 34.
 // The numbers for UC operators were obtained by calculating (34+12)-n
-fn infix_binding_power(op: SigilOrVecOp) -> Option<(u8, u8)> {
+fn infix_binding_power(op: OpLike) -> Option<(u8, u8)> {
     let op = match op {
-        SigilOrVecOp::Sig(s) => s,
-        SigilOrVecOp::VecOp(_) => return Some((16, 17)),
+        OpLike::Dot => return Some((42, 43)),
+        OpLike::Tern => return Some((13, 12)),
+        OpLike::Op(op) => op,
+        _ => return None,
     };
     let res = match op {
-        Sigil::Dot => (42, 43),
+        Op::MulMul => (34, 35),
 
-        Sigil::MulMul => (34, 35),
+        Op::Mul => (30, 31),
+        Op::Div => (30, 31),
 
-        Sigil::Mul => (30, 31),
-        Sigil::Div => (30, 31),
+        Op::Mod => (28, 29),
 
-        Sigil::Mod => (28, 29),
+        Op::Add => (26, 27),
+        Op::Sub => (26, 27),
 
-        Sigil::Add => (26, 27),
-        Sigil::Sub => (26, 27),
+        Op::LtLt => (24, 25),
+        Op::GtGt => (24, 25),
+        Op::GtGtGt => (24, 25),
 
-        Sigil::LtLt => (24, 25),
-        Sigil::GtGt => (24, 25),
-        Sigil::GtGtGt => (24, 25),
+        Op::Lt => (22, 23),
+        Op::Gt => (22, 23),
+        Op::LtEq => (22, 23),
+        Op::GtEq => (22, 23),
+        Op::EqEq => (22, 23),
+        Op::TildeEq => (22, 23),
 
-        Sigil::Lt => (22, 23),
-        Sigil::Gt => (22, 23),
-        Sigil::LtEq => (22, 23),
-        Sigil::GtEq => (22, 23),
-        Sigil::EqEq => (22, 23),
-        Sigil::TildeEq => (22, 23),
+        Op::BangEq => (20, 21),
 
-        Sigil::BangEq => (20, 21),
+        Op::And => (18, 19),
+        Op::Pow => (18, 19),
+        Op::Or => (18, 19),
 
-        Sigil::And => (18, 19),
-        Sigil::Pow => (18, 19),
-        Sigil::Or => (18, 19),
+        Op::AndAnd => (16, 17),
+        Op::PowPow => (16, 17),
 
-        Sigil::AndAnd => (16, 17),
-        Sigil::PowPow => (16, 17),
+        Op::VecCross => (16, 17),
+        Op::VecDot => (16, 17),
 
-        Sigil::OrOr => (14, 15),
+        Op::OrOr => (14, 15),
 
-        // Inserted here...
-        Sigil::Tern => (13, 12),
+        // Pushed these down from 12, 13 to accomodate ternary
+        Op::MulAssign => (10, 11),
+        Op::DivAssign => (10, 11),
+        Op::AddAssign => (10, 11),
+        Op::SubAssign => (10, 11),
 
-        // And pushed these down from 12, 13 to accomodate ternary
-        Sigil::MulAssign => (10, 11),
-        Sigil::DivAssign => (10, 11),
-        Sigil::AddAssign => (10, 11),
-        Sigil::SubAssign => (10, 11),
+        Op::Dollar => (8, 9),
+        Op::At => (8, 9),
 
-        Sigil::Dollar => (8, 9),
-        Sigil::At => (8, 9),
-
-        Sigil::DollarAssign => (6, 7),
-        Sigil::AtAssign => (6, 7),
+        Op::DollarAssign => (6, 7),
+        Op::AtAssign => (6, 7),
         // Technically there's a `-=` for strings with an even lower binding power
         // here. We just pretend it doesn't exist. Fix your own code.
         _ => return None,
