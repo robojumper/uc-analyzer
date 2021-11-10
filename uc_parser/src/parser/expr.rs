@@ -28,7 +28,7 @@ enum SigilOrVecOp {
 impl SigilOrVecOp {
     fn to_op(self) -> Op {
         match self {
-            SigilOrVecOp::Sig(s) => s.to_op(),
+            SigilOrVecOp::Sig(s) => s.to_op().unwrap(),
             SigilOrVecOp::VecOp(Keyword::Cross) => Op::VecCross,
             SigilOrVecOp::VecOp(Keyword::Dot) => Op::VecDot,
             _ => unreachable!("only constructed with cross or dot"),
@@ -54,7 +54,7 @@ impl Parser<'_> {
                     Some(((), r_bp)) => {
                         let rhs = self.parse_base_expression_bp(r_bp)?;
                         Expr::PreOpExpr {
-                            op: sig.to_op(),
+                            op: sig.to_op().unwrap(),
                             rhs: Box::new(rhs),
                         }
                     }

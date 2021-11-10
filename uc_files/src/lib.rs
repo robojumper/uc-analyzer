@@ -68,6 +68,7 @@ impl Sources {
         Ok(file_id)
     }
 
+    #[inline]
     pub fn file_span(&self, f_id: FileId) -> Span {
         self.metadata[f_id.0 as usize].span
     }
@@ -92,10 +93,12 @@ impl Sources {
         ))
     }
 
+    #[inline]
     pub fn lookup_bytes(&self, span: Span) -> &[u8] {
         &self.data[span.start as usize..span.end as usize]
     }
 
+    #[inline]
     pub fn file_name(&self, f_id: FileId) -> &Identifier {
         &self.metadata[f_id.0 as usize].name
     }

@@ -317,8 +317,8 @@ impl Parser<'_> {
                     kw!(Cross) => FuncName::Oper(Op::VecCross),
                     kw!(Dot) => FuncName::Oper(Op::VecDot),
                     Tk::Sym(_) => FuncName::Iden(self.sym_to_ident(&name_tok)),
-                    Tk::Sig(s) if allow_op_sigil && s.is_overloadable_op() => {
-                        FuncName::Oper(s.to_op())
+                    Tk::Sig(s) if allow_op_sigil && s.to_op().is_some() => {
+                        FuncName::Oper(s.to_op().unwrap())
                     }
                     _ => return Err(self.fmt_err("expected function name", Some(name_tok))),
                 }
