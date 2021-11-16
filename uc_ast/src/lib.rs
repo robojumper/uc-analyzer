@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+pub use uc_def;
 use uc_def::{ArgFlags, ClassFlags, Flags, FuncFlags, StructFlags, VarFlags};
 use uc_files::Span;
 use uc_name::Identifier;
@@ -226,6 +227,7 @@ pub enum Case {
 
 #[derive(Debug)]
 pub struct Block {
+    pub from_single_stmt: bool,
     pub stmts: Vec<Statement>,
 }
 

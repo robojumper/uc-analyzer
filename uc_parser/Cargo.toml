@@ -16,3 +16,4 @@ uc_files = { path = "../uc_files" }
 
 [dev-dependencies]
 walkdir = "2"
+uc_analysis = { path = "../uc_analysis" }

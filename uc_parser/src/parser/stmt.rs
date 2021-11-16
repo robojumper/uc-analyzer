@@ -32,14 +32,23 @@ fn stmt_wants_semi(stmt: &StatementKind) -> bool {
 impl Parser<'_> {
     fn parse_block_or_stmt(&mut self, ctx: (&'static str, Span)) -> Result<Block, ParseError> {
         if self.eat(Tk::Semi) {
-            Ok(Block { stmts: vec![] })
+            Ok(Block {
+                stmts: vec![],
+                from_single_stmt: true,
+            })
         } else if self.eat(sig!(LBrace)) {
             let stmts = self.parse_statements();
             self.expect(sig!(RBrace))?;
-            Ok(Block { stmts })
+            Ok(Block {
+                stmts,
+                from_single_stmt: false,
+            })
         } else {
             let stmt = self.expect_one_statement(ctx, true)?;
-            Ok(Block { stmts: vec![stmt] })
+            Ok(Block {
+                stmts: vec![stmt],
+                from_single_stmt: true,
+            })
         }
     }
 

@@ -22,6 +22,7 @@ pub struct Sources {
 struct SourceFileMetadata {
     name: Identifier,
     span: Span,
+    line_heads: Vec<u32>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -59,9 +60,19 @@ impl Sources {
         let span = Span { start, end };
 
         let file_id = FileId(self.metadata.len() as u32);
+        let line_heads = std::iter::once(0)
+            .chain(data.iter().enumerate().filter_map(|(idx, &b)| {
+                if b == b'\n' {
+                    Some(idx as u32)
+                } else {
+                    None
+                }
+            }))
+            .collect();
         self.metadata.push(SourceFileMetadata {
             name: name.clone(),
             span,
+            line_heads,
         });
 
         self.files_names.insert(name, file_id);
