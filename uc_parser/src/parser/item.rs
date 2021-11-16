@@ -1,4 +1,4 @@
-use uc_def::{
+use uc_ast::{
     ClassDef, ClassFlags, ClassHeader, ConstDef, ConstVal, DimCount, EnumDef, FuncArg, FuncBody,
     FuncDef, FuncName, FuncSig, Local, Op, StateDef, Statement, StructDef, Ty, VarDef, VarInstance,
 };

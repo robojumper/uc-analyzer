@@ -2,7 +2,7 @@ use std::{collections::HashMap, hash::Hash};
 
 use bitflags::bitflags;
 use once_cell::sync::Lazy;
-use uc_def::{ArgFlags, ClassFlags, Flags, FuncFlags, Modifiers, StructFlags, Values, VarFlags};
+use uc_ast::{ArgFlags, ClassFlags, Flags, FuncFlags, Modifiers, StructFlags, Values, VarFlags};
 
 use crate::{
     lexer::{Keyword as Kw, Symbol, Token, TokenKind as Tk},

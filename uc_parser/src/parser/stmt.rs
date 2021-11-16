@@ -1,6 +1,6 @@
 use std::vec;
 
-use uc_def::{Block, Case, CaseClause, Statement, StatementKind};
+use uc_ast::{Block, Case, CaseClause, Statement, StatementKind};
 use uc_files::Span;
 
 use crate::{

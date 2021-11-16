@@ -2,7 +2,7 @@
 //! See https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
 //! for an introduction to Pratt parsing.
 
-use uc_def::{Expr, Op, Ty};
+use uc_ast::{Expr, Op, Ty};
 
 use crate::{
     kw,
@@ -86,7 +86,7 @@ impl Parser<'_> {
                             {
                                 self.next();
                                 Expr::LiteralExpr {
-                                    lit: uc_def::Literal::Number,
+                                    lit: uc_ast::Literal::Number,
                                 }
                             } else {
                                 return Err(self.fmt_err("Not a preoperator", Some(tok)));
@@ -149,26 +149,26 @@ impl Parser<'_> {
                 {
                     self.next();
                     Expr::LiteralExpr {
-                        lit: uc_def::Literal::ObjReference,
+                        lit: uc_ast::Literal::ObjReference,
                     }
                 }
                 kw!(None) => Expr::LiteralExpr {
-                    lit: uc_def::Literal::None,
+                    lit: uc_ast::Literal::None,
                 },
                 Tk::Sym(_) => Expr::SymExpr {
                     sym: self.sym_to_ident(&tok),
                 },
                 Tk::Number(_) => Expr::LiteralExpr {
-                    lit: uc_def::Literal::Number,
+                    lit: uc_ast::Literal::Number,
                 },
                 Tk::String => Expr::LiteralExpr {
-                    lit: uc_def::Literal::String(self.lex.extract_string(&tok)),
+                    lit: uc_ast::Literal::String(self.lex.extract_string(&tok)),
                 },
                 Tk::Name => Expr::LiteralExpr {
-                    lit: uc_def::Literal::Name,
+                    lit: uc_ast::Literal::Name,
                 },
                 Tk::Bool(_) => Expr::LiteralExpr {
-                    lit: uc_def::Literal::Bool,
+                    lit: uc_ast::Literal::Bool,
                 },
                 _ => return Err(self.fmt_err("Unknown start of expression", Some(tok))),
             }

@@ -7,7 +7,7 @@ mod item;
 mod modifiers;
 mod stmt;
 
-use uc_def::{Hir, Ty};
+use uc_ast::{Hir, Ty};
 use uc_files::Span;
 use uc_name::Identifier;
 

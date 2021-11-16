@@ -2,7 +2,7 @@
 
 use std::str::FromStr;
 
-use uc_def::pretty;
+use uc_ast::pretty;
 use uc_files::Sources;
 use uc_name::Identifier;
 
