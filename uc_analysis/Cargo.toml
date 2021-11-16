@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 uc_ast = { path = "../uc_ast" }
+uc_files = { path = "../uc_files" }

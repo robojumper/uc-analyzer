@@ -1,5 +1,9 @@
 use std::{borrow::Cow, cmp::Ordering, collections::HashMap};
 
+use annotate_snippets::{
+    display_list::{self, FormatOptions},
+    snippet::{Annotation, AnnotationType, Slice, Snippet, SourceAnnotation},
+};
 use uc_name::Identifier;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -27,6 +31,7 @@ struct SourceFileMetadata {
 
 #[derive(Copy, Clone, Debug)]
 pub enum LookupError {
+    CrossFileSpan,
     InvalidBytePos,
     NonUtf8,
 }
@@ -37,7 +42,14 @@ pub enum InputError {
     Utf16UnpairedSurrogate,
 }
 
+pub struct ErrorReport {
+    pub msg: String,
+    pub full_text: Span,
+    pub inlay_messages: Vec<(String, Span)>,
+}
+
 impl Sources {
+    #[inline]
     pub fn new() -> Self {
         Self::default()
     }
@@ -60,10 +72,10 @@ impl Sources {
         let span = Span { start, end };
 
         let file_id = FileId(self.metadata.len() as u32);
-        let line_heads = std::iter::once(0)
+        let line_heads = std::iter::once(start)
             .chain(data.iter().enumerate().filter_map(|(idx, &b)| {
                 if b == b'\n' {
-                    Some(idx as u32)
+                    Some(idx as u32 + start + 1)
                 } else {
                     None
                 }
@@ -91,12 +103,12 @@ impl Sources {
         Ok(FileId(
             self.metadata
                 .binary_search_by(|data| {
-                    if data.span.start > byte_pos {
+                    if byte_pos < data.span.start {
                         Ordering::Greater
                     } else if data.span.end < byte_pos {
                         Ordering::Less
                     } else {
-                        assert!(byte_pos >= data.span.start && byte_pos <= data.span.end);
+                        assert!(data.span.start <= byte_pos && byte_pos <= data.span.end);
                         Ordering::Equal
                     }
                 })
@@ -114,8 +126,125 @@ impl Sources {
         &self.metadata[f_id.0 as usize].name
     }
 
+    #[inline]
     pub fn lookup_str(&self, span: Span) -> Result<&str, LookupError> {
         std::str::from_utf8(self.lookup_bytes(span)).map_err(|_| LookupError::NonUtf8)
+    }
+
+    pub fn emit_err_(&self, err: &ErrorReport) {
+        let full_span = err.full_text;
+        let (fid, source, line_start, remapped_span) = self.lookup_lines(full_span).unwrap();
+        // FIXME
+        let source = source.replace('\t', " ");
+
+        let annotations = err
+            .inlay_messages
+            .iter()
+            .map(|(msg, span)| {
+                assert!(span.start >= full_span.start && span.end <= full_span.end);
+                SourceAnnotation {
+                    range: (
+                        (span.start - full_span.start + remapped_span.start) as usize,
+                        (span.end - full_span.start + remapped_span.start) as usize,
+                    ),
+                    label: msg,
+                    annotation_type: AnnotationType::Warning,
+                }
+            })
+            .collect();
+
+        let slices = vec![Slice {
+            source: &*source,
+            line_start,
+            origin: Some(self.metadata[fid.0 as usize].name.as_ref()),
+            annotations,
+            fold: false,
+        }];
+        let snippet = Snippet {
+            title: Some(Annotation {
+                annotation_type: AnnotationType::Warning,
+                id: None,
+                label: Some(&err.msg),
+            }),
+            footer: vec![],
+            slices,
+            opt: FormatOptions::default(),
+        };
+
+        eprintln!("{}", display_list::DisplayList::from(snippet));
+    }
+
+    pub fn emit_err(&self, error_msg: &str, msg: &str, span: Span) {
+        let (fid, source, line_start, span) = self.lookup_lines(span).unwrap();
+        // FIXME
+        let source = source.replace('\t', " ");
+
+        let annotations = vec![SourceAnnotation {
+            range: (span.start as usize, span.end as usize),
+            label: msg,
+            annotation_type: AnnotationType::Warning,
+        }];
+        let slices = vec![Slice {
+            source: &*source,
+            line_start,
+            origin: Some(self.metadata[fid.0 as usize].name.as_ref()),
+            annotations,
+            fold: false,
+        }];
+        let snippet = Snippet {
+            title: Some(Annotation {
+                annotation_type: AnnotationType::Warning,
+                id: None,
+                label: Some(error_msg),
+            }),
+            footer: vec![],
+            slices,
+            opt: FormatOptions::default(),
+        };
+
+        eprintln!("{}", display_list::DisplayList::from(snippet));
+    }
+
+    /// -> FileID, data, first line number, remapped span
+    fn lookup_lines(&self, span: Span) -> Result<(FileId, &str, usize, Span), LookupError> {
+        let fid_a = self.lookup_file(span.start)?;
+        let fid_b = self.lookup_file(span.end)?;
+        if fid_a != fid_b {
+            return Err(LookupError::CrossFileSpan);
+        }
+
+        let meta = &self.metadata[fid_a.0 as usize];
+
+        let line_idx_a = meta
+            .line_heads
+            .binary_search(&span.start)
+            .map_or_else(|x| x - 1, |x| x);
+        let line_idx_b = meta
+            .line_heads
+            .binary_search(&span.end)
+            .map_or_else(|x| x - 1, |x| x);
+
+        let start_idx = meta.line_heads[line_idx_a];
+        let end_idx = meta
+            .line_heads
+            .get(line_idx_b + 1)
+            .copied()
+            .unwrap_or(meta.span.end + 1)
+            - 1;
+
+        let remapped_span = Span {
+            start: span.start - start_idx,
+            end: span.end - start_idx,
+        };
+
+        // FIXME
+        let str = self
+            .lookup_str(Span {
+                start: start_idx,
+                end: end_idx,
+            })
+            .unwrap();
+        Ok((fid_a, str, line_idx_a + 1, remapped_span))
     }
 }
 

@@ -6,6 +6,7 @@ use uc_files::Span;
 use uc_name::Identifier;
 
 pub mod pretty;
+pub mod visit;
 
 #[derive(Debug)]
 pub enum Values {
@@ -216,7 +217,7 @@ pub enum StatementKind {
 pub struct CaseClause {
     pub case: Case,
     pub case_span: Span,
-    pub statements: Vec<Statement>,
+    pub stmts: Vec<Statement>,
 }
 
 #[derive(Debug)]

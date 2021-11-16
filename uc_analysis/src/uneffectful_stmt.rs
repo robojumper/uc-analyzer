@@ -1,89 +1,74 @@
-use uc_ast::{Expr, Hir, Op, Statement, StatementKind};
+use uc_ast::{
+    visit::{self, StatementVisitor},
+    Expr, Hir, Op, Statement, StatementKind,
+};
+use uc_files::Span;
 
-pub fn visit_hir(hir: &Hir) {
+struct UneffectfulStmtsVisitor {
+    errs: Vec<(&'static str, Span)>,
+}
+
+impl StatementVisitor for UneffectfulStmtsVisitor {
+    fn visit_statement(&mut self, stmt: &Statement) {
+        visit::walk_statement(self, stmt);
+        if let StatementKind::Expr { expr } = &stmt.kind {
+            if let Some(err) = expr_no_effects(expr) {
+                self.errs.push((err, stmt.span));
+            }
+        }
+    }
+}
+
+pub fn visit_hir(hir: &Hir) -> Vec<(&'static str, Span)> {
+    let mut visitor = UneffectfulStmtsVisitor { errs: vec![] };
     for func in &hir.funcs {
         if let Some(body) = &func.body {
-            visit_statements(&body.statements);
+            visit::walk_statements(&mut visitor, &body.statements);
         }
     }
     for state in &hir.states {
-        visit_statements(&state.statements);
+        visit::walk_statements(&mut visitor, &state.statements);
     }
+
+    visitor.errs
 }
 
-fn visit_statements(statements: &[Statement]) {
-    for s in statements {
-        visit_statement(s);
-    }
-}
-
-fn visit_statement(statement: &Statement) {
-    match &statement.kind {
-        StatementKind::IfStatement {
-            cond: _,
-            then,
-            or_else,
-        } => {
-            visit_statements(&then.stmts);
-            if let Some(b) = or_else {
-                visit_statements(&b.stmts);
-            }
-        }
-        StatementKind::ForStatement {
-            init,
-            cond,
-            retry,
-            run,
-        } => {
-            visit_statement(init);
-            visit_statement(retry);
-            visit_statements(&run.stmts);
-        }
-        StatementKind::ForeachStatement { source, run } => visit_statements(&run.stmts),
-        StatementKind::WhileStatement { cond, run } => visit_statements(&run.stmts),
-        StatementKind::DoStatement { cond, run } => visit_statements(run),
-        StatementKind::SwitchStatement { scrutinee, cases } => {
-            for case in cases {
-                visit_statements(&case.statements)
-            }
-        }
-        StatementKind::BreakStatement => {}
-        StatementKind::ContinueStatement => {}
-        StatementKind::ReturnStatement { expr } => {}
-        StatementKind::Label(_) => {}
-        StatementKind::Assignment { lhs, rhs } => {}
-        StatementKind::Expr { expr } => {
-            if !expr_side_effectful(expr) {
-                panic!("Expression statement has no effect: {:?}", expr);
-            }
-        }
-    }
-}
-
-fn expr_side_effectful(expr: &Expr) -> bool {
+fn expr_no_effects(expr: &Expr) -> Option<&'static str> {
     match &expr {
-        Expr::IndexExpr { base, idx } => false,
-        Expr::FieldExpr { lhs, rhs } => false,
-        Expr::CallExpr { lhs, args } => true,
-        Expr::ClassMetaCastExpr { ty, expr } => false,
-        Expr::NewExpr { args, cls, arch } => false,
-        Expr::PreOpExpr { op, rhs } => true,
-        Expr::PostOpExpr { lhs, op } => true,
-        Expr::BinOpExpr { lhs, op, rhs } => op_side_effectful(*op),
-        Expr::TernExpr { cond, then, alt } => expr_side_effectful(then) || expr_side_effectful(alt),
-        Expr::SymExpr { sym } => false,
-        Expr::LiteralExpr { lit } => false,
+        Expr::IndexExpr { base: _, idx: _ } => Some("index expression has no side effect"),
+        Expr::FieldExpr { lhs: _, rhs: _ } => Some("place expression has no side effect"),
+        Expr::CallExpr { lhs: _, args: _ } => None,
+        Expr::ClassMetaCastExpr { ty: _, expr: _ } => {
+            Some("class meta cast expression has no side effect")
+        }
+        Expr::NewExpr {
+            args: _,
+            cls: _,
+            arch: _,
+        } => Some("class construction has no side effect"),
+        Expr::PreOpExpr { op: _, rhs: _ } => None,
+        Expr::PostOpExpr { lhs: _, op: _ } => None,
+        Expr::BinOpExpr { lhs: _, op, rhs: _ } => op_no_effects(*op),
+        Expr::TernExpr { cond: _, then, alt } => {
+            if expr_no_effects(then).is_some() || expr_no_effects(alt).is_some() {
+                Some("a branch in this ternary expression has no effect")
+            } else {
+                None
+            }
+        }
+        Expr::SymExpr { sym: _ } => Some("symbol expression has no effect"),
+        Expr::LiteralExpr { lit: _ } => Some("literal expression has no effect"),
     }
 }
 
-fn op_side_effectful(op: Op) -> bool {
-    matches!(
-        op,
+fn op_no_effects(op: Op) -> Option<&'static str> {
+    match op {
         Op::AtAssign
-            | Op::AddAssign
-            | Op::DivAssign
-            | Op::MulAssign
-            | Op::SubAssign
-            | Op::DollarAssign
-    )
+        | Op::AddAssign
+        | Op::DivAssign
+        | Op::MulAssign
+        | Op::SubAssign
+        | Op::DollarAssign => None,
+        _ => Some("operator has no side effect"),
+    }
 }

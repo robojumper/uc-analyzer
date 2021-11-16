@@ -79,7 +79,7 @@ impl<W: io::Write> PPrinter<W> {
                         crate::Case::Default => self.w.write_all(b"default:\n")?,
                     }
                     self.indent_incr();
-                    for stmt in &case.statements {
+                    for stmt in &case.stmts {
                         self.indent()?;
                         self.format_statement(stmt)?;
                         self.w.write_all(b"\n")?

@@ -94,7 +94,7 @@ impl Parser<'_> {
             }
         };
         while self.eat(Tk::Semi) {} // FIXME: Where is this hit?
-        let mut statements = vec![];
+        let mut stmts = vec![];
 
         loop {
             match self.peek_any()?.kind {
@@ -105,7 +105,7 @@ impl Parser<'_> {
                     // case label, or a statement
                     let stmt = self.expect_one_statement(("switch clause", case_span), true)?;
                     while self.eat(Tk::Semi) {} // FIXME: Where is this hit?
-                    statements.push(stmt);
+                    stmts.push(stmt);
                 }
             }
         }
@@ -113,7 +113,7 @@ impl Parser<'_> {
         Ok(Some(CaseClause {
             case,
             case_span,
-            statements,
+            stmts,
         }))
     }
 
