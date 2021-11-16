@@ -15,7 +15,7 @@ pub struct MissingBreak {
     pub and_then_executes: Option<Span>,
 }
 
-pub fn visit_hir<'a>(hir: &'_ Hir, source: &'a Sources) -> Vec<MissingBreak> {
+pub fn visit_hir(hir: &'_ Hir, source: &'_ Sources) -> Vec<MissingBreak> {
     let mut visitor = MissingBreakVisitor {
         errs: vec![],
         source,
@@ -47,7 +47,11 @@ impl StatementVisitor for MissingBreakVisitor<'_> {
 
 impl MissingBreakVisitor<'_> {
     fn check_switch_statement(&mut self, _statement: &Statement, cases: &[CaseClause]) {
-        for cs in cases.windows(2) {
+        let ccs = cases
+            .iter()
+            .filter(|&cc| !cc.stmts.is_empty())
+            .collect::<Vec<_>>();
+        for cs in ccs.windows(2) {
             let cs1 = &cs[0];
             let cs2 = &cs[1];
 
