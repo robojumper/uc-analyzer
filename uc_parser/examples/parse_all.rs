@@ -85,11 +85,11 @@ fn main() {
                 msg: "expression statement has no effect".to_owned(),
                 inlay_messages: vec![(err.0.to_owned(), err.1)],
             };
-            sources.emit_err_(&err);
+            sources.emit_err(&err);
         }
 
-        let uneffectful_errs = uc_analysis::missing_break::visit_hir(&hir, &sources);
-        for err in uneffectful_errs {
+        let missing_breaks = uc_analysis::missing_break::visit_hir(&hir, &sources);
+        for err in missing_breaks {
             let first_msg = ("control flow from this label...".to_owned(), err.from_label);
             let mut second_msg = (
                 "...implicitly falls through to this label".to_owned(),
@@ -114,7 +114,17 @@ fn main() {
                 msg: "implicit fallthrough".to_owned(),
                 inlay_messages,
             };
-            sources.emit_err_(&err);
+            sources.emit_err(&err);
+        }
+
+        let dangling_elses = uc_analysis::dangling_else::visit_hir(&hir);
+        for err in dangling_elses {
+            let err = ErrorReport {
+                full_text: err.whole_thing,
+                msg: "if if else is ambiguous".to_owned(),
+                inlay_messages: vec![("this one".to_owned(), err.whole_thing)],
+            };
+            sources.emit_err(&err);
         }
 
         hirs.push(hir);

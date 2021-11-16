@@ -131,7 +131,7 @@ impl Sources {
         std::str::from_utf8(self.lookup_bytes(span)).map_err(|_| LookupError::NonUtf8)
     }
 
-    pub fn emit_err_(&self, err: &ErrorReport) {
+    pub fn emit_err(&self, err: &ErrorReport) {
         let full_span = err.full_text;
         let (fid, source, line_start, remapped_span) = self.lookup_lines(full_span).unwrap();
         // FIXME
@@ -165,37 +165,6 @@ impl Sources {
                 annotation_type: AnnotationType::Warning,
                 id: None,
                 label: Some(&err.msg),
-            }),
-            footer: vec![],
-            slices,
-            opt: FormatOptions::default(),
-        };
-
-        eprintln!("{}", display_list::DisplayList::from(snippet));
-    }
-
-    pub fn emit_err(&self, error_msg: &str, msg: &str, span: Span) {
-        let (fid, source, line_start, span) = self.lookup_lines(span).unwrap();
-        // FIXME
-        let source = source.replace('\t', " ");
-
-        let annotations = vec![SourceAnnotation {
-            range: (span.start as usize, span.end as usize),
-            label: msg,
-            annotation_type: AnnotationType::Warning,
-        }];
-        let slices = vec![Slice {
-            source: &*source,
-            line_start,
-            origin: Some(self.metadata[fid.0 as usize].name.as_ref()),
-            annotations,
-            fold: false,
-        }];
-        let snippet = Snippet {
-            title: Some(Annotation {
-                annotation_type: AnnotationType::Warning,
-                id: None,
-                label: Some(error_msg),
             }),
             footer: vec![],
             slices,
