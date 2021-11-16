@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "uc_ast",
+    "uc_def",
     "uc_files",
     "uc_name",
     "uc_parser",

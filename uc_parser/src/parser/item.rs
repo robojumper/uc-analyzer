@@ -1,6 +1,6 @@
 use uc_ast::{
-    ClassDef, ClassFlags, ClassHeader, ConstDef, ConstVal, DimCount, EnumDef, FuncArg, FuncBody,
-    FuncDef, FuncName, FuncSig, Local, Op, StateDef, Statement, StructDef, Ty, VarDef, VarInstance,
+    ClassDef, ClassHeader, ConstDef, ConstVal, DimCount, EnumDef, FuncArg, FuncBody, FuncDef,
+    FuncName, FuncSig, Local, Op, StateDef, Statement, StructDef, Ty, VarDef, VarInstance,
 };
 
 use super::{ParseError, Parser};
@@ -57,7 +57,6 @@ impl Parser<'_> {
                     extends,
                     within,
                     implements: vec![],
-                    flags: ClassFlags::empty(),
                 },
                 mods,
             )

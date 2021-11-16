@@ -1,11 +1,9 @@
 [package]
-name = "uc_ast"
+name = "uc_def"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-uc_files = { path = "../uc_files" }
-uc_def = { path = "../uc_def" }
-uc_name = { path = "../uc_name" }
+bitflags = "1.3.2"

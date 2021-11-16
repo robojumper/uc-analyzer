@@ -102,41 +102,44 @@ fn visit_statements(statements: &[Statement]) {
 
 fn visit_statement(statement: &Statement) {
     match &statement.kind {
-        StatementKind::IfStatement { cond, then, or_else } => {
+        StatementKind::IfStatement {
+            cond,
+            then,
+            or_else,
+        } => {
             visit_statements(&then.stmts);
             if let Some(b) = or_else {
                 visit_statements(&b.stmts);
             }
-        },
-        StatementKind::ForStatement { init, cond, retry, run } => {
+        }
+        StatementKind::ForStatement {
+            init,
+            cond,
+            retry,
+            run,
+        } => {
             visit_statement(init);
             visit_statement(retry);
             visit_statements(&run.stmts);
-        },
-        StatementKind::ForeachStatement { source, run } => {
-            visit_statements(&run.stmts)
-        },
-        StatementKind::WhileStatement { cond, run } => {
-            visit_statements(&run.stmts)
-        },
-        StatementKind::DoStatement { cond, run } => {
-            visit_statements(run)
-        },
+        }
+        StatementKind::ForeachStatement { source, run } => visit_statements(&run.stmts),
+        StatementKind::WhileStatement { cond, run } => visit_statements(&run.stmts),
+        StatementKind::DoStatement { cond, run } => visit_statements(run),
         StatementKind::SwitchStatement { scrutinee, cases } => {
             for case in cases {
                 visit_statements(&case.statements)
             }
-        },
-        StatementKind::BreakStatement => {},
-        StatementKind::ContinueStatement => {},
-        StatementKind::ReturnStatement { expr } => {},
-        StatementKind::Label(_) => {},
-        StatementKind::Assignment { lhs, rhs } => {},
+        }
+        StatementKind::BreakStatement => {}
+        StatementKind::ContinueStatement => {}
+        StatementKind::ReturnStatement { expr } => {}
+        StatementKind::Label(_) => {}
+        StatementKind::Assignment { lhs, rhs } => {}
         StatementKind::Expr { expr } => {
             if !expr_side_effectful(expr) {
                 panic!("Expression statement has no effect: {:?}", expr);
             }
-        },
+        }
     }
 }
 
@@ -158,7 +161,12 @@ fn expr_side_effectful(expr: &Expr) -> bool {
 
 fn op_side_effectful(op: Op) -> bool {
     match op {
-        Op::AtAssign | Op::AddAssign | Op::DivAssign | Op::MulAssign | Op::SubAssign | Op::DollarAssign => true,
+        Op::AtAssign
+        | Op::AddAssign
+        | Op::DivAssign
+        | Op::MulAssign
+        | Op::SubAssign
+        | Op::DollarAssign => true,
         _ => false,
     }
 }

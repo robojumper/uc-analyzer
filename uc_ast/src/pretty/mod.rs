@@ -1,8 +1,10 @@
 use std::io;
 
+use uc_def::{ArgFlags, FuncFlags};
+
 use crate::{
-    ArgFlags, ClassDef, ClassHeader, ConstDef, EnumDef, Expr, FuncBody, FuncDef, FuncFlags,
-    FuncName, FuncSig, Hir, Identifier, Local, StateDef, StructDef, Ty, VarDef, VarInstance,
+    ClassDef, ClassHeader, ConstDef, EnumDef, Expr, FuncBody, FuncDef, FuncName, FuncSig, Hir,
+    Identifier, Local, StateDef, StructDef, Ty, VarDef, VarInstance,
 };
 
 mod stmts;
