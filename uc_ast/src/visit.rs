@@ -1,4 +1,4 @@
-use crate::{Expr, Statement, StatementKind};
+use crate::{Expr, ExprKind, Statement, StatementKind};
 
 macro_rules! walk_list {
     ($visitor: expr, $method: ident, $list: expr) => {
@@ -102,44 +102,44 @@ fn maybe_visit_expr<V: Visitor>(visit: &mut V, expr: &Expr) {
 
 pub fn walk_expr<V: Visitor>(visit: &mut V, expr: &Expr) {
     match &expr.kind {
-        crate::ExprKind::IndexExpr { base, idx } => {
+        ExprKind::IndexExpr { base, idx } => {
             visit.visit_expr(base);
             visit.visit_expr(idx);
         }
-        crate::ExprKind::FieldExpr { lhs, rhs: _ } => {
+        ExprKind::FieldExpr { lhs, rhs: _ } => {
             visit.visit_expr(lhs);
         }
-        crate::ExprKind::CallExpr { lhs, args } => {
+        ExprKind::CallExpr { lhs, args } => {
             visit.visit_expr(lhs);
             for arg in args.iter().flatten() {
                 visit.visit_expr(arg);
             }
         }
-        crate::ExprKind::ClassMetaCastExpr { ty: _, expr } => {
+        ExprKind::ClassMetaCastExpr { ty: _, expr } => {
             visit.visit_expr(expr);
         }
-        crate::ExprKind::NewExpr { args, cls, arch } => {
+        ExprKind::NewExpr { args, cls, arch } => {
             visit.visit_expr(cls);
             if let Some(arch) = arch {
                 visit.visit_expr(arch);
             }
         }
-        crate::ExprKind::PreOpExpr { op: _, rhs } => {
+        ExprKind::PreOpExpr { op: _, rhs } => {
             visit.visit_expr(rhs);
         }
-        crate::ExprKind::PostOpExpr { lhs, op: _ } => {
+        ExprKind::PostOpExpr { lhs, op: _ } => {
             visit.visit_expr(lhs);
         }
-        crate::ExprKind::BinOpExpr { lhs, op: _, rhs } => {
+        ExprKind::BinOpExpr { lhs, op: _, rhs } => {
             visit.visit_expr(lhs);
             visit.visit_expr(rhs);
         }
-        crate::ExprKind::TernExpr { cond, then, alt } => {
+        ExprKind::TernExpr { cond, then, alt } => {
             visit.visit_expr(cond);
             visit.visit_expr(then);
             visit.visit_expr(alt);
         }
-        crate::ExprKind::SymExpr { sym: _ } => {}
-        crate::ExprKind::LiteralExpr { lit: _ } => {}
+        ExprKind::SymExpr { sym: _ } => {}
+        ExprKind::LiteralExpr { lit: _ } => {}
     }
 }

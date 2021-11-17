@@ -1,6 +1,6 @@
 use std::io;
 
-use crate::{Block, Expr, ExprKind, Literal, Op, Statement, StatementKind};
+use crate::{Block, Case, Expr, ExprKind, Literal, Op, Statement, StatementKind};
 
 use super::PPrinter;
 
@@ -71,12 +71,12 @@ impl<W: io::Write> PPrinter<W> {
                 for case in cases {
                     self.indent()?;
                     match &case.case {
-                        crate::Case::Case(c) => {
+                        Case::Case(c) => {
                             self.w.write_all(b"case ")?;
                             self.format_expr(c)?;
                             self.w.write_all(b":\n")?
                         }
-                        crate::Case::Default => self.w.write_all(b"default:\n")?,
+                        Case::Default => self.w.write_all(b"default:\n")?,
                     }
                     self.indent_incr();
                     for stmt in &case.stmts {

@@ -3,8 +3,8 @@ use std::io;
 use uc_def::{ArgFlags, FuncFlags};
 
 use crate::{
-    ClassDef, ClassHeader, ConstDef, EnumDef, Expr, FuncBody, FuncDef, FuncName, FuncSig, Hir,
-    Identifier, Local, StateDef, StructDef, Ty, VarDef, VarInstance,
+    ClassDef, ClassHeader, ConstDef, DimCount, EnumDef, Expr, FuncBody, FuncDef, FuncName, FuncSig,
+    Hir, Identifier, Local, StateDef, StructDef, Ty, VarDef, VarInstance,
 };
 
 mod stmts;
@@ -188,13 +188,13 @@ impl<W: io::Write> PPrinter<W> {
         for (idx, inst) in i.iter().enumerate() {
             self.w.write_all(inst.name.as_ref().as_bytes())?;
             match &inst.count {
-                crate::DimCount::None => {}
-                crate::DimCount::Number(n) => {
+                DimCount::None => {}
+                DimCount::Number(n) => {
                     self.w.write_all(b"[")?;
                     self.w.write_fmt(format_args!("{}", n))?;
                     self.w.write_all(b"]")?;
                 }
-                crate::DimCount::Complex(ci) => {
+                DimCount::Complex(ci) => {
                     self.w.write_all(b"[")?;
                     self.format_veci(ci, b".")?;
                     self.w.write_all(b"]")?;
