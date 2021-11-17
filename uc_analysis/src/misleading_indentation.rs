@@ -37,7 +37,7 @@ fn indent_count(mut line: &[u8]) -> u32 {
     let mut count = 0;
     loop {
         match line.first() {
-            Some(b'\t') => count += 4,
+            Some(b'\t') => count = (count & !0b11) + 4,
             Some(b' ') => count += 1,
             Some(_) | None => break count,
         }
