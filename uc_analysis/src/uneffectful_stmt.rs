@@ -1,6 +1,6 @@
 use uc_ast::{
-    visit::{self, StatementVisitor},
-    Expr, Hir, Op, Statement, StatementKind,
+    visit::{self, Visitor},
+    Expr, ExprKind, Hir, Op, Statement, StatementKind,
 };
 use uc_files::Span;
 
@@ -8,7 +8,9 @@ struct UneffectfulStmtsVisitor {
     errs: Vec<(&'static str, Span)>,
 }
 
-impl StatementVisitor for UneffectfulStmtsVisitor {
+impl Visitor for UneffectfulStmtsVisitor {
+    const VISIT_EXPRS: bool = false;
+
     fn visit_statement(&mut self, stmt: &Statement) {
         visit::walk_statement(self, stmt);
         if let StatementKind::Expr { expr } = &stmt.kind {
@@ -34,30 +36,30 @@ pub fn visit_hir(hir: &Hir) -> Vec<(&'static str, Span)> {
 }
 
 fn expr_no_effects(expr: &Expr) -> Option<&'static str> {
-    match &expr {
-        Expr::IndexExpr { base: _, idx: _ } => Some("index expression has no side effect"),
-        Expr::FieldExpr { lhs: _, rhs: _ } => Some("place expression has no side effect"),
-        Expr::CallExpr { lhs: _, args: _ } => None,
-        Expr::ClassMetaCastExpr { ty: _, expr: _ } => {
+    match &expr.kind {
+        ExprKind::IndexExpr { base: _, idx: _ } => Some("index expression has no side effect"),
+        ExprKind::FieldExpr { lhs: _, rhs: _ } => Some("place expression has no side effect"),
+        ExprKind::CallExpr { lhs: _, args: _ } => None,
+        ExprKind::ClassMetaCastExpr { ty: _, expr: _ } => {
             Some("class meta cast expression has no side effect")
         }
-        Expr::NewExpr {
+        ExprKind::NewExpr {
             args: _,
             cls: _,
             arch: _,
         } => Some("class construction has no side effect"),
-        Expr::PreOpExpr { op: _, rhs: _ } => None,
-        Expr::PostOpExpr { lhs: _, op: _ } => None,
-        Expr::BinOpExpr { lhs: _, op, rhs: _ } => op_no_effects(*op),
-        Expr::TernExpr { cond: _, then, alt } => {
+        ExprKind::PreOpExpr { op: _, rhs: _ } => None,
+        ExprKind::PostOpExpr { lhs: _, op: _ } => None,
+        ExprKind::BinOpExpr { lhs: _, op, rhs: _ } => op_no_effects(*op),
+        ExprKind::TernExpr { cond: _, then, alt } => {
             if expr_no_effects(then).is_some() || expr_no_effects(alt).is_some() {
                 Some("a branch in this ternary expression has no effect")
             } else {
                 None
             }
         }
-        Expr::SymExpr { sym: _ } => Some("symbol expression has no effect"),
-        Expr::LiteralExpr { lit: _ } => Some("literal expression has no effect"),
+        ExprKind::SymExpr { sym: _ } => Some("symbol expression has no effect"),
+        ExprKind::LiteralExpr { lit: _ } => Some("literal expression has no effect"),
     }
 }
 

@@ -1,5 +1,5 @@
 use uc_ast::{
-    visit::{self, StatementVisitor},
+    visit::{self, Visitor},
     CaseClause, Hir, Statement, StatementKind,
 };
 use uc_files::{Sources, Span};
@@ -32,7 +32,9 @@ pub fn visit_hir(hir: &'_ Hir, source: &'_ Sources) -> Vec<MissingBreak> {
     visitor.errs
 }
 
-impl StatementVisitor for MissingBreakVisitor<'_> {
+impl Visitor for MissingBreakVisitor<'_> {
+    const VISIT_EXPRS: bool = false;
+
     fn visit_statement(&mut self, stmt: &Statement) {
         visit::walk_statement(self, stmt);
         if let StatementKind::SwitchStatement {
@@ -129,7 +131,9 @@ struct BreakFinder {
     found_break: bool,
 }
 
-impl StatementVisitor for BreakFinder {
+impl Visitor for BreakFinder {
+    const VISIT_EXPRS: bool = false;
+
     fn visit_statement(&mut self, stmt: &Statement) {
         visit::walk_statement(self, stmt);
         if let StatementKind::BreakStatement = &stmt.kind {

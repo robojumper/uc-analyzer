@@ -2,7 +2,7 @@
 //! See https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
 //! for an introduction to Pratt parsing.
 
-use uc_ast::{Expr, Op, Ty};
+use uc_ast::{Expr, ExprKind, Op, Ty};
 
 use crate::{
     kw,
@@ -55,11 +55,13 @@ impl Parser<'_> {
     }
 
     fn parse_base_expression_bp(&mut self, min_bp: u8) -> Result<Expr, ParseError> {
+        let lhs_marker = self.marker();
         let mut lhs = {
             let tok = self.next_any()?;
             match tok.kind {
                 sig!(LParen) => {
-                    let lhs = self.parse_base_expression_bp(0)?;
+                    let mut lhs = self.parse_base_expression_bp(0)?;
+                    lhs.paren = true;
                     self.expect(sig!(RParen))?;
                     lhs
                 }
@@ -67,9 +69,13 @@ impl Parser<'_> {
                     match OpLike::from_token(&tok).and_then(prefix_binding_power) {
                         Some(((), r_bp)) => {
                             let rhs = self.parse_base_expression_bp(r_bp)?;
-                            Expr::PreOpExpr {
-                                op: sig.to_op().unwrap(),
-                                rhs: Box::new(rhs),
+                            Expr {
+                                span: lhs_marker.complete(self),
+                                paren: false,
+                                kind: ExprKind::PreOpExpr {
+                                    op: sig.to_op().unwrap(),
+                                    rhs: Box::new(rhs),
+                                },
                             }
                         }
                         None => {
@@ -85,8 +91,12 @@ impl Parser<'_> {
                                 )
                             {
                                 self.next();
-                                Expr::LiteralExpr {
-                                    lit: uc_ast::Literal::Number,
+                                Expr {
+                                    span: lhs_marker.complete(self),
+                                    paren: false,
+                                    kind: ExprKind::LiteralExpr {
+                                        lit: uc_ast::Literal::Number,
+                                    },
                                 }
                             } else {
                                 return Err(self.fmt_err("Not a preoperator", Some(tok)));
@@ -119,11 +129,14 @@ impl Parser<'_> {
                     } else {
                         None
                     };
-
-                    Expr::NewExpr {
-                        args,
-                        cls: Box::new(cls),
-                        arch: arch.map(Box::new),
+                    Expr {
+                        span: lhs_marker.complete(self),
+                        paren: false,
+                        kind: ExprKind::NewExpr {
+                            args,
+                            cls: Box::new(cls),
+                            arch: arch.map(Box::new),
+                        },
                     }
                 }
                 kw!(Class) if matches!(self.peek(), Some(Token { kind: sig!(Lt), .. })) => {
@@ -133,9 +146,13 @@ impl Parser<'_> {
                     self.expect(sig!(LParen))?;
                     let expr = self.parse_base_expression_bp(0)?;
                     self.expect(sig!(RParen))?;
-                    Expr::ClassMetaCastExpr {
-                        ty: Ty::Class(Some(ident)),
-                        expr: Box::new(expr),
+                    Expr {
+                        span: lhs_marker.complete(self),
+                        paren: false,
+                        kind: ExprKind::ClassMetaCastExpr {
+                            ty: Ty::Class(Some(ident)),
+                            expr: Box::new(expr),
+                        },
                     }
                 }
                 Tk::Sym(_)
@@ -148,27 +165,55 @@ impl Parser<'_> {
                     ) =>
                 {
                     self.next();
-                    Expr::LiteralExpr {
-                        lit: uc_ast::Literal::ObjReference,
+                    Expr {
+                        span: lhs_marker.complete(self),
+                        paren: false,
+                        kind: ExprKind::LiteralExpr {
+                            lit: uc_ast::Literal::ObjReference,
+                        },
                     }
                 }
-                kw!(None) => Expr::LiteralExpr {
-                    lit: uc_ast::Literal::None,
+                kw!(None) => Expr {
+                    span: lhs_marker.complete(self),
+                    paren: false,
+                    kind: ExprKind::LiteralExpr {
+                        lit: uc_ast::Literal::None,
+                    },
                 },
-                Tk::Sym(_) => Expr::SymExpr {
-                    sym: self.sym_to_ident(&tok),
+                Tk::Sym(_) => Expr {
+                    span: lhs_marker.complete(self),
+                    paren: false,
+                    kind: ExprKind::SymExpr {
+                        sym: self.sym_to_ident(&tok),
+                    },
                 },
-                Tk::Number(_) => Expr::LiteralExpr {
-                    lit: uc_ast::Literal::Number,
+                Tk::Number(_) => Expr {
+                    span: lhs_marker.complete(self),
+                    paren: false,
+                    kind: ExprKind::LiteralExpr {
+                        lit: uc_ast::Literal::Number,
+                    },
                 },
-                Tk::String => Expr::LiteralExpr {
-                    lit: uc_ast::Literal::String(self.lex.extract_string(&tok)),
+                Tk::String => Expr {
+                    span: lhs_marker.complete(self),
+                    paren: false,
+                    kind: ExprKind::LiteralExpr {
+                        lit: uc_ast::Literal::String(self.lex.extract_string(&tok)),
+                    },
                 },
-                Tk::Name => Expr::LiteralExpr {
-                    lit: uc_ast::Literal::Name,
+                Tk::Name => Expr {
+                    span: lhs_marker.complete(self),
+                    paren: false,
+                    kind: ExprKind::LiteralExpr {
+                        lit: uc_ast::Literal::Name,
+                    },
                 },
-                Tk::Bool(_) => Expr::LiteralExpr {
-                    lit: uc_ast::Literal::Bool,
+                Tk::Bool(_) => Expr {
+                    span: lhs_marker.complete(self),
+                    paren: false,
+                    kind: ExprKind::LiteralExpr {
+                        lit: uc_ast::Literal::Bool,
+                    },
                 },
                 _ => return Err(self.fmt_err("Unknown start of expression", Some(tok))),
             }
@@ -192,9 +237,13 @@ impl Parser<'_> {
                 lhs = if let OpLike::LBrack = op {
                     let rhs = self.parse_base_expression_bp(0)?;
                     self.expect(sig!(RBrack))?;
-                    Expr::IndexExpr {
-                        base: Box::new(lhs),
-                        idx: Box::new(rhs),
+                    Expr {
+                        span: lhs_marker.complete(self),
+                        paren: false,
+                        kind: ExprKind::IndexExpr {
+                            base: Box::new(lhs),
+                            idx: Box::new(rhs),
+                        },
                     }
                 } else if let OpLike::LParen = op {
                     let mut args = vec![];
@@ -214,14 +263,22 @@ impl Parser<'_> {
                             _ => return Err(self.fmt_err("Expected comma or )", Some(delim))),
                         }
                     }
-                    Expr::CallExpr {
-                        lhs: Box::new(lhs),
-                        args,
+                    Expr {
+                        span: lhs_marker.complete(self),
+                        paren: false,
+                        kind: ExprKind::CallExpr {
+                            lhs: Box::new(lhs),
+                            args,
+                        },
                     }
                 } else {
-                    Expr::PostOpExpr {
-                        lhs: Box::new(lhs),
-                        op: op.unwrap_op(),
+                    Expr {
+                        span: lhs_marker.complete(self),
+                        paren: false,
+                        kind: ExprKind::PostOpExpr {
+                            lhs: Box::new(lhs),
+                            op: op.unwrap_op(),
+                        },
                     }
                 };
             } else if let Some((l_bp, r_bp)) = infix_binding_power(op) {
@@ -234,23 +291,35 @@ impl Parser<'_> {
                     let mhs = self.parse_base_expression_bp(0)?;
                     self.expect(sig!(Colon))?;
                     let rhs = self.parse_base_expression_bp(r_bp)?;
-                    Expr::TernExpr {
-                        cond: Box::new(lhs),
-                        then: Box::new(mhs),
-                        alt: Box::new(rhs),
+                    Expr {
+                        span: lhs_marker.complete(self),
+                        paren: false,
+                        kind: ExprKind::TernExpr {
+                            cond: Box::new(lhs),
+                            then: Box::new(mhs),
+                            alt: Box::new(rhs),
+                        },
                     }
                 } else if let OpLike::Dot = op {
                     let rhs = self.expect_ident()?;
-                    Expr::FieldExpr {
-                        lhs: Box::new(lhs),
-                        rhs,
+                    Expr {
+                        span: lhs_marker.complete(self),
+                        paren: false,
+                        kind: ExprKind::FieldExpr {
+                            lhs: Box::new(lhs),
+                            rhs,
+                        },
                     }
                 } else {
                     let rhs = self.parse_base_expression_bp(r_bp)?;
-                    Expr::BinOpExpr {
-                        lhs: Box::new(lhs),
-                        op: op.unwrap_op(),
-                        rhs: Box::new(rhs),
+                    Expr {
+                        span: lhs_marker.complete(self),
+                        paren: false,
+                        kind: ExprKind::BinOpExpr {
+                            lhs: Box::new(lhs),
+                            op: op.unwrap_op(),
+                            rhs: Box::new(rhs),
+                        },
                     }
                 };
             } else {

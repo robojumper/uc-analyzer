@@ -78,6 +78,20 @@ fn main() {
         uc_ast::pretty::format_hir(&hir, &mut out, uc_ast::pretty::IdentifierFormat).unwrap();
         */
 
+        let ambiguous_new = uc_analysis::ambiguous_new_template::visit_hir(&hir);
+        for err in ambiguous_new {
+            let err = ErrorReport {
+                full_text: err.new_expr,
+                msg: "new with function call is ambiguous".to_owned(),
+                inlay_messages: vec![(
+                    "this could be a function call or a field reference with template arguments"
+                        .to_owned(),
+                    err.cls_expr,
+                )],
+            };
+            sources.emit_err(&err);
+        }
+
         let uneffectful_errs = uc_analysis::uneffectful_stmt::visit_hir(&hir);
         for err in uneffectful_errs {
             let err = ErrorReport {

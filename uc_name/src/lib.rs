@@ -28,9 +28,9 @@ impl<S: AsRef<str>> AsRef<str> for Ascii<S> {
     }
 }
 
-impl<S: AsRef<str>> PartialEq for Ascii<S> {
+impl<S: AsRef<str>, T: AsRef<str>> PartialEq<T> for Ascii<S> {
     #[inline]
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, other: &T) -> bool {
         self.as_ref().eq_ignore_ascii_case(other.as_ref())
     }
 }
@@ -75,6 +75,12 @@ impl FromStr for Identifier {
     #[inline]
     fn from_str(t: &str) -> Result<Self, Self::Err> {
         Ok(Self(Ascii::new(t.to_owned().into_boxed_str())?))
+    }
+}
+
+impl PartialEq<str> for Identifier {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
     }
 }
 

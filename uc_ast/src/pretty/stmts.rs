@@ -1,6 +1,6 @@
 use std::io;
 
-use crate::{Block, Expr, Literal, Op, Statement, StatementKind};
+use crate::{Block, Expr, ExprKind, Literal, Op, Statement, StatementKind};
 
 use super::PPrinter;
 
@@ -137,8 +137,8 @@ impl<W: io::Write> PPrinter<W> {
     }
 
     pub fn format_expr(&mut self, expr: &Expr) -> io::Result<()> {
-        match expr {
-            Expr::IndexExpr { base, idx } => {
+        match &expr.kind {
+            ExprKind::IndexExpr { base, idx } => {
                 self.w.write_all(b"(")?;
                 self.format_expr(base)?;
                 self.w.write_all(b"[")?;
@@ -146,12 +146,12 @@ impl<W: io::Write> PPrinter<W> {
                 self.w.write_all(b"]")?;
                 self.w.write_all(b")")?;
             }
-            Expr::FieldExpr { lhs, rhs } => {
+            ExprKind::FieldExpr { lhs, rhs } => {
                 self.format_expr(lhs)?;
                 self.w.write_all(b".")?;
                 self.format_i(rhs)?;
             }
-            Expr::CallExpr { lhs, args } => {
+            ExprKind::CallExpr { lhs, args } => {
                 self.format_expr(lhs)?;
                 self.w.write_all(b"(")?;
                 for (idx, arg) in args.iter().enumerate() {
@@ -164,13 +164,13 @@ impl<W: io::Write> PPrinter<W> {
                 }
                 self.w.write_all(b")")?;
             }
-            Expr::ClassMetaCastExpr { ty, expr } => {
+            ExprKind::ClassMetaCastExpr { ty, expr } => {
                 self.format_ty(ty)?;
                 self.w.write_all(b"(")?;
                 self.format_expr(expr)?;
                 self.w.write_all(b")")?;
             }
-            Expr::NewExpr { args, cls, arch } => {
+            ExprKind::NewExpr { args, cls, arch } => {
                 self.w.write_all(b"(")?;
                 self.w.write_all(b"new ")?;
                 if !args.is_empty() {
@@ -192,20 +192,20 @@ impl<W: io::Write> PPrinter<W> {
                 }
                 self.w.write_all(b")")?;
             }
-            Expr::PreOpExpr { op, rhs } => {
+            ExprKind::PreOpExpr { op, rhs } => {
                 self.w.write_all(b"(")?;
                 self.format_op(op)?;
                 self.format_expr(rhs)?;
                 self.w.write_all(b")")?;
             }
-            Expr::PostOpExpr { lhs, op } => {
+            ExprKind::PostOpExpr { lhs, op } => {
                 self.w.write_all(b"(")?;
                 self.format_expr(lhs)?;
                 self.w.write_all(b" ")?;
                 self.format_op(op)?;
                 self.w.write_all(b")")?;
             }
-            Expr::BinOpExpr { lhs, op, rhs } => {
+            ExprKind::BinOpExpr { lhs, op, rhs } => {
                 self.w.write_all(b"(")?;
                 self.format_expr(lhs)?;
                 self.w.write_all(b" ")?;
@@ -214,7 +214,7 @@ impl<W: io::Write> PPrinter<W> {
                 self.format_expr(rhs)?;
                 self.w.write_all(b")")?;
             }
-            Expr::TernExpr { cond, then, alt } => {
+            ExprKind::TernExpr { cond, then, alt } => {
                 self.w.write_all(b"(")?;
                 self.format_expr(cond)?;
                 self.w.write_all(b" ? ")?;
@@ -223,10 +223,10 @@ impl<W: io::Write> PPrinter<W> {
                 self.format_expr(alt)?;
                 self.w.write_all(b")")?;
             }
-            Expr::SymExpr { sym } => {
+            ExprKind::SymExpr { sym } => {
                 self.format_i(sym)?;
             }
-            Expr::LiteralExpr { lit } => {
+            ExprKind::LiteralExpr { lit } => {
                 self.format_lit(lit)?;
             }
         }

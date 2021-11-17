@@ -1,5 +1,5 @@
 use uc_ast::{
-    visit::{self, StatementVisitor},
+    visit::{self, Visitor},
     Block, Hir, Statement, StatementKind,
 };
 use uc_files::Span;
@@ -26,7 +26,9 @@ pub fn visit_hir(hir: &'_ Hir) -> Vec<DanglingElse> {
     visitor.errs
 }
 
-impl StatementVisitor for DanglingElseVisitor {
+impl Visitor for DanglingElseVisitor {
+    const VISIT_EXPRS: bool = false;
+
     fn visit_statement(&mut self, stmt: &Statement) {
         visit::walk_statement(self, stmt);
         if let StatementKind::IfStatement { then, .. } = &stmt.kind {

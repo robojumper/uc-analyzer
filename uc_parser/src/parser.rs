@@ -38,7 +38,7 @@ struct Parser<'a> {
 }
 
 // pretty much stolen from rust-analyzer
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 struct SpanMarker {
     pos: Option<u32>,
 }

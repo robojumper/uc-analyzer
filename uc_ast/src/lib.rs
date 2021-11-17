@@ -274,7 +274,14 @@ pub enum Op {
 }
 
 #[derive(Debug)]
-pub enum Expr {
+pub struct Expr {
+    pub span: Span,
+    pub paren: bool,
+    pub kind: ExprKind,
+}
+
+#[derive(Debug)]
+pub enum ExprKind {
     IndexExpr {
         base: Box<Expr>,
         idx: Box<Expr>,
