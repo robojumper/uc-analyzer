@@ -2,10 +2,25 @@ use uc_ast::{
     visit::{self, Visitor},
     Expr, ExprKind, Hir, Op, Statement, StatementKind,
 };
-use uc_files::Span;
+use uc_files::{ErrorReport, Sources, Span};
 
 struct UneffectfulStmtsVisitor {
     errs: Vec<(&'static str, Span)>,
+}
+
+pub fn run(hir: &Hir, _: &Sources) -> Vec<ErrorReport> {
+    let mut visitor = UneffectfulStmtsVisitor { errs: vec![] };
+    visitor.visit_hir(hir);
+    visitor
+        .errs
+        .iter()
+        .map(|err| ErrorReport {
+            code: "uneffectful-statememt",
+            full_text: err.1,
+            msg: "expression statement has no effect".to_owned(),
+            inlay_messages: vec![(err.0.to_owned(), err.1)],
+        })
+        .collect()
 }
 
 impl Visitor for UneffectfulStmtsVisitor {
@@ -19,20 +34,6 @@ impl Visitor for UneffectfulStmtsVisitor {
             }
         }
     }
-}
-
-pub fn visit_hir(hir: &Hir) -> Vec<(&'static str, Span)> {
-    let mut visitor = UneffectfulStmtsVisitor { errs: vec![] };
-    for func in &hir.funcs {
-        if let Some(body) = &func.body {
-            visitor.visit_statements(&body.statements);
-        }
-    }
-    for state in &hir.states {
-        visitor.visit_statements(&state.statements);
-    }
-
-    visitor.errs
 }
 
 fn expr_no_effects(expr: &Expr) -> Option<&'static str> {

@@ -2,29 +2,36 @@ use uc_ast::{
     visit::{self, Visitor},
     Expr, ExprKind, Hir,
 };
-use uc_files::Span;
+use uc_files::{ErrorReport, Sources, Span};
 
 struct AmbigNewVisitor {
     errs: Vec<AmbigNew>,
 }
 
+pub struct AmbiguousNew;
+
+pub fn run(hir: &Hir, _: &Sources) -> Vec<ErrorReport> {
+    let mut visitor = AmbigNewVisitor { errs: vec![] };
+    visitor.visit_hir(hir);
+    visitor
+        .errs
+        .iter()
+        .map(|err| ErrorReport {
+            code: "ambiguous-new",
+            full_text: err.new_expr,
+            msg: "new with function call is ambiguous".to_owned(),
+            inlay_messages: vec![(
+                "this could be a function call or a field reference with template arguments"
+                    .to_owned(),
+                err.cls_expr,
+            )],
+        })
+        .collect()
+}
+
 pub struct AmbigNew {
     pub new_expr: Span,
     pub cls_expr: Span,
-}
-
-pub fn visit_hir(hir: &'_ Hir) -> Vec<AmbigNew> {
-    let mut visitor = AmbigNewVisitor { errs: vec![] };
-    for func in &hir.funcs {
-        if let Some(body) = &func.body {
-            visitor.visit_statements(&body.statements);
-        }
-    }
-    for state in &hir.states {
-        visitor.visit_statements(&state.statements);
-    }
-
-    visitor.errs
 }
 
 impl Visitor for AmbigNewVisitor {

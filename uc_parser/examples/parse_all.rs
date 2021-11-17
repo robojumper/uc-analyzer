@@ -2,7 +2,10 @@ use core::panic;
 use std::fs;
 use std::str::FromStr;
 
-use uc_files::{ErrorReport, Sources, Span};
+use uc_analysis::{
+    ambiguous_new_template, dangling_else, misleading_indentation, missing_break, uneffectful_stmt,
+};
+use uc_files::Sources;
 use uc_name::Identifier;
 use uc_parser::{lexer, parser};
 use walkdir::{DirEntry, WalkDir};
@@ -73,96 +76,14 @@ fn main() {
             panic!();
         }
 
-        /*
-        let out = std::io::stdout();
-        let mut out = out.lock();
-        uc_ast::pretty::format_hir(&hir, &mut out).unwrap();
-        */
+        let mut errs = vec![];
+        errs.extend(ambiguous_new_template::run(&hir, &sources));
+        errs.extend(dangling_else::run(&hir, &sources));
+        errs.extend(misleading_indentation::run(&hir, &sources));
+        errs.extend(missing_break::run(&hir, &sources));
+        errs.extend(uneffectful_stmt::run(&hir, &sources));
 
-        let ambiguous_new = uc_analysis::ambiguous_new_template::visit_hir(&hir);
-        for err in ambiguous_new {
-            let err = ErrorReport {
-                full_text: err.new_expr,
-                msg: "new with function call is ambiguous".to_owned(),
-                inlay_messages: vec![(
-                    "this could be a function call or a field reference with template arguments"
-                        .to_owned(),
-                    err.cls_expr,
-                )],
-            };
-            sources.emit_err(&err);
-        }
-
-        let uneffectful_errs = uc_analysis::uneffectful_stmt::visit_hir(&hir);
-        for err in uneffectful_errs {
-            let err = ErrorReport {
-                full_text: err.1,
-                msg: "expression statement has no effect".to_owned(),
-                inlay_messages: vec![(err.0.to_owned(), err.1)],
-            };
-            sources.emit_err(&err);
-        }
-
-        let missing_breaks = uc_analysis::missing_break::visit_hir(&hir, &sources);
-        for err in missing_breaks {
-            let first_msg = ("control flow from this label...".to_owned(), err.from_label);
-            let mut second_msg = (
-                "...implicitly falls through to this label".to_owned(),
-                err.to_label,
-            );
-            if err.and_then_executes.is_none() {
-                second_msg.0 += " (which has no statements and may fall further)";
-            }
-            let mut inlay_messages = vec![first_msg, second_msg];
-            let mut full_text = Span {
-                start: err.from_label.start,
-                end: err.to_label.end,
-            };
-
-            if let Some(e) = err.and_then_executes {
-                full_text.end = e.end;
-                inlay_messages.push(("and executes these statements".to_owned(), e))
-            }
-
-            let err = ErrorReport {
-                full_text,
-                msg: "implicit fallthrough".to_owned(),
-                inlay_messages,
-            };
-            sources.emit_err(&err);
-        }
-
-        let misleading_indents = uc_analysis::misleading_indentation::visit_hir(&hir, &sources);
-        for err in misleading_indents {
-            let first_msg = (
-                format!("this {} statement (+ guarded statement)...", err.guard.0),
-                err.guard.1,
-            );
-            let second_msg = (
-                "...looks like it guards this statement".to_owned(),
-                err.affected_statement,
-            );
-
-            let err = ErrorReport {
-                full_text: Span {
-                    start: err.guard.1.start,
-                    end: err.affected_statement.end,
-                },
-                msg: "misleading indentation".to_owned(),
-                inlay_messages: vec![first_msg, second_msg],
-            };
-            sources.emit_err(&err);
-        }
-
-        let dangling_elses = uc_analysis::dangling_else::visit_hir(&hir);
-        for err in dangling_elses {
-            let err = ErrorReport {
-                full_text: err.whole_thing,
-                msg: "if if else is ambiguous".to_owned(),
-                inlay_messages: vec![("this one".to_owned(), err.whole_thing)],
-            };
-            sources.emit_err(&err);
-        }
+        errs.iter().for_each(|e| sources.emit_err(e));
 
         hirs.push(hir);
     }

@@ -2,7 +2,7 @@ use uc_ast::{
     visit::{self, Visitor},
     Block, Hir, Statement, StatementKind,
 };
-use uc_files::{Sources, Span};
+use uc_files::{ErrorReport, Sources, Span};
 
 struct MisleadingIndentVisitor<'a> {
     errs: Vec<MisleadingIndent>,
@@ -16,21 +16,36 @@ pub struct MisleadingIndent {
     pub guard: (&'static str, Span),
 }
 
-pub fn visit_hir(hir: &'_ Hir, sources: &'_ Sources) -> Vec<MisleadingIndent> {
+pub fn run(hir: &Hir, sources: &Sources) -> Vec<ErrorReport> {
     let mut visitor = MisleadingIndentVisitor {
         errs: vec![],
         sources,
     };
-    for func in &hir.funcs {
-        if let Some(body) = &func.body {
-            visitor.visit_statements(&body.statements);
-        }
-    }
-    for state in &hir.states {
-        visitor.visit_statements(&state.statements);
-    }
+    visitor.visit_hir(hir);
+    visitor
+        .errs
+        .iter()
+        .map(|err| {
+            let first_msg = (
+                format!("this {} statement (+ guarded statement)...", err.guard.0),
+                err.guard.1,
+            );
+            let second_msg = (
+                "...looks like it guards this statement".to_owned(),
+                err.affected_statement,
+            );
 
-    visitor.errs
+            ErrorReport {
+                code: "misleading-indent",
+                full_text: Span {
+                    start: err.guard.1.start,
+                    end: err.affected_statement.end,
+                },
+                msg: "misleading indentation".to_owned(),
+                inlay_messages: vec![first_msg, second_msg],
+            }
+        })
+        .collect()
 }
 
 fn indent_count(mut line: &[u8]) -> u32 {

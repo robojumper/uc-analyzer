@@ -2,7 +2,7 @@ use uc_ast::{
     visit::{self, Visitor},
     Block, Hir, Statement, StatementKind,
 };
-use uc_files::Span;
+use uc_files::{ErrorReport, Sources, Span};
 
 struct DanglingElseVisitor {
     errs: Vec<DanglingElse>,
@@ -12,18 +12,19 @@ pub struct DanglingElse {
     pub whole_thing: Span,
 }
 
-pub fn visit_hir(hir: &'_ Hir) -> Vec<DanglingElse> {
+pub fn run(hir: &Hir, _: &Sources) -> Vec<ErrorReport> {
     let mut visitor = DanglingElseVisitor { errs: vec![] };
-    for func in &hir.funcs {
-        if let Some(body) = &func.body {
-            visitor.visit_statements(&body.statements);
-        }
-    }
-    for state in &hir.states {
-        visitor.visit_statements(&state.statements);
-    }
-
-    visitor.errs
+    visitor.visit_hir(hir);
+    visitor
+        .errs
+        .iter()
+        .map(|err| ErrorReport {
+            code: "dangling-else",
+            full_text: err.whole_thing,
+            msg: "if if else is ambiguous".to_owned(),
+            inlay_messages: vec![("this one".to_owned(), err.whole_thing)],
+        })
+        .collect()
 }
 
 impl Visitor for DanglingElseVisitor {

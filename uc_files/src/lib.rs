@@ -43,6 +43,7 @@ pub enum InputError {
 }
 
 pub struct ErrorReport {
+    pub code: &'static str,
     pub msg: String,
     pub full_text: Span,
     pub inlay_messages: Vec<(String, Span)>,
@@ -178,7 +179,7 @@ impl Sources {
         let snippet = Snippet {
             title: Some(Annotation {
                 annotation_type: AnnotationType::Warning,
-                id: None,
+                id: Some(err.code),
                 label: Some(&err.msg),
             }),
             footer: vec![],

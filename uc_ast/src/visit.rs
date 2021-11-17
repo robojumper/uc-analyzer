@@ -1,7 +1,11 @@
-use crate::{Expr, ExprKind, Statement, StatementKind};
+use crate::{Expr, ExprKind, Hir, Statement, StatementKind};
 
 pub trait Visitor: Sized {
     const VISIT_EXPRS: bool;
+
+    fn visit_hir(&mut self, hir: &Hir) {
+        walk_hir(self, hir)
+    }
 
     fn visit_statements(&mut self, stmts: &[Statement]) {
         walk_statements(self, stmts)
@@ -13,6 +17,25 @@ pub trait Visitor: Sized {
 
     fn visit_expr(&mut self, expr: &Expr) {
         walk_expr(self, expr)
+    }
+}
+
+pub fn walk_hir<V: Visitor>(visit: &mut V, hir: &Hir) {
+    for func in &hir.funcs {
+        if let Some(body) = &func.body {
+            visit.visit_statements(&body.statements);
+        }
+        if V::VISIT_EXPRS {
+            for arg in &func.sig.args {
+                if let Some(def) = &arg.def {
+                    visit.visit_expr(def);
+                }
+            }
+        }
+    }
+
+    for state in &hir.states {
+        visit.visit_statements(&state.statements);
     }
 }
 

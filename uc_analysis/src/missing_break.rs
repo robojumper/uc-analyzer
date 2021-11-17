@@ -2,11 +2,11 @@ use uc_ast::{
     visit::{self, Visitor},
     CaseClause, Hir, Statement, StatementKind,
 };
-use uc_files::{Sources, Span};
+use uc_files::{ErrorReport, Sources, Span};
 
 struct MissingBreakVisitor<'a> {
     errs: Vec<MissingBreak>,
-    source: &'a Sources,
+    sources: &'a Sources,
 }
 
 pub struct MissingBreak {
@@ -15,21 +15,43 @@ pub struct MissingBreak {
     pub and_then_executes: Option<Span>,
 }
 
-pub fn visit_hir(hir: &'_ Hir, source: &'_ Sources) -> Vec<MissingBreak> {
+pub fn run(hir: &Hir, sources: &Sources) -> Vec<ErrorReport> {
     let mut visitor = MissingBreakVisitor {
         errs: vec![],
-        source,
+        sources,
     };
-    for func in &hir.funcs {
-        if let Some(body) = &func.body {
-            visitor.visit_statements(&body.statements);
-        }
-    }
-    for state in &hir.states {
-        visitor.visit_statements(&state.statements);
-    }
+    visitor.visit_hir(hir);
+    visitor
+        .errs
+        .iter()
+        .map(|err| {
+            let first_msg = ("control flow from this label...".to_owned(), err.from_label);
+            let mut second_msg = (
+                "...implicitly falls through to this label".to_owned(),
+                err.to_label,
+            );
+            if err.and_then_executes.is_none() {
+                second_msg.0 += " (which has no statements)";
+            }
+            let mut inlay_messages = vec![first_msg, second_msg];
+            let mut full_text = Span {
+                start: err.from_label.start,
+                end: err.to_label.end,
+            };
 
-    visitor.errs
+            if let Some(e) = err.and_then_executes {
+                full_text.end = e.end;
+                inlay_messages.push(("and executes these statements".to_owned(), e))
+            }
+
+            ErrorReport {
+                code: "implicit-fallthrough",
+                full_text,
+                msg: "implicit switch/case fallthrough".to_owned(),
+                inlay_messages,
+            }
+        })
+        .collect()
 }
 
 impl Visitor for MissingBreakVisitor<'_> {
@@ -77,7 +99,7 @@ impl MissingBreakVisitor<'_> {
                 end: cs2.case_span.start,
             };
 
-            if let Ok(text) = self.source.lookup_str(search_span) {
+            if let Ok(text) = self.sources.lookup_str(search_span) {
                 if text.contains("fallthrough")
                     || text.contains("fall through")
                     || text.contains("missing break")
