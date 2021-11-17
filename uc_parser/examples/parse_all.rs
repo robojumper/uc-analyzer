@@ -17,7 +17,7 @@ fn is_uc(entry: &DirEntry) -> bool {
 
 fn main() {
     let dir = std::env::args().nth(1).expect("missing directory");
-    let preprocessed = if dir.contains("PreProcessedFiles") {
+    let preprocessed = if dir.contains("PreProcessedFiles") || dir.contains("TestFiles") {
         true
     } else if dir.contains("Development") {
         false
@@ -72,10 +72,11 @@ fn main() {
             dbg!(&errs);
             panic!();
         }
+
         /*
         let out = std::io::stdout();
         let mut out = out.lock();
-        uc_ast::pretty::format_hir(&hir, &mut out, uc_ast::pretty::IdentifierFormat).unwrap();
+        uc_ast::pretty::format_hir(&hir, &mut out).unwrap();
         */
 
         let ambiguous_new = uc_analysis::ambiguous_new_template::visit_hir(&hir);
@@ -127,6 +128,28 @@ fn main() {
                 full_text,
                 msg: "implicit fallthrough".to_owned(),
                 inlay_messages,
+            };
+            sources.emit_err(&err);
+        }
+
+        let misleading_indents = uc_analysis::misleading_indentation::visit_hir(&hir, &sources);
+        for err in misleading_indents {
+            let first_msg = (
+                format!("this {} statement (+ guarded statement)...", err.guard.0),
+                err.guard.1,
+            );
+            let second_msg = (
+                "...looks like it guards this statement".to_owned(),
+                err.affected_statement,
+            );
+
+            let err = ErrorReport {
+                full_text: Span {
+                    start: err.guard.1.start,
+                    end: err.affected_statement.end,
+                },
+                msg: "misleading indentation".to_owned(),
+                inlay_messages: vec![first_msg, second_msg],
             };
             sources.emit_err(&err);
         }

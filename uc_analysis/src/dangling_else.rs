@@ -16,11 +16,11 @@ pub fn visit_hir(hir: &'_ Hir) -> Vec<DanglingElse> {
     let mut visitor = DanglingElseVisitor { errs: vec![] };
     for func in &hir.funcs {
         if let Some(body) = &func.body {
-            visit::walk_statements(&mut visitor, &body.statements);
+            visitor.visit_statements(&body.statements);
         }
     }
     for state in &hir.states {
-        visit::walk_statements(&mut visitor, &state.statements);
+        visitor.visit_statements(&state.statements);
     }
 
     visitor.errs

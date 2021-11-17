@@ -1,18 +1,5 @@
 use crate::{Expr, ExprKind, Statement, StatementKind};
 
-macro_rules! walk_list {
-    ($visitor: expr, $method: ident, $list: expr) => {
-        for elem in $list {
-            $visitor.$method(elem)
-        }
-    };
-    ($visitor: expr, $method: ident, $list: expr, $($extra_args: expr),*) => {
-        for elem in $list {
-            $visitor.$method(elem, $($extra_args,)*)
-        }
-    }
-}
-
 pub trait Visitor: Sized {
     const VISIT_EXPRS: bool;
 
@@ -30,7 +17,9 @@ pub trait Visitor: Sized {
 }
 
 pub fn walk_statements<V: Visitor>(visit: &mut V, stmts: &[Statement]) {
-    walk_list!(visit, visit_statement, stmts)
+    for stmt in stmts {
+        visit.visit_statement(stmt);
+    }
 }
 
 pub fn walk_statement<V: Visitor>(visit: &mut V, stmt: &Statement) {
@@ -41,9 +30,9 @@ pub fn walk_statement<V: Visitor>(visit: &mut V, stmt: &Statement) {
             or_else,
         } => {
             maybe_visit_expr(visit, cond);
-            walk_list!(visit, visit_statement, &then.stmts);
+            visit.visit_statements(&then.stmts);
             if let Some(b) = or_else {
-                walk_list!(visit, visit_statement, &b.stmts);
+                visit.visit_statements(&b.stmts);
             }
         }
         StatementKind::ForStatement {
@@ -55,24 +44,24 @@ pub fn walk_statement<V: Visitor>(visit: &mut V, stmt: &Statement) {
             visit.visit_statement(init);
             maybe_visit_expr(visit, cond);
             visit.visit_statement(retry);
-            walk_list!(visit, visit_statement, &run.stmts);
+            visit.visit_statements(&run.stmts);
         }
         StatementKind::ForeachStatement { source, run } => {
             maybe_visit_expr(visit, source);
-            walk_list!(visit, visit_statement, &run.stmts)
+            visit.visit_statements(&run.stmts)
         }
         StatementKind::WhileStatement { cond, run } => {
             maybe_visit_expr(visit, cond);
-            walk_list!(visit, visit_statement, &run.stmts)
+            visit.visit_statements(&run.stmts)
         }
         StatementKind::DoStatement { cond, run } => {
-            walk_list!(visit, visit_statement, run);
+            visit.visit_statements(run);
             maybe_visit_expr(visit, cond);
         }
         StatementKind::SwitchStatement { scrutinee, cases } => {
             maybe_visit_expr(visit, scrutinee);
             for case in cases {
-                walk_list!(visit, visit_statement, &case.stmts);
+                visit.visit_statements(&case.stmts);
             }
         }
         StatementKind::BreakStatement => {}

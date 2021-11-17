@@ -133,20 +133,35 @@ impl Sources {
 
     pub fn emit_err(&self, err: &ErrorReport) {
         let full_span = err.full_text;
-        let (fid, source, line_start, remapped_span) = self.lookup_lines(full_span).unwrap();
-        // FIXME
-        let source = source.replace('\t', " ");
+        let (fid, source, line_start, remapped_span) = self.lookup_err_ctx(full_span).unwrap();
+
+        // replace tabs with 4 spaces and adjust spans
+        let tab_indices = source
+            .bytes()
+            .enumerate()
+            .filter_map(|(idx, b)| if b == b'\t' { Some(idx) } else { None })
+            .collect::<Vec<_>>();
+
+        let new_pos = |b_pos: u32| {
+            let num_prev_tabs = tab_indices
+                .binary_search(&(b_pos as usize))
+                .map_or_else(|x| x, |x| x);
+            b_pos + (num_prev_tabs as u32 * 3)
+        };
+
+        let source = source.replace('\t', "    ");
 
         let annotations = err
             .inlay_messages
             .iter()
             .map(|(msg, span)| {
                 assert!(span.start >= full_span.start && span.end <= full_span.end);
+                let new_span = (
+                    new_pos(span.start - full_span.start + remapped_span.start) as usize,
+                    new_pos(span.end - full_span.start + remapped_span.start) as usize,
+                );
                 SourceAnnotation {
-                    range: (
-                        (span.start - full_span.start + remapped_span.start) as usize,
-                        (span.end - full_span.start + remapped_span.start) as usize,
-                    ),
+                    range: new_span,
                     label: msg,
                     annotation_type: AnnotationType::Warning,
                 }
@@ -175,7 +190,7 @@ impl Sources {
     }
 
     /// -> FileID, data, first line number, remapped span
-    fn lookup_lines(&self, span: Span) -> Result<(FileId, &str, usize, Span), LookupError> {
+    fn lookup_err_ctx(&self, span: Span) -> Result<(FileId, &str, usize, Span), LookupError> {
         let fid_a = self.lookup_file(span.start)?;
         let fid_b = self.lookup_file(span.end)?;
         if fid_a != fid_b {
@@ -214,6 +229,34 @@ impl Sources {
             })
             .unwrap();
         Ok((fid_a, str, line_idx_a + 1, remapped_span))
+    }
+
+    pub fn lookup_line(&self, byte_pos: u32) -> Result<&str, LookupError> {
+        let fid = self.lookup_file(byte_pos)?;
+
+        let meta = &self.metadata[fid.0 as usize];
+
+        let line_idx = meta
+            .line_heads
+            .binary_search(&byte_pos)
+            .map_or_else(|x| x - 1, |x| x);
+
+        let start_idx = meta.line_heads[line_idx];
+        let end_idx = meta
+            .line_heads
+            .get(line_idx + 1)
+            .copied()
+            .unwrap_or(meta.span.end + 1)
+            - 1;
+
+        // FIXME
+        let str = self
+            .lookup_str(Span {
+                start: start_idx,
+                end: end_idx,
+            })
+            .unwrap();
+        Ok(str)
     }
 }
 
