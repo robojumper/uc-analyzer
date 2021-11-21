@@ -49,6 +49,67 @@ struct ClassResidual {
     within: Option<Identifier>,
 }
 
+impl LoweringContext {
+    fn lower_class(
+        &mut self,
+        defs: &mut DefHierarchy,
+        file_name: &Identifier,
+        hir: &Hir,
+        pack_id: DefId,
+    ) -> DefId {
+        defs.add_def(self, |_, l_ctx, file_id| {
+            let (ret, residual) = match &hir.header.kind {
+                uc_ast::ClassHeader::Class {
+                    extends,
+                    implements,
+                    within,
+                } => (
+                    Def::Class(Box::new(Class {
+                        def_id: file_id,
+                        name: file_name.clone(),
+                        package: pack_id,
+                        self_ty: Ty::object_from(file_id),
+                        flags: hir.header.mods.flags,
+                        extends: None,
+                        implements: Box::new([]),
+                        within: None,
+                        vars: Box::new([]),
+                        structs: Box::new([]),
+                        enums: Box::new([]),
+                        consts: Box::new([]),
+                        funcs: Box::new([]),
+                    })),
+                    ClassResidual {
+                        extends: extends.clone(),
+                        implements: implements.clone(),
+                        within: within.clone(),
+                    },
+                ),
+                uc_ast::ClassHeader::Interface { extends } => (
+                    Def::Interface(Box::new(Interface {
+                        def_id: file_id,
+                        name: file_name.clone(),
+                        package: pack_id,
+                        self_ty: Ty::interface_from(file_id),
+                        flags: hir.header.mods.flags,
+                        extends: None,
+                        funcs: Box::new([]),
+                    })),
+                    ClassResidual {
+                        extends: extends.clone(),
+                        implements: vec![],
+                        within: None,
+                    },
+                ),
+            };
+            l_ctx
+                .classes_interfaces
+                .insert(file_name.clone(), (file_id, residual));
+            ret
+        })
+    }
+}
+
 pub fn lower(input: LoweringInput) -> DefHierarchy {
     let mut defs = DefHierarchy::new();
     let mut l_ctx = LoweringContext {
@@ -57,73 +118,28 @@ pub fn lower(input: LoweringInput) -> DefHierarchy {
     };
 
     // Create the packages and classes
-    input.packages.iter().for_each(|(pack_name, package)| {
-        defs.add_def(&mut l_ctx, |defs, l_ctx, pack_id| {
-            l_ctx.packages.insert(pack_name.clone(), pack_id);
-            Def::Package(Box::new(Package {
-                def_id: pack_id,
-                name: pack_name.clone(),
-                classes: package
-                    .files
-                    .iter()
-                    .map(|(file_name, hir)| {
-                        defs.add_def(&mut *l_ctx, |_, l_ctx, file_id| {
-                            let (ret, residual) = match &hir.header.kind {
-                                uc_ast::ClassHeader::Class {
-                                    extends,
-                                    implements,
-                                    within,
-                                } => (
-                                    Def::Class(Box::new(Class {
-                                        def_id: file_id,
-                                        name: file_name.clone(),
-                                        package: pack_id,
-                                        self_ty: Ty::object_from(file_id),
-                                        flags: hir.header.mods.flags,
-                                        extends: None,
-                                        implements: Box::new([]),
-                                        within: None,
-                                        vars: Box::new([]),
-                                        structs: Box::new([]),
-                                        enums: Box::new([]),
-                                        consts: Box::new([]),
-                                        funcs: Box::new([]),
-                                    })),
-                                    ClassResidual {
-                                        extends: extends.clone(),
-                                        implements: implements.clone(),
-                                        within: within.clone(),
-                                    },
-                                ),
-                                uc_ast::ClassHeader::Interface { extends } => (
-                                    Def::Interface(Box::new(Interface {
-                                        def_id: file_id,
-                                        name: file_name.clone(),
-                                        package: pack_id,
-                                        self_ty: Ty::interface_from(file_id),
-                                        flags: hir.header.mods.flags,
-                                        extends: None,
-                                        funcs: Box::new([]),
-                                    })),
-                                    ClassResidual {
-                                        extends: extends.clone(),
-                                        implements: vec![],
-                                        within: None,
-                                    },
-                                ),
-                            };
-                            l_ctx
-                                .classes_interfaces
-                                .insert(file_name.clone(), (file_id, residual));
-                            ret
-                        })
-                    })
-                    .collect(),
-            }))
-        });
-    });
+    let package_defs = input
+        .packages
+        .iter()
+        .map(|(pack_name, package)| {
+            defs.add_def(&mut l_ctx, |defs, l_ctx, pack_id| {
+                l_ctx.packages.insert(pack_name.clone(), pack_id);
+                Def::Package(Box::new(Package {
+                    def_id: pack_id,
+                    name: pack_name.clone(),
+                    classes: package
+                        .files
+                        .iter()
+                        .map(|(file_name, hir)| l_ctx.lower_class(defs, file_name, hir, pack_id))
+                        .collect(),
+                }))
+            })
+        })
+        .collect::<Vec<_>>();
+    defs.packages = package_defs.into_boxed_slice();
 
     // Fix up superclasses and interface implementations
+    // FIXME: Lots of repetition here
     l_ctx
         .classes_interfaces
         .values()
