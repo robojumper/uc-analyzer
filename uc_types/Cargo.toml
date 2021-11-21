@@ -1,12 +1,8 @@
 [package]
-name = "uc_analysis"
+name = "uc_types"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-uc_ast = { path = "../uc_ast" }
-uc_files = { path = "../uc_files" }
-uc_name = { path = "../uc_name" }
-

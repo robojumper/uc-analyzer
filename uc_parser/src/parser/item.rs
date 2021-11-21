@@ -335,6 +335,8 @@ impl Parser<'_> {
                 self.expect(Tk::Comma)?;
             }
 
+            let arg_span = self.marker();
+
             let mods = self.parse_kws(&*modifiers::ARG_MODIFIERS)?;
             let ty = self.parse_ty(None)?;
             let name = self.expect_ident()?;
@@ -372,6 +374,7 @@ impl Parser<'_> {
                 count,
                 def,
                 mods,
+                span: arg_span.complete(self),
             });
 
             comma = true;

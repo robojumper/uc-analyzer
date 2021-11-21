@@ -238,6 +238,8 @@ impl<'a> Parser<'a> {
                     self.eat(kw!(Const));
                     self.eat(kw!(Native));
                     self.eat(kw!(Transient));
+                    // One lwotc file has config there
+                    self.eat(kw!(Config));
                 }
 
                 let ty = self.parse_ty(None)?;

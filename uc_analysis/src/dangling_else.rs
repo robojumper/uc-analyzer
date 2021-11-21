@@ -22,7 +22,7 @@ pub fn run(hir: &Hir, _: &Sources) -> Vec<ErrorReport> {
             code: "dangling-else",
             full_text: err.whole_thing,
             msg: "if if else is ambiguous".to_owned(),
-            inlay_messages: vec![("this one".to_owned(), err.whole_thing)],
+            inlay_messages: vec![("this one is if (...) { if (...) { ... } else { ... } } but could be interpreted as if (...) { if (...) { ... } } else { ... }".to_owned(), err.whole_thing)],
         })
         .collect()
 }

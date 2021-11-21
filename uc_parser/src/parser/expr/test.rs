@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use std::str::FromStr;
+use std::{path::PathBuf, str::FromStr};
 
 use uc_ast::pretty;
 use uc_files::Sources;
@@ -18,7 +18,7 @@ fn object_913() {
 #[test]
 fn object_1331() {
     let text = "Mid(Text,Idx+1,Len(Text))";
-    let pretty = "Mid(Text, (Idx + <Number>), Len(Text))";
+    let pretty = "Mid(Text, (Idx + `Number`), Len(Text))";
     assert_parse_pretty(text, pretty);
 }
 
@@ -55,7 +55,11 @@ fn new_op() {
 fn assert_parse_pretty(text: &str, pretty: &str) {
     let mut sources = Sources::new();
     let id = sources
-        .add_file(Identifier::from_str("TestFile").unwrap(), text.as_bytes())
+        .add_file(
+            Identifier::from_str("TestFile").unwrap(),
+            text.as_bytes(),
+            PathBuf::from("<anonymous>"),
+        )
         .unwrap();
     let lex = Lexer::new(&sources, id);
     let mut p = Parser::new(lex);

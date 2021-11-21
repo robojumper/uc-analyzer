@@ -1,9 +1,13 @@
 [workspace]
 members = [
-    "uc_ast",
     "uc_analysis",
+    "uc_analyzer",
+    "uc_ast",
+    "uc_ast_lowering",
     "uc_def",
     "uc_files",
+    "uc_middle",
     "uc_name",
     "uc_parser",
+    "uc_types",
 ]

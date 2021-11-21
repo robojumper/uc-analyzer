@@ -1,4 +1,4 @@
-use std::{borrow::Cow, cmp::Ordering, collections::HashMap};
+use std::{borrow::Cow, cmp::Ordering, collections::HashMap, path::PathBuf};
 
 use annotate_snippets::{
     display_list::{self, FormatOptions},
@@ -25,6 +25,7 @@ pub struct Sources {
 #[derive(Debug)]
 struct SourceFileMetadata {
     name: Identifier,
+    path: PathBuf,
     span: Span,
     line_heads: Vec<u32>,
 }
@@ -55,7 +56,12 @@ impl Sources {
         Self::default()
     }
 
-    pub fn add_file(&mut self, name: Identifier, data: &[u8]) -> Result<FileId, InputError> {
+    pub fn add_file(
+        &mut self,
+        name: Identifier,
+        data: &[u8],
+        path: PathBuf,
+    ) -> Result<FileId, InputError> {
         let data = fix_defects(name.as_ref(), data)?;
 
         if self.metadata.len() == u32::MAX as usize {
@@ -84,6 +90,7 @@ impl Sources {
             .collect();
         self.metadata.push(SourceFileMetadata {
             name: name.clone(),
+            path,
             span,
             line_heads,
         });

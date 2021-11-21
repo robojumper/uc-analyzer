@@ -1,5 +1,5 @@
 [package]
-name = "uc_analysis"
+name = "uc_ast_lowering"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,6 +7,6 @@ edition = "2021"
 
 [dependencies]
 uc_ast = { path = "../uc_ast" }
-uc_files = { path = "../uc_files" }
-uc_name = { path = "../uc_name" }
-
+uc_def = { path = "../uc_def" }
+uc_middle = { path = "../uc_middle" }
+uc_types = { path = "../uc_types" }

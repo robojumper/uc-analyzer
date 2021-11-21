@@ -154,6 +154,7 @@ pub struct FuncArg {
     pub count: DimCount,
     pub def: Option<Expr>,
     pub mods: Modifiers<ArgFlags>,
+    pub span: Span,
 }
 
 #[derive(Debug)]

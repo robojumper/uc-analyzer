@@ -15,7 +15,7 @@ pub fn run(hir: &Hir, _: &Sources) -> Vec<ErrorReport> {
         .errs
         .iter()
         .map(|err| ErrorReport {
-            code: "uneffectful-statememt",
+            code: "uneffectful-statement",
             full_text: err.1,
             msg: "expression statement has no effect".to_owned(),
             inlay_messages: vec![(err.0.to_owned(), err.1)],

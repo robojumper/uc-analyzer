@@ -12,8 +12,3 @@ uc_name = { path = "../uc_name" }
 uc_ast = { path = "../uc_ast" }
 uc_def = { path = "../uc_def" }
 uc_files = { path = "../uc_files" }
-
-
-[dev-dependencies]
-walkdir = "2"
-uc_analysis = { path = "../uc_analysis" }
