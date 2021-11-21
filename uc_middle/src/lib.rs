@@ -104,11 +104,21 @@ pub enum Def {
     Class(Box<Class>),
     Interface(Box<Interface>),
     Enum(Box<Enum>),
+    EnumVariant(Box<EnumVariant>),
 }
 
 #[derive(Debug)]
 pub struct Enum {
     pub def_id: DefId,
+    pub owning_class: DefId,
     pub name: Identifier,
-    pub variants: HashMap<Identifier, DefId>,
+    pub variants: Box<[DefId]>,
+}
+
+#[derive(Debug)]
+pub struct EnumVariant {
+    pub def_id: DefId,
+    pub owning_enum: DefId,
+    pub name: Identifier,
+    pub idx: u8,
 }

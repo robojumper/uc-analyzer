@@ -19,7 +19,7 @@
 use std::collections::HashMap;
 
 use uc_ast::Hir;
-use uc_middle::{ty::Ty, Class, Def, DefHierarchy, DefId, Interface, Package};
+use uc_middle::{ty::Ty, Class, Def, DefHierarchy, DefId, Enum, EnumVariant, Interface, Package};
 use uc_name::Identifier;
 
 pub struct LoweringInput {
@@ -36,25 +36,33 @@ pub struct LoweringInputPackage {
 /// that couldn't be lowered in form of residuals.
 struct LoweringContext {
     packages: HashMap<Identifier, DefId>,
-    classes_interfaces: HashMap<Identifier, (DefId, ClassResidual)>,
+    classes_interfaces: HashMap<Identifier, DefId>,
 }
 
 /// For example, these class modifiers refer to other classes we might now have
 /// visited yet, so we consume the header, create the class/interface defs with
 /// name, ty, flags, and stash these modifiers as identifiers in a ClassResidual.
 /// The next lowering step simply looks at these residuals and resolves them.
-struct ClassResidual {
+struct ClassResidual<'a> {
+    def_id: DefId,
     extends: Option<Identifier>,
     implements: Vec<Identifier>,
     within: Option<Identifier>,
+
+    enums: &'a [uc_ast::EnumDef],
 }
 
 impl LoweringContext {
-    fn lower_class(
+    fn lookup_class(&self, name: &Identifier) -> DefId {
+        *self.classes_interfaces.get(name).unwrap()
+    }
+
+    fn lower_class<'a>(
         &mut self,
         defs: &mut DefHierarchy,
+        residuals: &mut Vec<ClassResidual<'a>>,
         file_name: &Identifier,
-        hir: &Hir,
+        hir: &'a Hir,
         pack_id: DefId,
     ) -> DefId {
         defs.add_def(self, |_, l_ctx, file_id| {
@@ -80,9 +88,11 @@ impl LoweringContext {
                         funcs: Box::new([]),
                     })),
                     ClassResidual {
+                        def_id: file_id,
                         extends: extends.clone(),
                         implements: implements.clone(),
                         within: within.clone(),
+                        enums: &hir.enums,
                     },
                 ),
                 uc_ast::ClassHeader::Interface { extends } => (
@@ -96,16 +106,48 @@ impl LoweringContext {
                         funcs: Box::new([]),
                     })),
                     ClassResidual {
+                        def_id: file_id,
                         extends: extends.clone(),
                         implements: vec![],
                         within: None,
+                        enums: &[],
                     },
                 ),
             };
-            l_ctx
-                .classes_interfaces
-                .insert(file_name.clone(), (file_id, residual));
+            l_ctx.classes_interfaces.insert(file_name.clone(), file_id);
+            residuals.push(residual);
             ret
+        })
+    }
+
+    fn lower_enum(
+        &mut self,
+        defs: &mut DefHierarchy,
+        class_id: DefId,
+        en: &uc_ast::EnumDef,
+    ) -> DefId {
+        defs.add_def(self, |defs, l_ctx, enum_id| {
+            Def::Enum(Box::new(Enum {
+                def_id: enum_id,
+                owning_class: class_id,
+                name: en.name.clone(),
+                variants: en
+                    .variants
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, name)| {
+                        defs.add_def(&mut *l_ctx, |_, _, var_id| {
+                            Def::EnumVariant(Box::new(EnumVariant {
+                                def_id: var_id,
+                                owning_enum: enum_id,
+                                name: name.clone(),
+                                idx: idx.try_into().expect("too many variants"),
+                            }))
+                        })
+                    })
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice(),
+            }))
         })
     }
 }
@@ -116,6 +158,8 @@ pub fn lower(input: LoweringInput) -> DefHierarchy {
         packages: HashMap::new(),
         classes_interfaces: HashMap::new(),
     };
+
+    let mut class_residuals = vec![];
 
     // Create the packages and classes
     let package_defs = input
@@ -130,7 +174,9 @@ pub fn lower(input: LoweringInput) -> DefHierarchy {
                     classes: package
                         .files
                         .iter()
-                        .map(|(file_name, hir)| l_ctx.lower_class(defs, file_name, hir, pack_id))
+                        .map(|(file_name, hir)| {
+                            l_ctx.lower_class(defs, &mut class_residuals, file_name, hir, pack_id)
+                        })
                         .collect(),
                 }))
             })
@@ -138,35 +184,35 @@ pub fn lower(input: LoweringInput) -> DefHierarchy {
         .collect::<Vec<_>>();
     defs.packages = package_defs.into_boxed_slice();
 
-    // Fix up superclasses and interface implementations
-    // FIXME: Lots of repetition here
-    l_ctx
-        .classes_interfaces
-        .values()
-        .for_each(|(d, residual)| match &mut defs.get_def_mut(*d) {
+    class_residuals.iter().for_each(|res| {
+        // Fix up superclasses and interface implementations
+        let extends = res.extends.as_ref().map(|e| l_ctx.lookup_class(e));
+        let implements = res
+            .implements
+            .iter()
+            .map(|e| l_ctx.lookup_class(e))
+            .collect();
+        let within = res.within.as_ref().map(|e| l_ctx.lookup_class(e));
+        // Lower enums
+        let enums = res
+            .enums
+            .iter()
+            .map(|e| l_ctx.lower_enum(&mut defs, res.def_id, e))
+            .collect::<Vec<_>>();
+
+        match &mut defs.get_def_mut(res.def_id) {
             Def::Class(def) => {
-                def.extends = residual
-                    .extends
-                    .as_ref()
-                    .map(|e| l_ctx.classes_interfaces.get(e).unwrap().0);
-                def.implements = residual
-                    .implements
-                    .iter()
-                    .map(|e| l_ctx.classes_interfaces.get(e).unwrap().0)
-                    .collect();
-                def.within = residual
-                    .within
-                    .as_ref()
-                    .map(|e| l_ctx.classes_interfaces.get(e).unwrap().0);
+                def.extends = extends;
+                def.implements = implements;
+                def.within = within;
+                def.enums = enums.into_boxed_slice();
             }
             Def::Interface(def) => {
-                def.extends = residual
-                    .extends
-                    .as_ref()
-                    .map(|e| l_ctx.classes_interfaces.get(e).unwrap().0);
+                def.extends = extends;
             }
             _ => unreachable!(),
-        });
+        }
+    });
 
     println!("{:?}", &defs);
 
