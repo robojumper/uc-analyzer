@@ -243,6 +243,9 @@ impl<'a> Parser<'a> {
                 }
 
                 let ty = self.parse_ty(None)?;
+                if matches!(ty, Ty::Array(_)) {
+                    return Err(self.fmt_err("nested arrays are not supported", Some(ty_tok)));
+                }
                 self.expect(sig!(Gt))?;
                 Ok(Ty::Array(Box::new(ty)))
             }
@@ -250,9 +253,9 @@ impl<'a> Parser<'a> {
                 let class = if self.eat(sig!(Lt)) {
                     let c = self.expect_ident()?;
                     self.expect(sig!(Gt))?;
-                    Some(c)
+                    c
                 } else {
-                    None
+                    Identifier::from_str("Object").unwrap()
                 };
                 Ok(Ty::Class(class))
             }

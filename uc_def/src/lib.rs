@@ -12,10 +12,6 @@ bitflags! {
         const ABSTRACT = 1 << 5;
     }
 
-    pub struct InterfaceFlags: u32 {
-        const NATIVE = 1 << 0;
-    }
-
     pub struct FuncFlags: u32 {
         const EVENT = 1 << 0;
         const SIMULATED = 1 << 1;

@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 uc_analysis = { path = "../uc_analysis" }
 uc_ast = { path = "../uc_ast" }
+uc_ast_lowering = { path = "../uc_ast_lowering" }
 uc_files = { path = "../uc_files" }
 uc_name = { path = "../uc_name" }
 uc_parser = { path = "../uc_parser" }

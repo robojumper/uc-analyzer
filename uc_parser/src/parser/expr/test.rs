@@ -40,8 +40,8 @@ fn class_metacast() {
 #[test]
 fn class_simplecast() {
     let text = "Class(SomeObject)";
-    // Just a regular function call
-    let pretty = "Class(SomeObject)";
+    // We cheat. This is a regular function call on the UC side.
+    let pretty = "class<Object>(SomeObject)";
     assert_parse_pretty(text, pretty);
 }
 

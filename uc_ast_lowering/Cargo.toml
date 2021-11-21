@@ -9,4 +9,4 @@ edition = "2021"
 uc_ast = { path = "../uc_ast" }
 uc_def = { path = "../uc_def" }
 uc_middle = { path = "../uc_middle" }
-uc_types = { path = "../uc_types" }
+uc_name = { path = "../uc_name" }

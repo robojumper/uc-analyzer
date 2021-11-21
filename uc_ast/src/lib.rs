@@ -64,7 +64,7 @@ pub enum Ty {
     Simple(Identifier),
     Qualified(Vec<Identifier>),
     Array(Box<Ty>),
-    Class(Option<Identifier>),
+    Class(Identifier),
     Delegate(Vec<Identifier>),
 }
 

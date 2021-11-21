@@ -2,7 +2,10 @@
 //! See https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
 //! for an introduction to Pratt parsing.
 
+use std::str::FromStr;
+
 use uc_ast::{Expr, ExprKind, Op, Ty};
+use uc_name::Identifier;
 
 use crate::{
     kw,
@@ -139,10 +142,23 @@ impl Parser<'_> {
                         },
                     }
                 }
-                kw!(Class) if matches!(self.peek(), Some(Token { kind: sig!(Lt), .. })) => {
-                    self.next();
-                    let ident = self.expect_ident()?;
-                    self.expect(sig!(Gt))?;
+                kw!(Class)
+                    if matches!(
+                        self.peek(),
+                        Some(Token {
+                            kind: sig!(Lt) | sig!(LParen),
+                            ..
+                        })
+                    ) =>
+                {
+                    let name = if self.eat(sig!(Lt)) {
+                        let ident = self.expect_ident()?;
+                        self.expect(sig!(Gt))?;
+                        ident
+                    } else {
+                        Identifier::from_str("Object").unwrap()
+                    };
+
                     self.expect(sig!(LParen))?;
                     let expr = self.parse_base_expression_bp(0)?;
                     self.expect(sig!(RParen))?;
@@ -150,7 +166,7 @@ impl Parser<'_> {
                         span: lhs_marker.complete(self),
                         paren: false,
                         kind: ExprKind::ClassMetaCastExpr {
-                            ty: Ty::Class(Some(ident)),
+                            ty: Ty::Class(name),
                             expr: Box::new(expr),
                         },
                     }

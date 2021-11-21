@@ -9,5 +9,4 @@ members = [
     "uc_middle",
     "uc_name",
     "uc_parser",
-    "uc_types",
 ]

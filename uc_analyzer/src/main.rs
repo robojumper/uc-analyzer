@@ -5,6 +5,8 @@ use std::{fs, path::PathBuf};
 use uc_analysis::{
     ambiguous_new_template, dangling_else, misleading_indentation, missing_break, uneffectful_stmt,
 };
+use uc_ast::Hir;
+use uc_ast_lowering::{LoweringInput, LoweringInputPackage};
 use uc_files::{FileId, Sources};
 use uc_name::Identifier;
 use uc_parser::{lexer, parser};
@@ -12,6 +14,7 @@ use uc_parser::{lexer, parser};
 struct Package {
     name: Identifier,
     files: Vec<FileId>,
+    hirs: Vec<Hir>,
 }
 
 fn main() {
@@ -31,7 +34,6 @@ fn main() {
             exp
         });
 
-    let mut hirs = vec![];
     let mut sources = Sources::new();
     let mut packages = vec![];
 
@@ -54,6 +56,7 @@ fn main() {
                 .and_then(|n| Identifier::from_str(n).ok())
                 .expect("non-ascii package name"),
             files: vec![],
+            hirs: vec![],
         };
 
         let classes = {
@@ -90,7 +93,8 @@ fn main() {
                 path = expanded_dir.clone();
                 path.push(package_dir.file_name());
                 path.push(class.file_name());
-                contents = fs::read(&path).unwrap_or_else(|e| panic!("failed to read expanded file {:?}: {:?}", path, e));
+                contents = fs::read(&path)
+                    .unwrap_or_else(|e| panic!("failed to read expanded file {:?}: {:?}", path, e));
             }
 
             let id = sources
@@ -109,7 +113,7 @@ fn main() {
         packages.push(package);
     }
 
-    for p in &packages {
+    for p in &mut packages {
         for &f in &p.files {
             let lexer = lexer::Lexer::new(&sources, f);
             let (hir, errs) = parser::parse(lexer);
@@ -128,7 +132,25 @@ fn main() {
 
             errs.iter().for_each(|e| sources.emit_err(e));
 
-            hirs.push(hir);
+            p.hirs.push(hir);
         }
     }
+
+    let input = LoweringInput {
+        packages: packages
+            .into_iter()
+            .map(|p| {
+                let pack = LoweringInputPackage {
+                    files: p
+                        .hirs
+                        .into_iter()
+                        .map(|h| (h.header.name.clone(), h))
+                        .collect(),
+                };
+                (p.name, pack)
+            })
+            .collect(),
+    };
+
+    let result = uc_ast_lowering::lower(input);
 }

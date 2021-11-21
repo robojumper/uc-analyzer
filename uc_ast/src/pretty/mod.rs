@@ -129,11 +129,9 @@ impl<W: io::Write> PPrinter<W> {
             }
             Ty::Class(ci) => {
                 self.w.write_all(b"class")?;
-                if let Some(i) = ci {
-                    self.w.write_all(b"<")?;
-                    self.format_i(i)?;
-                    self.w.write_all(b">")?;
-                }
+                self.w.write_all(b"<")?;
+                self.format_i(ci)?;
+                self.w.write_all(b">")?;
             }
             Ty::Delegate(parts) => {
                 self.w.write_all(b"delegate(")?;
