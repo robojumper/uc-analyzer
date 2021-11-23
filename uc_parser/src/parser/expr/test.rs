@@ -56,7 +56,7 @@ fn assert_parse_pretty(text: &str, pretty: &str) {
     let mut sources = Sources::new();
     let id = sources
         .add_file(
-            Identifier::from_str("TestFile").unwrap(),
+            "TestFile".to_owned(),
             text.as_bytes(),
             PathBuf::from("<anonymous>"),
         )

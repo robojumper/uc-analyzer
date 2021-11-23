@@ -402,7 +402,7 @@ pub fn lower(input: LoweringInput) -> Defs {
 }
 
 // Todo: This needs to take into account the environment when looking at delegates
-fn ast_ty_to_ty(ctx: &Defs, ty: uc_ast::Ty) -> Ty {
+fn ast_ty_to_ty(ctx: &Defs, ty: uc_ast::Ty, scope: DefId) -> Ty {
     match ty {
         uc_ast::Ty::Simple(ident) => {
             if ident == *"int" {
@@ -425,7 +425,7 @@ fn ast_ty_to_ty(ctx: &Defs, ty: uc_ast::Ty) -> Ty {
         uc_ast::Ty::Array(arr_ty) => {
             // This is filtered in the parser
             assert!(!matches!(&*arr_ty, uc_ast::Ty::Array(_)));
-            Ty::array_from(ast_ty_to_ty(ctx, *arr_ty))
+            Ty::array_from(ast_ty_to_ty(ctx, *arr_ty, scope))
         }
         uc_ast::Ty::Class(_) => todo!(),
         uc_ast::Ty::Delegate(_) => todo!(),

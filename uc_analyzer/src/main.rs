@@ -101,7 +101,7 @@ fn main() {
                 .add_file(
                     path.file_stem()
                         .and_then(|n| n.to_str())
-                        .and_then(|n| Identifier::from_str(n).ok())
+                        .map(|n| n.to_owned())
                         .unwrap(),
                     &contents,
                     path,

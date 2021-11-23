@@ -11,6 +11,19 @@
 * Mirroring the behavior of UCC exactly.
   * We want to catch errors UCC doesn't, not the ones it does.
 
+## Crates
+
+* `uc_analyzer`: Main executable. Currently does whatever I'm working on.
+* `uc_analysis`: Librarified lints, used by the main executable.
+* `uc_files`: Simple file storage, span lookup and error reporting through `annotate-snippets`.
+  * I'd like to use `codespan` for this but it can't handle non-UTF-8 text (see below).
+* `uc_name`: Encapsulated case-insensitive ASCII string.
+* `uc_def`: Core definitions likely to be relevant in many crates, such as bitflags and operators.
+* `uc_ast`: Definition and pretty-printing of the UnrealScript AST.
+* `uc_parser`: Lexer and parser that produces this AST.
+* `uc_middle`: Fully resolved UnrealScript workspace.
+* `uc_ast_lowering`: Lowers and resolves AST to middle representation.
+
 ## Encodings
 
 UCC accepts ASCII, extended ASCII, UTF-8, and UTF-16 with a BOM.

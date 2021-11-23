@@ -4,7 +4,6 @@ use annotate_snippets::{
     display_list::{self, FormatOptions},
     snippet::{Annotation, AnnotationType, Slice, Snippet, SourceAnnotation},
 };
-use uc_name::Identifier;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Span {
@@ -19,12 +18,12 @@ pub struct FileId(u32);
 pub struct Sources {
     data: Vec<u8>,
     metadata: Vec<SourceFileMetadata>,
-    files_names: HashMap<Identifier, FileId>,
+    files_names: HashMap<String, FileId>,
 }
 
 #[derive(Debug)]
 struct SourceFileMetadata {
-    name: Identifier,
+    name: String,
     path: PathBuf,
     span: Span,
     line_heads: Vec<u32>,
@@ -58,7 +57,7 @@ impl Sources {
 
     pub fn add_file(
         &mut self,
-        name: Identifier,
+        name: String,
         data: &[u8],
         path: PathBuf,
     ) -> Result<FileId, InputError> {
@@ -130,7 +129,7 @@ impl Sources {
     }
 
     #[inline]
-    pub fn file_name(&self, f_id: FileId) -> &Identifier {
+    pub fn file_name(&self, f_id: FileId) -> &str {
         &self.metadata[f_id.0 as usize].name
     }
 
