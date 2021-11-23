@@ -14,6 +14,7 @@ const __ASSERT_COVERED: () = {
     assert_mask_covers_all_bits[((combined_mask != !0) as bool) as usize]
 };
 
+#[derive(Clone, Copy, Debug)]
 enum BaseTy {
     /// Base `int` type.
     Int = 1 << 27,
@@ -46,37 +47,57 @@ enum BaseTy {
 /// - base type represented with 4 bits
 /// - 27 bits for indexing back into the thing that defined the
 ///   type (134 million classes+structs+enums+interfaces).
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 #[repr(transparent)]
 pub struct Ty(NonZeroU32);
 
+impl std::fmt::Debug for Ty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut builder = f.debug_tuple("Ty");
+        builder.field(&self.base_ty());
+        if let Some(id) = self.get_def() {
+            builder.field(&id);
+        }
+        builder.finish()
+    }
+}
+
 impl Ty {
-    pub const INT: Self = Ty(unsafe { NonZeroU32::new_unchecked(BaseTy::Int as u32) });
-    pub const FLOAT: Self = Ty(unsafe { NonZeroU32::new_unchecked(BaseTy::Float as u32) });
-    pub const BOOL: Self = Ty(unsafe { NonZeroU32::new_unchecked(BaseTy::Bool as u32) });
-    pub const BYTE: Self = Ty(unsafe { NonZeroU32::new_unchecked(BaseTy::Byte as u32) });
-    pub const STRING: Self = Ty(unsafe { NonZeroU32::new_unchecked(BaseTy::String as u32) });
-    pub const NAME: Self = Ty(unsafe { NonZeroU32::new_unchecked(BaseTy::Name as u32) });
+    pub const INT: Self = Ty(NonZeroU32::new(BaseTy::Int as u32).unwrap());
+    pub const FLOAT: Self = Ty(NonZeroU32::new(BaseTy::Float as u32).unwrap());
+    pub const BOOL: Self = Ty(NonZeroU32::new(BaseTy::Bool as u32).unwrap());
+    pub const BYTE: Self = Ty(NonZeroU32::new(BaseTy::Byte as u32).unwrap());
+    pub const STRING: Self = Ty(NonZeroU32::new(BaseTy::String as u32).unwrap());
+    pub const NAME: Self = Ty(NonZeroU32::new(BaseTy::Name as u32).unwrap());
 
     pub fn get_def(&self) -> Option<NonZeroU32> {
         if self.is_array() {
             return None;
         }
+        match self.base_ty() {
+            BaseTy::Int | BaseTy::Float | BaseTy::Bool | BaseTy::String | BaseTy::Name => None,
+            BaseTy::Struct
+            | BaseTy::Object
+            | BaseTy::Class
+            | BaseTy::Interface
+            | BaseTy::Delegate => Some(NonZeroU32::new(self.0.get() & DEF_ID_MASK).unwrap()),
+            BaseTy::Byte => NonZeroU32::new(self.0.get() & DEF_ID_MASK),
+        }
+    }
+
+    fn base_ty(&self) -> BaseTy {
         match self.0.get() & BASE_TY_MASK {
-            const { BaseTy::Int as u32 }
-            | const { BaseTy::Float as u32 }
-            | const { BaseTy::Bool as u32 }
-            | const { BaseTy::String as u32 }
-            | const { BaseTy::Name as u32 } => None,
-            const { BaseTy::Struct as u32 }
-            | const { BaseTy::Object as u32 }
-            | const { BaseTy::Class as u32 }
-            | const { BaseTy::Interface as u32 }
-            | const { BaseTy::Delegate as u32 } => {
-                Some(NonZeroU32::new(self.0.get() & DEF_ID_MASK).unwrap())
-            }
-            // Bytes can have an associated enum
-            const { BaseTy::Byte as u32 } => NonZeroU32::new(self.0.get() & DEF_ID_MASK),
+            const { BaseTy::Int as u32 } => BaseTy::Int,
+            const { BaseTy::Float as u32 } => BaseTy::Float,
+            const { BaseTy::Bool as u32 } => BaseTy::Bool,
+            const { BaseTy::Byte as u32 } => BaseTy::Byte,
+            const { BaseTy::String as u32 } => BaseTy::String,
+            const { BaseTy::Name as u32 } => BaseTy::Name,
+            const { BaseTy::Struct as u32 } => BaseTy::Struct,
+            const { BaseTy::Object as u32 } => BaseTy::Object,
+            const { BaseTy::Class as u32 } => BaseTy::Class,
+            const { BaseTy::Interface as u32 } => BaseTy::Interface,
+            const { BaseTy::Delegate as u32 } => BaseTy::Delegate,
             _ => unreachable!(),
         }
     }
@@ -95,6 +116,16 @@ impl Ty {
     #[inline]
     pub fn interface_from(id: DefId) -> Ty {
         Ty(NonZeroU32::new(BaseTy::Interface as u32 | id.0.get()).unwrap())
+    }
+
+    #[inline]
+    pub fn enum_from(id: DefId) -> Ty {
+        Ty(NonZeroU32::new(BaseTy::Byte as u32 | id.0.get()).unwrap())
+    }
+
+    #[inline]
+    pub fn struct_from(id: DefId) -> Ty {
+        Ty(NonZeroU32::new(BaseTy::Struct as u32 | id.0.get()).unwrap())
     }
 
     #[inline]

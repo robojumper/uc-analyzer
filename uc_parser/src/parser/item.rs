@@ -1,7 +1,8 @@
 use uc_ast::{
     ClassDef, ClassHeader, ConstDef, ConstVal, DimCount, EnumDef, FuncArg, FuncBody, FuncDef,
-    FuncName, FuncSig, Local, Op, StateDef, Statement, StructDef, Ty, VarDef, VarInstance,
+    FuncName, FuncSig, LocalDef, StateDef, Statement, StructDef, Ty, VarDef, VarInstance,
 };
+use uc_def::Op;
 
 use super::{ParseError, Parser};
 use crate::{
@@ -422,7 +423,7 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_locals(&mut self) -> Result<Vec<Local>, ParseError> {
+    fn parse_locals(&mut self) -> Result<Vec<LocalDef>, ParseError> {
         let mut locals = vec![];
         while self.eat(Tk::Semi) {} // FIXME: Where is this hit?
         while self.eat(kw!(Local)) {
@@ -437,7 +438,7 @@ impl Parser<'_> {
         Ok(locals)
     }
 
-    fn parse_local(&mut self) -> Result<Local, ParseError> {
+    fn parse_local(&mut self) -> Result<LocalDef, ParseError> {
         let ty = self.parse_ty(None)?;
         let mut names = vec![];
         loop {
@@ -473,7 +474,7 @@ impl Parser<'_> {
             }
         }
         self.expect(Tk::Semi)?;
-        Ok(Local { ty, names })
+        Ok(LocalDef { ty, names })
     }
 
     #[allow(clippy::type_complexity)]

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 pub use uc_def;
-use uc_def::{ArgFlags, ClassFlags, Flags, FuncFlags, StructFlags, VarFlags};
+use uc_def::{ArgFlags, ClassFlags, Flags, FuncFlags, Op, StructFlags, VarFlags};
 use uc_files::Span;
 use uc_name::Identifier;
 
@@ -159,7 +159,7 @@ pub struct FuncArg {
 
 #[derive(Debug)]
 pub struct FuncBody {
-    pub locals: Vec<Local>,
+    pub locals: Vec<LocalDef>,
     pub consts: Vec<ConstDef>,
     pub statements: Vec<Statement>,
 }
@@ -233,47 +233,6 @@ pub struct Block {
     pub stmts: Vec<Statement>,
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum Op {
-    Add,
-    AddAdd,
-    AddAssign,
-    And,
-    AndAnd,
-    At,
-    AtAssign,
-    Bang,
-    BangEq,
-    Div,
-    DivAssign,
-    Dollar,
-    DollarAssign,
-    EqEq,
-    Gt,
-    GtEq,
-    GtGt,
-    GtGtGt,
-    Lt,
-    LtEq,
-    LtLt,
-    Mod,
-    Mul,
-    MulMul,
-    MulAssign,
-    Or,
-    OrOr,
-    Pow,
-    PowPow,
-    Sub,
-    SubAssign,
-    SubSub,
-    Tilde,
-    TildeEq,
-
-    VecCross,
-    VecDot,
-}
-
 #[derive(Debug)]
 pub struct Expr {
     pub span: Span,
@@ -341,7 +300,7 @@ pub enum Literal {
 }
 
 #[derive(Debug)]
-pub struct Local {
+pub struct LocalDef {
     pub ty: Ty,
     pub names: Vec<VarInstance>,
 }

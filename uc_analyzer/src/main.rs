@@ -123,6 +123,7 @@ fn main() {
                 panic!();
             }
 
+            /*
             let mut errs = vec![];
             errs.extend(ambiguous_new_template::run(&hir, &sources));
             errs.extend(dangling_else::run(&hir, &sources));
@@ -131,6 +132,7 @@ fn main() {
             errs.extend(uneffectful_stmt::run(&hir, &sources));
 
             errs.iter().for_each(|e| sources.emit_err(e));
+             */
 
             p.hirs.push(hir);
         }

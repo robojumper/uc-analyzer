@@ -4,7 +4,7 @@ use uc_def::{ArgFlags, FuncFlags};
 
 use crate::{
     ClassDef, ClassHeader, ConstDef, DimCount, EnumDef, Expr, FuncBody, FuncDef, FuncName, FuncSig,
-    Hir, Identifier, Local, StateDef, StructDef, Ty, VarDef, VarInstance,
+    Hir, Identifier, LocalDef, StateDef, StructDef, Ty, VarDef, VarInstance,
 };
 
 mod stmts;
@@ -291,7 +291,7 @@ impl<W: io::Write> PPrinter<W> {
         Ok(())
     }
 
-    fn format_local(&mut self, l: &Local) -> io::Result<()> {
+    fn format_local(&mut self, l: &LocalDef) -> io::Result<()> {
         self.indent()?;
         self.w.write_all(b"local ")?;
         self.format_ty(&l.ty)?;

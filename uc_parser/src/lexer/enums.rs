@@ -1,4 +1,4 @@
-use uc_ast::Op;
+use uc_def::Op;
 use uc_name::Ascii;
 
 use once_cell::sync::Lazy;

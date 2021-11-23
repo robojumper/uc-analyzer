@@ -4,7 +4,8 @@
 
 use std::str::FromStr;
 
-use uc_ast::{Expr, ExprKind, Op, Ty};
+use uc_ast::{Expr, ExprKind, Ty};
+use uc_def::Op;
 use uc_name::Identifier;
 
 use crate::{

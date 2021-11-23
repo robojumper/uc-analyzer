@@ -1,6 +1,7 @@
 use uc_ast::{
+    uc_def::Op,
     visit::{self, Visitor},
-    Expr, ExprKind, Hir, Op, Statement, StatementKind,
+    Expr, ExprKind, Hir, Statement, StatementKind,
 };
 use uc_files::{ErrorReport, Sources, Span};
 
