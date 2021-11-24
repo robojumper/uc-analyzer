@@ -85,7 +85,7 @@ impl_flags_for_bitflags! {
     ClassFlags, FuncFlags, VarFlags, ArgFlags, StructFlags,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum Op {
     Add,
     AddAdd,
@@ -124,4 +124,5 @@ pub enum Op {
 
     VecCross,
     VecDot,
+    YawClockwiseFrom,
 }

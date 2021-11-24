@@ -314,6 +314,7 @@ impl Parser<'_> {
             _ => (Some(self.parse_ty(Some(ty_or_name))?), {
                 let name_tok = self.next_any()?;
                 match name_tok.kind {
+                    kw!(ClockwiseFrom) => FuncName::Oper(Op::YawClockwiseFrom),
                     kw!(Cross) => FuncName::Oper(Op::VecCross),
                     kw!(Dot) => FuncName::Oper(Op::VecDot),
                     Tk::Sym(_) => FuncName::Iden(self.sym_to_ident(&name_tok)),

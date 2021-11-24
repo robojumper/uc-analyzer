@@ -1,3 +1,5 @@
+#![feature(iter_intersperse)]
+
 use std::collections::HashMap;
 
 pub use uc_def;

@@ -1,4 +1,4 @@
-#![feature(inline_const)]
+#![feature(inline_const_pat)]
 #![feature(const_option)]
 
 //! The middle representation of a whole UnrealScript workspace.
@@ -54,12 +54,28 @@ impl Defs {
 
     #[inline]
     pub fn get_def(&self, def_id: DefId) -> &Def {
-        &self.defs[def_id.0.get() as usize]
+        let def = &self.defs[def_id.0.get() as usize];
+        assert!(!matches!(def, Def::None));
+        def
     }
 
     #[inline]
     pub fn get_def_mut(&mut self, def_id: DefId) -> &mut Def {
-        &mut self.defs[def_id.0.get() as usize]
+        let def = &mut self.defs[def_id.0.get() as usize];
+        assert!(!matches!(def, Def::None));
+        def
+    }
+
+    pub fn get_package_of_ty(&self, mut def_id: DefId) -> DefId {
+        loop {
+            match self.get_def(def_id) {
+                Def::Class(c) => break c.package,
+                Def::Enum(e) => def_id = e.owning_class,
+                Def::Struct(s) => def_id = s.owning_class,
+
+                d => panic!("not a type: {:?}", d),
+            }
+        }
     }
 
     pub fn get_class(&self, def_id: DefId) -> &Class {
@@ -101,7 +117,7 @@ pub enum Def {
     Struct(Box<Struct>),
     Var(Box<Var>),
     Operator(Box<Operator>),
-    Funtion(Box<Function>),
+    Function(Box<Function>),
     FuncArg(Box<FuncArg>),
 }
 
@@ -184,7 +200,7 @@ pub struct Operator {
     pub owning_class: DefId,
     pub flags: FuncFlags,
 
-    pub sig: FuncSig,
+    pub sig: Option<FuncSig>,
 }
 
 #[derive(Debug)]
@@ -193,6 +209,7 @@ pub struct Function {
     pub name: Identifier,
     pub owner: DefId, // Class or State
     pub flags: FuncFlags,
+    pub delegate_prop: Option<DefId>,
 
     pub sig: Option<FuncSig>,
 }

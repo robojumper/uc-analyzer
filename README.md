@@ -34,3 +34,27 @@ codepoints are simply interpreted as 2, 3, or 4 extended ASCII characters.
 We solve this problem by converting BOM'ed UTF-16 to UTF-8, and just feeding
 raw bytes to the lexer. The lexer will reject all non-ASCII characters that
 appear outside of comments and strings.
+
+## Defects
+
+The compiler accepts some pretty clearly invalid syntax and has some
+questionable behavior, not all of which I want to accept in this
+implementation. The different behavior is documented.
+
+* `defaultproperties` blocks may be not closed, or may contain arbitrary
+  bytes after the closing brace on the same line.
+  * we reject this
+* Overloaded operators may have a different priority from other
+  implementations of the same operator.
+  * we ignore precedence annotations and hardcode sane ones.
+* Arbitrary new operators can be defined as long as their name is a valid
+  token.
+  * we only recognize the sigil operators, `cross`, `dot`, and `clockwisefrom`.
+* Conflicts between type names are allowed and UCC just picks the one
+  loaded/compiled later.
+  * we, in the case of ambiguity, prefer a type from the same package as
+    the reference, otherwise error.
+* `new CallOrVar(ArgOrTemplate)` can, syntactically, be a single-argument
+  function returning a class, or be a local property followed by the object
+  template for the `new` operator.
+  * aaaaaaaahh

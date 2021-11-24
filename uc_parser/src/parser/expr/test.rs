@@ -1,10 +1,9 @@
 #![cfg(test)]
 
-use std::{path::PathBuf, str::FromStr};
+use std::path::PathBuf;
 
 use uc_ast::pretty;
 use uc_files::Sources;
-use uc_name::Identifier;
 
 use crate::{lexer::Lexer, parser::Parser};
 

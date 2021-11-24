@@ -283,6 +283,7 @@ impl<W: io::Write> PPrinter<W> {
             Op::TildeEq => "~=",
             Op::VecCross => "cross",
             Op::VecDot => "dot",
+            Op::YawClockwiseFrom => "clockwisefrom",
         };
         self.w.write_all(sl.as_bytes())?;
         Ok(())

@@ -1,5 +1,5 @@
 //! UnrealScript statement and expression parser based on Pratt parsing.
-//! See https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
+//! See <https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html>
 //! for an introduction to Pratt parsing.
 
 use std::str::FromStr;
@@ -38,6 +38,7 @@ impl OpLike {
             sig!(Dot) => Some(OpLike::Dot),
             sig!(LBrack) => Some(OpLike::LBrack),
             sig!(LParen) => Some(OpLike::LParen),
+            kw!(ClockwiseFrom) => Some(OpLike::Op(Op::YawClockwiseFrom)),
             kw!(Cross) => Some(OpLike::Op(Op::VecCross)),
             kw!(Dot) => Some(OpLike::Op(Op::VecDot)),
             Tk::Sig(s) => s.to_op().map(OpLike::Op),
@@ -421,6 +422,8 @@ fn infix_binding_power(op: OpLike) -> Option<(u8, u8)> {
         Op::GtEq => (22, 23),
         Op::EqEq => (22, 23),
         Op::TildeEq => (22, 23),
+
+        Op::YawClockwiseFrom => (22, 23),
 
         Op::BangEq => (20, 21),
 

@@ -129,6 +129,11 @@ impl Ty {
     }
 
     #[inline]
+    pub fn delegate_from(id: DefId) -> Ty {
+        Ty(NonZeroU32::new(BaseTy::Delegate as u32 | id.0.get()).unwrap())
+    }
+
+    #[inline]
     pub fn is_array(&self) -> bool {
         self.0.get() & ARRAY_MASK != 0
     }

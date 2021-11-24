@@ -131,6 +131,7 @@ keywords! {
         Class,
         ClassGroup,
         Client,
+        ClockwiseFrom,
         Coerce,
         CollapseCategories,
         Config,
