@@ -252,7 +252,12 @@ pub enum ExprKind {
         lhs: Box<Expr>,
         rhs: Identifier,
     },
-    CallExpr {
+    FuncCallExpr {
+        lhs: Option<Box<Expr>>,
+        name: Identifier,
+        args: Vec<Option<Expr>>,
+    },
+    DelegateCallExpr {
         lhs: Box<Expr>,
         args: Vec<Option<Expr>>,
     },
@@ -261,7 +266,7 @@ pub enum ExprKind {
         expr: Box<Expr>,
     },
     NewExpr {
-        args: Vec<Expr>,
+        args: Vec<Option<Expr>>,
         cls: Box<Expr>,
         arch: Option<Box<Expr>>,
     },

@@ -29,6 +29,8 @@ pub struct ResolverContext {
     global_values: HashMap<Identifier, DefId>,
     /// Class/Struct -> Name -> Var
     scoped_vars: HashMap<DefId, HashMap<Identifier, DefId>>,
+    /// Class/Struct -> Name -> Const
+    scoped_consts: HashMap<DefId, HashMap<Identifier, DefId>>,
     /// Class -> Name -> Func
     scoped_funcs: HashMap<DefId, HashMap<Identifier, DefId>>,
     /// Class -> Op -> Func
@@ -110,6 +112,25 @@ impl ResolverContext {
             Entry::Occupied(_) => return Err(ResolutionError::ExistsInExactScope),
             Entry::Vacant(e) => {
                 e.insert(var);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn add_scoped_const(
+        &mut self,
+        scope: DefId,
+        name: Identifier,
+        const_id: DefId,
+    ) -> Result<()> {
+        let consts = self
+            .scoped_consts
+            .entry(scope)
+            .or_insert_with(HashMap::default);
+        match consts.entry(name) {
+            Entry::Occupied(_) => return Err(ResolutionError::ExistsInExactScope),
+            Entry::Vacant(e) => {
+                e.insert(const_id);
             }
         }
         Ok(())

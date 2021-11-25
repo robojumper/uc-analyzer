@@ -23,8 +23,8 @@ use resolver::{ResolutionError, ResolverContext};
 use uc_ast::Hir;
 use uc_def::{FuncFlags, VarFlags};
 use uc_middle::{
-    ty::Ty, Class, ClassKind, Def, DefId, Defs, Enum, EnumVariant, Function, Operator, Package,
-    Struct, Var, VarSig,
+    ty::Ty, Class, ClassKind, Const, Def, DefId, Defs, Enum, EnumVariant, Function, Operator,
+    Package, Struct, Var, VarSig,
 };
 use uc_name::Identifier;
 
@@ -148,13 +148,20 @@ impl<'defs> LoweringContext<'defs> {
     /// Lower enums, create DefIDs for structs, enums, consts, functions, vars
     fn discover_items<'hir>(&mut self, backrefs: &'hir mut HirBackrefs) {
         for (&class_id, &hir) in &backrefs.files {
-            let mut resolving = HashMap::new();
+            let const_ids = hir
+                .consts
+                .iter()
+                .map(|const_def| self.lower_const(class_id, const_def, &mut backrefs.consts))
+                .collect::<Box<[_]>>();
+            self.defs
+                .get_class_mut(class_id)
+                .items
+                .extend_from_slice(&const_ids);
+
             let var_ids = hir
                 .vars
                 .iter()
-                .flat_map(|var_def| {
-                    self.lower_var(class_id, var_def, &mut backrefs.vars, &mut resolving)
-                })
+                .flat_map(|var_def| self.lower_var(class_id, var_def, &mut backrefs.vars))
                 .collect::<Box<[_]>>();
             self.defs
                 .get_class_mut(class_id)
@@ -200,6 +207,8 @@ impl<'defs> LoweringContext<'defs> {
                 .get_class_mut(class_id)
                 .items
                 .extend_from_slice(&funcs);
+
+            let states = hir.states.iter().map(|state_def| {});
         }
     }
 
@@ -291,7 +300,6 @@ impl<'defs> LoweringContext<'defs> {
         struct_def: &'hir uc_ast::StructDef,
         vars: &mut HashMap<DefId, (&'hir uc_ast::VarDef, usize)>,
     ) -> DefId {
-        let mut resolving = HashMap::new();
         self.add_def(|this, struct_id| {
             this.resolver
                 .add_scoped_ty(class_id, struct_def.name.clone(), struct_id)
@@ -300,7 +308,7 @@ impl<'defs> LoweringContext<'defs> {
             let var_ids = struct_def
                 .fields
                 .iter()
-                .flat_map(|var_def| this.lower_var(struct_id, var_def, vars, &mut resolving))
+                .flat_map(|var_def| this.lower_var(struct_id, var_def, vars))
                 .collect::<Box<[_]>>();
 
             Def::Struct(Box::new(Struct {
@@ -320,16 +328,17 @@ impl<'defs> LoweringContext<'defs> {
         owner_id: DefId,
         var_def: &'hir uc_ast::VarDef,
         vars: &mut HashMap<DefId, (&'hir uc_ast::VarDef, usize)>,
-        resolving: &mut HashMap<Identifier, DefId>,
     ) -> Vec<DefId> {
         var_def
             .names
             .iter()
             .enumerate()
             .map(|(idx, inst)| {
-                let id = self.add_def(|_, var_id| {
+                self.add_def(|this, var_id| {
+                    this.resolver
+                        .add_scoped_var(owner_id, inst.name.clone(), var_id)
+                        .unwrap();
                     vars.insert(var_id, (var_def, idx));
-                    resolving.insert(inst.name.clone(), var_id);
                     Def::Var(Box::new(Var {
                         def_id: var_id,
                         name: inst.name.clone(),
@@ -337,13 +346,28 @@ impl<'defs> LoweringContext<'defs> {
                         flags: var_def.mods.flags,
                         sig: None,
                     }))
-                });
-                self.resolver
-                    .add_scoped_var(owner_id, inst.name.clone(), id)
-                    .unwrap();
-                id
+                })
             })
             .collect()
+    }
+
+    fn lower_const<'hir>(
+        &mut self,
+        owner_id: DefId,
+        const_def: &'hir uc_ast::ConstDef,
+        consts: &mut HashMap<DefId, &'hir uc_ast::ConstDef>,
+    ) -> DefId {
+        self.add_def(|this, const_id| {
+            this.resolver
+                .add_scoped_const(owner_id, const_def.name.clone(), const_id)
+                .unwrap();
+            consts.insert(const_id, const_def);
+            Def::Const(Box::new(Const {
+                def_id: const_id,
+                name: const_def.name.clone(),
+                owner: owner_id,
+            }))
+        })
     }
 
     /// Create a DefId for the function name, its args and locals, and not much more.
@@ -458,7 +482,7 @@ pub fn lower(input: LoweringInput) -> Defs {
 
     l_ctx.run(&input);
 
-    //println!("{:?}", &defs);
+    println!("{:?}", &defs);
 
     defs
 }

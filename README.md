@@ -58,3 +58,9 @@ implementation. The different behavior is documented.
   function returning a class, or be a local property followed by the object
   template for the `new` operator.
   * aaaaaaaahh
+
+## TODO Lints
+
+* Operating on returned arrays directly (e.g. `GetSomeArray()[0]` causes VM issues)
+* Never assigned out variable
+* Dead assignment

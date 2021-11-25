@@ -54,19 +54,19 @@ impl SpanMarker {
 
 #[derive(Clone, Debug)]
 pub struct ParseError {
-    err: Box<ParseErrorInner>,
+    pub err: Box<ParseErrorInner>,
 }
 
 #[derive(Clone, Debug)]
 pub struct ParseErrorInner {
     /// Message.
-    error_message: &'static str,
+    pub error_message: &'static str,
     /// Token that caused us to realize there's an error.
-    bad_token: Option<Token>,
+    pub bad_token: Option<Token>,
     /// Reason this token is bad, if any.
-    ctx_token: Option<(String, Span)>,
+    pub ctx_token: Option<(String, Span)>,
     /// Expected kind
-    expected_token: Option<Tk>,
+    pub expected_token: Option<Tk>,
 }
 
 impl<'a> Parser<'a> {

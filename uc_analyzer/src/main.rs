@@ -7,7 +7,7 @@ use uc_analysis::{
 };
 use uc_ast::Hir;
 use uc_ast_lowering::{LoweringInput, LoweringInputPackage};
-use uc_files::{FileId, Sources};
+use uc_files::{ErrorReport, FileId, Sources};
 use uc_name::Identifier;
 use uc_parser::{lexer, parser};
 
@@ -118,9 +118,19 @@ fn main() {
             let lexer = lexer::Lexer::new(&sources, f);
             let (hir, errs) = parser::parse(lexer);
             if !errs.is_empty() {
-                dbg!(sources.file_name(f));
-                dbg!(&errs);
-                panic!();
+                for err in &errs {
+                    let rep = ErrorReport {
+                        code: "parser-error",
+                        msg: err.err.error_message.to_owned(),
+                        full_text: err.err.bad_token.as_ref().unwrap().span,
+                        inlay_messages: vec![(
+                            "this token".to_owned(),
+                            err.err.bad_token.as_ref().unwrap().span,
+                        )],
+                    };
+                    sources.emit_err(&rep);
+                }
+                panic!()
             }
 
             /*

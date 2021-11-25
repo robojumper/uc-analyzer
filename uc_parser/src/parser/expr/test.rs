@@ -51,6 +51,27 @@ fn new_op() {
     assert_parse_pretty(text, pretty);
 }
 
+#[test]
+fn delegate_call() {
+    let text = "(self.SomeDelegateProperty)()";
+    let pretty = "(self.SomeDelegateProperty)()";
+    assert_parse_pretty(text, pretty);
+}
+
+#[test]
+fn chained_func_call() {
+    let text = "self.SomeFunc(, abc)";
+    let pretty = "self.SomeFunc(, abc)";
+    assert_parse_pretty(text, pretty);
+}
+
+#[test]
+fn free_func_call() {
+    let text = "SomeFunc(, abc)";
+    let pretty = "SomeFunc(, abc)";
+    assert_parse_pretty(text, pretty);
+}
+
 fn assert_parse_pretty(text: &str, pretty: &str) {
     let mut sources = Sources::new();
     let id = sources

@@ -19,7 +19,7 @@ mod test;
 use super::{ParseError, Parser};
 
 /// Slightly annoying: Operators on the parser level don't neatly correspond
-/// to sigils but also not to operators on the HIR. We need to give parens and
+/// to sigils but also not to operators on the HIR. We need to give the dot and
 /// the ternary op a binding power, but also have the vector operators
 /// cross and dot. This might not be the best way to handle this.
 #[derive(Copy, Clone, Debug)]
@@ -28,7 +28,6 @@ enum OpLike {
     Tern,
     Dot,
     LBrack,
-    LParen,
 }
 
 impl OpLike {
@@ -37,7 +36,6 @@ impl OpLike {
             sig!(Tern) => Some(OpLike::Tern),
             sig!(Dot) => Some(OpLike::Dot),
             sig!(LBrack) => Some(OpLike::LBrack),
-            sig!(LParen) => Some(OpLike::LParen),
             kw!(ClockwiseFrom) => Some(OpLike::Op(Op::YawClockwiseFrom)),
             kw!(Cross) => Some(OpLike::Op(Op::VecCross)),
             kw!(Dot) => Some(OpLike::Op(Op::VecDot)),
@@ -59,6 +57,27 @@ impl Parser<'_> {
         self.parse_base_expression_bp(0)
     }
 
+    fn parse_arg_list(&mut self) -> Result<Vec<Option<Expr>>, ParseError> {
+        let mut args = vec![];
+        loop {
+            while self.eat(Tk::Comma) {
+                args.push(None);
+            }
+            if self.eat(sig!(RParen)) {
+                break;
+            }
+            let expr = self.parse_base_expression_bp(0)?;
+            args.push(Some(expr));
+            let delim = self.next_any()?;
+            match delim.kind {
+                Tk::Comma => continue,
+                sig!(RParen) => break,
+                _ => return Err(self.fmt_err("Expected comma or )", Some(delim))),
+            }
+        }
+        Ok(args)
+    }
+
     fn parse_base_expression_bp(&mut self, min_bp: u8) -> Result<Expr, ParseError> {
         let lhs_marker = self.marker();
         let mut lhs = {
@@ -68,6 +87,17 @@ impl Parser<'_> {
                     let mut lhs = self.parse_base_expression_bp(0)?;
                     lhs.paren = true;
                     self.expect(sig!(RParen))?;
+                    if self.eat(sig!(LParen)) {
+                        let args = self.parse_arg_list()?;
+                        lhs = Expr {
+                            span: lhs_marker.complete(self),
+                            paren: false,
+                            kind: ExprKind::DelegateCallExpr {
+                                lhs: Box::new(lhs),
+                                args,
+                            },
+                        }
+                    }
                     lhs
                 }
                 Tk::Sig(sig) => {
@@ -110,19 +140,11 @@ impl Parser<'_> {
                     }
                 }
                 kw!(New) => {
-                    let mut args = vec![];
-                    if self.eat(sig!(LParen)) {
-                        loop {
-                            let expr = self.parse_base_expression_bp(0)?;
-                            args.push(expr);
-                            let delim = self.next_any()?;
-                            match delim.kind {
-                                Tk::Comma => continue,
-                                sig!(RParen) => break,
-                                _ => return Err(self.fmt_err("Expected comma or )", Some(delim))),
-                            }
-                        }
-                    }
+                    let args = if self.eat(sig!(LParen)) {
+                        self.parse_arg_list()?
+                    } else {
+                        vec![]
+                    };
 
                     let ((), r_bp) = NEW_PREFIX_POWER;
 
@@ -198,13 +220,28 @@ impl Parser<'_> {
                         lit: uc_ast::Literal::None,
                     },
                 },
-                Tk::Sym(_) => Expr {
-                    span: lhs_marker.complete(self),
-                    paren: false,
-                    kind: ExprKind::SymExpr {
-                        sym: self.sym_to_ident(&tok),
-                    },
-                },
+                Tk::Sym(_) => {
+                    if self.eat(sig!(LParen)) {
+                        let args = self.parse_arg_list()?;
+                        Expr {
+                            span: lhs_marker.complete(self),
+                            paren: false,
+                            kind: ExprKind::FuncCallExpr {
+                                lhs: None,
+                                name: self.sym_to_ident(&tok),
+                                args,
+                            },
+                        }
+                    } else {
+                        Expr {
+                            span: lhs_marker.complete(self),
+                            paren: false,
+                            kind: ExprKind::SymExpr {
+                                sym: self.sym_to_ident(&tok),
+                            },
+                        }
+                    }
+                }
                 Tk::Number(_) => Expr {
                     span: lhs_marker.complete(self),
                     paren: false,
@@ -263,32 +300,6 @@ impl Parser<'_> {
                             idx: Box::new(rhs),
                         },
                     }
-                } else if let OpLike::LParen = op {
-                    let mut args = vec![];
-                    loop {
-                        while self.eat(Tk::Comma) {
-                            args.push(None);
-                        }
-                        if self.eat(sig!(RParen)) {
-                            break;
-                        }
-                        let expr = self.parse_base_expression_bp(0)?;
-                        args.push(Some(expr));
-                        let delim = self.next_any()?;
-                        match delim.kind {
-                            Tk::Comma => continue,
-                            sig!(RParen) => break,
-                            _ => return Err(self.fmt_err("Expected comma or )", Some(delim))),
-                        }
-                    }
-                    Expr {
-                        span: lhs_marker.complete(self),
-                        paren: false,
-                        kind: ExprKind::CallExpr {
-                            lhs: Box::new(lhs),
-                            args,
-                        },
-                    }
                 } else {
                     Expr {
                         span: lhs_marker.complete(self),
@@ -320,13 +331,26 @@ impl Parser<'_> {
                     }
                 } else if let OpLike::Dot = op {
                     let rhs = self.expect_ident()?;
-                    Expr {
-                        span: lhs_marker.complete(self),
-                        paren: false,
-                        kind: ExprKind::FieldExpr {
-                            lhs: Box::new(lhs),
-                            rhs,
-                        },
+                    if self.eat(sig!(LParen)) {
+                        let args = self.parse_arg_list()?;
+                        Expr {
+                            span: lhs_marker.complete(self),
+                            paren: false,
+                            kind: ExprKind::FuncCallExpr {
+                                lhs: Some(Box::new(lhs)),
+                                name: rhs,
+                                args,
+                            },
+                        }
+                    } else {
+                        Expr {
+                            span: lhs_marker.complete(self),
+                            paren: false,
+                            kind: ExprKind::FieldExpr {
+                                lhs: Box::new(lhs),
+                                rhs,
+                            },
+                        }
                     }
                 } else {
                     let rhs = self.parse_base_expression_bp(r_bp)?;
@@ -370,7 +394,6 @@ fn prefix_binding_power(op: OpLike) -> Option<((), u8)> {
 fn postfix_binding_power(op: OpLike) -> Option<(u8, ())> {
     let op = match op {
         OpLike::LBrack => return Some((40, ())),
-        OpLike::LParen => return Some((40, ())),
         OpLike::Op(op) => op,
         _ => return None,
     };

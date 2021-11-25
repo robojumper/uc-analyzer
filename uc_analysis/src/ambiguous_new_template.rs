@@ -41,7 +41,7 @@ impl Visitor for AmbigNewVisitor {
         visit::walk_expr(self, expr);
         if let ExprKind::NewExpr { cls, .. } = &expr.kind {
             if !cls.paren {
-                if let ExprKind::CallExpr { lhs, .. } = &cls.kind {
+                if let ExprKind::FuncCallExpr { lhs: Some(lhs), .. } = &cls.kind {
                     if let ExprKind::FieldExpr { rhs, .. } = &lhs.kind {
                         if rhs != "class" {
                             self.errs.push(AmbigNew {

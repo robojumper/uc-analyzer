@@ -121,7 +121,15 @@ pub fn walk_expr<V: Visitor>(visit: &mut V, expr: &Expr) {
         ExprKind::FieldExpr { lhs, rhs: _ } => {
             visit.visit_expr(lhs);
         }
-        ExprKind::CallExpr { lhs, args } => {
+        ExprKind::FuncCallExpr { lhs, name: _, args } => {
+            if let Some(lhs) = lhs {
+                visit.visit_expr(lhs);
+            }
+            for arg in args.iter().flatten() {
+                visit.visit_expr(arg);
+            }
+        }
+        ExprKind::DelegateCallExpr { lhs, args } => {
             visit.visit_expr(lhs);
             for arg in args.iter().flatten() {
                 visit.visit_expr(arg);

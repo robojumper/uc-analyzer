@@ -151,8 +151,27 @@ impl<W: io::Write> PPrinter<W> {
                 self.w.write_all(b".")?;
                 self.format_i(rhs)?;
             }
-            ExprKind::CallExpr { lhs, args } => {
+            ExprKind::FuncCallExpr { lhs, name, args } => {
+                if let Some(lhs) = lhs {
+                    self.format_expr(lhs)?;
+                    self.w.write_all(b".")?;
+                }
+                self.format_i(name)?;
+                self.w.write_all(b"(")?;
+                for (idx, arg) in args.iter().enumerate() {
+                    if let Some(arg) = arg {
+                        self.format_expr(arg)?;
+                    }
+                    if idx != args.len() - 1 {
+                        self.w.write_all(b", ")?;
+                    }
+                }
+                self.w.write_all(b")")?;
+            }
+            ExprKind::DelegateCallExpr { lhs, args } => {
+                self.w.write_all(b"(")?;
                 self.format_expr(lhs)?;
+                self.w.write_all(b")")?;
                 self.w.write_all(b"(")?;
                 for (idx, arg) in args.iter().enumerate() {
                     if let Some(arg) = arg {
@@ -176,7 +195,11 @@ impl<W: io::Write> PPrinter<W> {
                 if !args.is_empty() {
                     self.w.write_all(b"(")?;
                     for (idx, arg) in args.iter().enumerate() {
-                        self.format_expr(arg)?;
+                        if let Some(arg) = arg {
+                            self.format_expr(arg)?;
+                        } else {
+                            self.w.write_all(b",")?;
+                        }
                         if idx != args.len() - 1 {
                             self.w.write_all(b", ")?;
                         }

@@ -41,7 +41,12 @@ fn expr_no_effects(expr: &Expr) -> Option<&'static str> {
     match &expr.kind {
         ExprKind::IndexExpr { base: _, idx: _ } => Some("index expression has no side effect"),
         ExprKind::FieldExpr { lhs: _, rhs: _ } => Some("place expression has no side effect"),
-        ExprKind::CallExpr { lhs: _, args: _ } => None,
+        ExprKind::FuncCallExpr {
+            lhs: _,
+            name: _,
+            args: _,
+        } => None,
+        ExprKind::DelegateCallExpr { lhs: _, args: _ } => None,
         ExprKind::ClassMetaCastExpr { ty: _, expr: _ } => {
             Some("class meta cast expression has no side effect")
         }

@@ -116,6 +116,7 @@ pub enum Def {
     EnumVariant(Box<EnumVariant>),
     Struct(Box<Struct>),
     Var(Box<Var>),
+    Const(Box<Const>),
     Operator(Box<Operator>),
     Function(Box<Function>),
     FuncArg(Box<FuncArg>),
@@ -191,6 +192,13 @@ pub struct Var {
     pub flags: VarFlags,
 
     pub sig: Option<VarSig>,
+}
+
+#[derive(Debug)]
+pub struct Const {
+    pub def_id: DefId,
+    pub name: Identifier,
+    pub owner: DefId, // Class
 }
 
 #[derive(Debug)]
