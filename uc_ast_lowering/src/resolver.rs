@@ -26,7 +26,7 @@ pub struct ResolverContext {
     /// Class -> Name -> Struct/Enum
     scoped_ty_defs: HashMap<DefId, HashMap<Identifier, DefId>>,
     /// Name -> Enum variants
-    global_values: HashMap<Identifier, DefId>,
+    global_values: HashMap<Identifier, Vec<DefId>>,
     /// Class/Struct -> Name -> Var
     scoped_vars: HashMap<DefId, HashMap<Identifier, DefId>>,
     /// Class/Struct -> Name -> Const
@@ -65,6 +65,44 @@ impl ResolverContext {
             .unwrap()
             .insert(name, class);
         Ok(())
+    }
+
+    pub fn add_global_value(&mut self, name: Identifier, value: DefId) -> Result<()> {
+        match self.global_values.entry(name) {
+            Entry::Occupied(mut e) => e.get_mut().push(value),
+            Entry::Vacant(e) => {
+                e.insert(vec![value]);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn get_global_value(
+        &mut self,
+        current_class: DefId,
+        defs: &Defs,
+        name: &Identifier,
+    ) -> Result<DefId> {
+        match self.global_values.get(name).map(|v| &**v) {
+            Some([single]) => Ok(*single),
+            Some([multiple @ ..]) => {
+                let matches = multiple
+                    .iter()
+                    .copied()
+                    .filter(|&t| {
+                        current_class == defs.get_enum(defs.get_variant(t).owning_enum).owning_class
+                    })
+                    .collect::<Vec<_>>();
+                match &*matches {
+                    [] => Err(ResolutionError::InvalidAmbiguity(multiple.to_owned())),
+                    [one] => Ok(*one),
+                    [multiple_in_class @ ..] => Err(ResolutionError::InvalidAmbiguity(
+                        multiple_in_class.to_owned(),
+                    )),
+                }
+            }
+            None => Err(ResolutionError::NotFound),
+        }
     }
 
     pub fn get_ty(&self, current_package: DefId, defs: &Defs, name: &Identifier) -> Result<DefId> {

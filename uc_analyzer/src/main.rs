@@ -3,7 +3,8 @@ use std::str::FromStr;
 use std::{fs, path::PathBuf};
 
 use uc_analysis::{
-    ambiguous_new_template, dangling_else, misleading_indentation, missing_break, uneffectful_stmt,
+    ambiguous_new_template, dangling_else, misleading_indentation, missing_break, never_loop,
+    uneffectful_stmt,
 };
 use uc_ast::Hir;
 use uc_ast_lowering::{LoweringInput, LoweringInputPackage};
@@ -133,16 +134,19 @@ fn main() {
                 panic!()
             }
 
-            /*
             let mut errs = vec![];
+            /*
             errs.extend(ambiguous_new_template::run(&hir, &sources));
             errs.extend(dangling_else::run(&hir, &sources));
             errs.extend(misleading_indentation::run(&hir, &sources));
             errs.extend(missing_break::run(&hir, &sources));
+            */
+            errs.extend(never_loop::run(&hir, &sources));
+            /*
             errs.extend(uneffectful_stmt::run(&hir, &sources));
+            */
 
             errs.iter().for_each(|e| sources.emit_err(e));
-             */
 
             p.hirs.push(hir);
         }

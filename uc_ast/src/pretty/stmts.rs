@@ -51,16 +51,10 @@ impl<W: io::Write> PPrinter<W> {
                 self.w.write_all(b"\n")?;
             }
             StatementKind::DoStatement { cond, run } => {
-                self.w.write_all(b"do {\n")?;
+                self.w.write_all(b"do")?;
                 self.indent_incr();
-                for stmt in run {
-                    self.indent()?;
-                    self.format_statement(stmt)?;
-                    self.w.write_all(b"\n")?
-                }
-                self.indent_decr();
-                self.indent()?;
-                self.w.write_all(b"} until(")?;
+                self.format_block(run)?;
+                self.w.write_all(b" until(")?;
                 self.format_expr(cond)?;
                 self.w.write_all(b");\n")?;
             }
@@ -103,8 +97,8 @@ impl<W: io::Write> PPrinter<W> {
                 }
                 self.w.write_all(b";")?;
             }
-            StatementKind::Label(l) => {
-                self.format_i(l)?;
+            StatementKind::Label { name } => {
+                self.format_i(name)?;
                 self.w.write_all(b":")?;
             }
             StatementKind::Assignment { lhs, rhs } => {

@@ -23,7 +23,7 @@ fn stmt_wants_semi(stmt: &StatementKind) -> bool {
         StatementKind::BreakStatement => true,
         StatementKind::ContinueStatement => true,
         StatementKind::ReturnStatement { .. } => true,
-        StatementKind::Label(_) => false,
+        StatementKind::Label { .. } => false,
         StatementKind::Assignment { .. } => true,
         StatementKind::Expr { .. } => true,
     }
@@ -136,7 +136,7 @@ impl Parser<'_> {
                     let label = self.expect_ident()?;
                     self.next();
                     Ok(Some(Statement {
-                        kind: StatementKind::Label(label),
+                        kind: StatementKind::Label { name: label },
                         span: m.complete(self),
                     }))
                 }
@@ -214,17 +214,15 @@ impl Parser<'_> {
                 }
                 kw!(Do) => {
                     let do_m = self.marker();
-                    self.next();
-                    self.expect(sig!(LBrace))?;
-                    let stmts = self.parse_statements();
-                    self.expect(sig!(RBrace))?;
+                    let kw_span = self.next().unwrap().span;
+                    let run = self.parse_block_or_stmt(("do", kw_span))?;
                     self.expect(kw!(Until))?;
                     self.expect(sig!(LParen))?;
                     let cond = self.parse_base_expression()?;
                     self.expect(sig!(RParen))?;
 
                     Ok(Some(Statement {
-                        kind: StatementKind::DoStatement { cond, run: stmts },
+                        kind: StatementKind::DoStatement { cond, run },
                         span: do_m.complete(self),
                     }))
                 }

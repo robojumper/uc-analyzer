@@ -24,7 +24,7 @@ use uc_ast::Hir;
 use uc_def::{FuncFlags, VarFlags};
 use uc_middle::{
     ty::Ty, Class, ClassKind, Const, Def, DefId, Defs, Enum, EnumVariant, Function, Operator,
-    Package, Struct, Var, VarSig,
+    Package, State, Struct, Var, VarSig,
 };
 use uc_name::Identifier;
 
@@ -208,7 +208,22 @@ impl<'defs> LoweringContext<'defs> {
                 .items
                 .extend_from_slice(&funcs);
 
-            let states = hir.states.iter().map(|state_def| {});
+            let states = hir
+                .states
+                .iter()
+                .map(|state_def| {
+                    self.lower_state(
+                        class_id,
+                        state_def,
+                        &mut backrefs.states,
+                        &mut backrefs.funcs,
+                    )
+                })
+                .collect::<Vec<_>>();
+            self.defs
+                .get_class_mut(class_id)
+                .items
+                .extend_from_slice(&states);
         }
     }
 
@@ -279,7 +294,10 @@ impl<'defs> LoweringContext<'defs> {
                     .iter()
                     .enumerate()
                     .map(|(idx, name)| {
-                        this.add_def(|_, var_id| {
+                        this.add_def(|this, var_id| {
+                            this.resolver
+                                .add_global_value(name.clone(), var_id)
+                                .unwrap_or_else(|e| panic!("conflict: {}", name));
                             Def::EnumVariant(Box::new(EnumVariant {
                                 def_id: var_id,
                                 owning_enum: enum_id,
@@ -466,8 +484,36 @@ impl<'defs> LoweringContext<'defs> {
                     flags: func_def.mods.flags,
                     delegate_prop: var_id,
                     sig: None,
+                    contents: None,
                 }))
             }
+        })
+    }
+
+    fn lower_state<'hir>(
+        &mut self,
+        owner_id: DefId,
+        state_def: &'hir uc_ast::StateDef,
+        states: &mut HashMap<DefId, &'hir uc_ast::StateDef>,
+        funcs: &mut HashMap<DefId, &'hir uc_ast::FuncDef>,
+    ) -> DefId {
+        self.add_def(|this, state_id| {
+            states.insert(state_id, state_def);
+            let mut ops = HashMap::default();
+            let funcs = state_def
+                .funcs
+                .iter()
+                .map(|func_def| this.lower_func(state_id, func_def, funcs, &mut ops))
+                .collect();
+            assert!(ops.is_empty());
+
+            Def::State(Box::new(State {
+                def_id: state_id,
+                name: state_def.name.clone(),
+                owner: owner_id,
+                funcs,
+                contents: None,
+            }))
         })
     }
 }

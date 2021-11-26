@@ -195,7 +195,7 @@ pub enum StatementKind {
     },
     DoStatement {
         cond: Expr,
-        run: Vec<Statement>,
+        run: Block,
     },
     SwitchStatement {
         scrutinee: Expr,
@@ -206,7 +206,9 @@ pub enum StatementKind {
     ReturnStatement {
         expr: Option<Expr>,
     },
-    Label(Identifier),
+    Label {
+        name: Identifier,
+    },
     Assignment {
         lhs: Expr,
         rhs: Expr,

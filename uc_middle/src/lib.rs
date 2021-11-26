@@ -105,6 +105,34 @@ impl Defs {
             _ => panic!("expected struct"),
         }
     }
+
+    pub fn get_enum(&self, def_id: DefId) -> &Enum {
+        match self.get_def(def_id) {
+            Def::Enum(c) => c,
+            _ => panic!("expected enum"),
+        }
+    }
+
+    pub fn get_enum_mut(&mut self, def_id: DefId) -> &mut Enum {
+        match self.get_def_mut(def_id) {
+            Def::Enum(c) => c,
+            _ => panic!("expected enum"),
+        }
+    }
+
+    pub fn get_variant(&self, def_id: DefId) -> &EnumVariant {
+        match self.get_def(def_id) {
+            Def::EnumVariant(v) => v,
+            _ => panic!("expected variant"),
+        }
+    }
+
+    pub fn get_variant_mut(&mut self, def_id: DefId) -> &mut EnumVariant {
+        match self.get_def_mut(def_id) {
+            Def::EnumVariant(v) => v,
+            _ => panic!("expected variant"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -117,6 +145,7 @@ pub enum Def {
     Struct(Box<Struct>),
     Var(Box<Var>),
     Const(Box<Const>),
+    State(Box<State>),
     Operator(Box<Operator>),
     Function(Box<Function>),
     FuncArg(Box<FuncArg>),
@@ -202,6 +231,15 @@ pub struct Const {
 }
 
 #[derive(Debug)]
+pub struct State {
+    pub def_id: DefId,
+    pub name: Identifier,
+    pub owner: DefId, // Class
+    pub funcs: Box<[DefId]>,
+    pub contents: Option<Statements>,
+}
+
+#[derive(Debug)]
 pub struct Operator {
     pub def_id: DefId,
     pub op: Op,
@@ -220,6 +258,7 @@ pub struct Function {
     pub delegate_prop: Option<DefId>,
 
     pub sig: Option<FuncSig>,
+    pub contents: Option<Statements>,
 }
 
 #[derive(Debug)]
@@ -243,3 +282,6 @@ pub struct VarSig {
     pub ty: Ty,
     pub dim: Option<u32>,
 }
+
+#[derive(Debug)]
+pub struct Statements {}

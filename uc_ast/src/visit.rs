@@ -78,7 +78,7 @@ pub fn walk_statement<V: Visitor>(visit: &mut V, stmt: &Statement) {
             visit.visit_statements(&run.stmts)
         }
         StatementKind::DoStatement { cond, run } => {
-            visit.visit_statements(run);
+            visit.visit_statements(&run.stmts);
             maybe_visit_expr(visit, cond);
         }
         StatementKind::SwitchStatement { scrutinee, cases } => {
@@ -94,7 +94,7 @@ pub fn walk_statement<V: Visitor>(visit: &mut V, stmt: &Statement) {
                 maybe_visit_expr(visit, expr);
             }
         }
-        StatementKind::Label(_) => {}
+        StatementKind::Label { .. } => {}
         StatementKind::Assignment { lhs, rhs } => {
             maybe_visit_expr(visit, lhs);
             maybe_visit_expr(visit, rhs);
