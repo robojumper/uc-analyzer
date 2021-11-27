@@ -50,6 +50,7 @@ pub enum ClassHeader {
 pub struct ClassDef {
     pub name: Identifier,
     pub kind: ClassHeader,
+    pub dependson: Box<[Identifier]>,
     pub mods: Modifiers<ClassFlags>,
     pub span: Span,
 }
@@ -80,7 +81,7 @@ pub struct ConstDef {
 #[derive(Debug)]
 pub enum ConstVal {
     Bool,
-    Int,
+    Int(i32),
     String,
     Name,
     Float,

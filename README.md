@@ -52,8 +52,8 @@ implementation. The different behavior is documented.
   * we only recognize the sigil operators, `cross`, `dot`, and `clockwisefrom`.
 * Conflicts between type names are allowed and UCC just picks the one
   loaded/compiled later.
-  * we, in the case of ambiguity, prefer a type from the same package as
-    the reference, otherwise error.
+  * we, in the case of ambiguity, prefer a type from the definition hierarchy,
+    if there are none or more than one, error.
 * `new CallOrVar(ArgOrTemplate)` can, syntactically, be a single-argument
   function returning a class, or be a local property followed by the object
   template for the `new` operator.

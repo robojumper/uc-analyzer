@@ -10,3 +10,6 @@ members = [
     "uc_name",
     "uc_parser",
 ]
+
+[profile.dev]
+opt-level = 1

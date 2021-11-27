@@ -348,11 +348,20 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn extract_number(&self, token: &Token) -> Result<NumberLiteral, String> {
-        let text = &self.source.lookup_str(token.span).expect("valid num token");
+        let text = self.source.lookup_str(token.span).expect("valid num token");
         match token.kind {
-            TokenKind::Number(NumberSyntax::Int | NumberSyntax::Hex) => Ok(NumberLiteral::Int(
+            TokenKind::Number(NumberSyntax::Int) => Ok(NumberLiteral::Int(
                 text.parse::<i32>().map_err(|e| e.to_string())?,
             )),
+            TokenKind::Number(NumberSyntax::Hex) => {
+                if text.len() < 3 || (&text[0..2] != "0x" && &text[0..2] != "0X") {
+                    return Err("invalid hex number".to_owned());
+                }
+                Ok(NumberLiteral::Int(
+                    // Most important cast right here
+                    u32::from_str_radix(&text[2..], 16).map_err(|e| e.to_string())? as i32,
+                ))
+            }
             TokenKind::Number(NumberSyntax::Float) => Ok(NumberLiteral::Float(
                 text.parse::<f32>().map_err(|e| e.to_string())?,
             )),

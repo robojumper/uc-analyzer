@@ -1,4 +1,7 @@
-use std::collections::{hash_map::Entry, HashMap};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    ops::ControlFlow,
+};
 
 use uc_def::Op;
 use uc_middle::{DefId, Defs};
@@ -23,8 +26,6 @@ pub struct ResolverContext {
     package_classes: HashMap<DefId, HashMap<Identifier, DefId>>,
     /// Name -> Enum/Struct/Class/Interface
     global_ty_defs: HashMap<Identifier, Vec<DefId>>,
-    /// Class -> Name -> Struct/Enum
-    scoped_ty_defs: HashMap<DefId, HashMap<Identifier, DefId>>,
     /// Name -> Enum variants
     global_values: HashMap<Identifier, Vec<DefId>>,
     /// Class/Struct -> Name -> Var
@@ -77,6 +78,13 @@ impl ResolverContext {
         Ok(())
     }
 
+    pub fn get_package(&mut self, name: &Identifier) -> Result<DefId> {
+        self.packages
+            .get(name)
+            .copied()
+            .ok_or(ResolutionError::NotFound)
+    }
+
     pub fn get_global_value(
         &mut self,
         current_class: DefId,
@@ -105,14 +113,14 @@ impl ResolverContext {
         }
     }
 
-    pub fn get_ty(&self, current_package: DefId, defs: &Defs, name: &Identifier) -> Result<DefId> {
+    pub fn get_ty(&self, scope: DefId, defs: &Defs, name: &Identifier) -> Result<DefId> {
         match self.global_ty_defs.get(name).map(|v| &**v) {
             Some([single]) => Ok(*single),
             Some([multiple @ ..]) => {
                 let matches = multiple
                     .iter()
                     .copied()
-                    .filter(|&t| current_package == defs.get_package_of_ty(t))
+                    .filter(|&item| defs.ty_in_scope(scope, item))
                     .collect::<Vec<_>>();
                 match &*matches {
                     [] => Err(ResolutionError::InvalidAmbiguity(multiple.to_owned())),
@@ -129,16 +137,22 @@ impl ResolverContext {
     /// Get a qualified type.
     pub fn get_ty_in(
         &self,
-        current_package: DefId,
+        scope: Option<DefId>,
         defs: &Defs,
-        class: &Identifier,
-        name: &Identifier,
+        first: &Identifier,
+        second: &Identifier,
     ) -> Result<DefId> {
-        // We pretty much disallow multiple types of the same name in the same package, so
-        // we can cheat a little bit here by simply looking at the owning package of the class
-        let class = self.get_ty(current_package, defs, class)?;
-        let pack = defs.get_package_of_ty(class);
-        self.get_ty(pack, defs, name)
+        // If the first part is a package name, we want a class
+        if let Some(pack_id) = self.packages.get(first) {
+            return match self.package_classes.get(pack_id).unwrap().get(second) {
+                Some(d) => Ok(*d),
+                None => Err(ResolutionError::NotFound),
+            };
+        }
+
+        // Otherwise, assume it's a class and a struct/enum
+        let class = self.get_ty(scope.unwrap(), defs, first)?;
+        self.get_ty(class, defs, second)
     }
 
     pub fn add_scoped_var(&mut self, scope: DefId, name: Identifier, var: DefId) -> Result<()> {
@@ -164,7 +178,7 @@ impl ResolverContext {
         let consts = self
             .scoped_consts
             .entry(scope)
-            .or_insert_with(HashMap::default);
+            .or_insert_with(HashMap::default); // TODO: Explicit add scope function
         match consts.entry(name) {
             Entry::Occupied(_) => return Err(ResolutionError::ExistsInExactScope),
             Entry::Vacant(e) => {
@@ -174,31 +188,39 @@ impl ResolverContext {
         Ok(())
     }
 
-    pub fn add_scoped_ty(&mut self, scope: DefId, name: Identifier, ty: DefId) -> Result<()> {
-        match self.global_ty_defs.entry(name.clone()) {
+    pub fn get_scoped_const(
+        &mut self,
+        scope: DefId,
+        defs: &Defs,
+        const_name: &Identifier,
+    ) -> Result<DefId> {
+        match defs.walk_defining_scopes(scope, |def_id| match self.scoped_consts.get(&def_id) {
+            // TODO: Use unwrap for scope when other TODOs adressed
+            Some(consts) => match consts.get(const_name) {
+                Some(&d) => ControlFlow::Break(d),
+                None => ControlFlow::Continue(()),
+            },
+            None => ControlFlow::Continue(()),
+        }) {
+            Some(d) => Ok(d),
+            None => Err(ResolutionError::NotFound),
+        }
+    }
+
+    pub fn add_scoped_ty(&mut self, name: Identifier, ty: DefId) {
+        match self.global_ty_defs.entry(name) {
             Entry::Occupied(mut e) => e.get_mut().push(ty),
             Entry::Vacant(e) => {
                 e.insert(vec![ty]);
             }
         }
-        let tys = self
-            .scoped_ty_defs
-            .entry(scope)
-            .or_insert_with(HashMap::default);
-        match tys.entry(name) {
-            Entry::Occupied(_) => return Err(ResolutionError::ExistsInExactScope),
-            Entry::Vacant(e) => {
-                e.insert(ty);
-            }
-        }
-        Ok(())
     }
 
     pub fn add_scoped_func(&mut self, scope: DefId, name: Identifier, func: DefId) -> Result<()> {
         let funcs = self
             .scoped_funcs
             .entry(scope)
-            .or_insert_with(HashMap::default);
+            .or_insert_with(HashMap::default); // TODO: Explicit add scope function
         match funcs.entry(name) {
             Entry::Occupied(_) => return Err(ResolutionError::ExistsInExactScope),
             Entry::Vacant(e) => {
@@ -212,7 +234,7 @@ impl ResolverContext {
         let ops = self
             .scoped_ops
             .entry(scope)
-            .or_insert_with(HashMap::default);
+            .or_insert_with(HashMap::default); // TODO: Explicit add scope function
         match ops.entry(name) {
             Entry::Occupied(mut e) => e.get_mut().push(op),
             Entry::Vacant(e) => {
@@ -220,5 +242,27 @@ impl ResolverContext {
             }
         }
         Ok(())
+    }
+
+    pub fn get_scoped_func(
+        &mut self,
+        scope: DefId,
+        defs: &Defs,
+        func_name: &Identifier,
+    ) -> Result<DefId> {
+        match defs.walk_defining_scopes(scope, |def_id| {
+            match self
+                .scoped_funcs
+                .get(&def_id)
+                .expect("unknown scope")
+                .get(func_name)
+            {
+                Some(&f) => ControlFlow::Break(f),
+                None => ControlFlow::Continue(()),
+            }
+        }) {
+            Some(d) => Ok(d),
+            None => Err(ResolutionError::NotFound),
+        }
     }
 }

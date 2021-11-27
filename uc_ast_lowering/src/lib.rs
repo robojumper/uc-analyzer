@@ -20,11 +20,11 @@
 use std::{collections::HashMap, str::FromStr};
 
 use resolver::{ResolutionError, ResolverContext};
-use uc_ast::Hir;
-use uc_def::{FuncFlags, VarFlags};
+use uc_ast::{DimCount, Hir};
+use uc_def::{ClassFlags, FuncFlags, StructFlags, VarFlags};
 use uc_middle::{
-    ty::Ty, Class, ClassKind, Const, Def, DefId, Defs, Enum, EnumVariant, Function, Operator,
-    Package, State, Struct, Var, VarSig,
+    ty::Ty, Class, ClassKind, Const, ConstVal, Def, DefId, Defs, Enum, EnumVariant, Function,
+    Operator, Package, State, Struct, Var, VarSig,
 };
 use uc_name::Identifier;
 
@@ -71,20 +71,13 @@ impl<'defs> LoweringContext<'defs> {
         Defs::add_def(self, f)
     }
 
-    fn err_panic(&self, err: ResolutionError) {
-        match err {
-            ResolutionError::ExistsInExactScope => todo!(),
-            ResolutionError::InvalidShadowing => todo!(),
-            ResolutionError::InvalidAmbiguity(defs) => panic!("{:?}", defs),
-            ResolutionError::NotFound => todo!(),
-        }
-    }
-
     fn run(&mut self, input: &LoweringInput) {
         let mut backrefs = HirBackrefs::default();
         self.create_packages_class_frames(&input.packages, &mut backrefs);
         self.discover_items(&mut backrefs);
         self.fixup_extends(&backrefs);
+        self.add_builtin_items();
+        self.resolve_sigs(&backrefs);
     }
 
     /// Create DefIds for packages and classes
@@ -139,6 +132,7 @@ impl<'defs> LoweringContext<'defs> {
                 package: pack_id,
                 self_ty: ty,
                 flags: hir.header.mods.flags,
+                dependson: Box::new([]),
                 kind: None,
                 items: vec![],
             }))
@@ -227,9 +221,95 @@ impl<'defs> LoweringContext<'defs> {
         }
     }
 
+    fn add_builtin_items(&mut self) {
+        // Add the classes that exist in native engine code, but aren't
+        // declared in UnrealScript
+
+        let get_package = |this: &mut Self, package: &str| {
+            let name = Identifier::from_str(package).unwrap();
+            this.resolver
+                .get_package(&name)
+                .unwrap_or_else(|e| panic!("{} package missing: {:?}", package, e))
+        };
+
+        let get_class = |this: &mut Self, package: &str, class: &str| {
+            let pack = Identifier::from_str(package).unwrap();
+            let cls = Identifier::from_str(class).unwrap();
+            this.resolver
+                .get_ty_in(None, this.defs, &pack, &cls)
+                .expect("Object missing")
+        };
+
+        let core = get_package(self, "Core");
+        let engine = get_package(self, "Engine");
+        let unrealed = get_package(self, "UnrealEd");
+
+        let object_id = get_class(self, "Core", "Object");
+
+        let add_class = |this: &mut Self, package, class_name: &str, parent| {
+            let ident = Identifier::from_str(class_name).unwrap();
+            this.add_def(|this, class_id| {
+                this.resolver
+                    .add_class(package, ident.clone(), class_id)
+                    .unwrap();
+                Def::Class(Box::new(Class {
+                    def_id: class_id,
+                    name: ident,
+                    package,
+                    self_ty: Ty::object_from(class_id),
+                    flags: ClassFlags::empty(),
+                    dependson: Box::new([]),
+                    kind: Some(ClassKind::Class {
+                        extends: Some(parent),
+                        implements: Box::new([]),
+                        within: None,
+                    }),
+                    items: vec![],
+                }))
+            })
+        };
+
+        add_class(self, core, "Function", object_id);
+        add_class(self, core, "Package", object_id);
+        add_class(self, core, "Polys", object_id);
+        add_class(self, core, "Property", object_id);
+
+        let static_mesh_id = add_class(self, engine, "StaticMesh", object_id);
+        add_class(self, engine, "FracturedStaticMesh", static_mesh_id);
+
+        let level_base_id = add_class(self, engine, "LevelBase", object_id);
+        add_class(self, engine, "Level", level_base_id);
+        add_class(self, engine, "PendingLevel", level_base_id);
+
+        add_class(self, engine, "Client", object_id);
+        add_class(self, engine, "Model", object_id);
+        add_class(self, engine, "ShadowMap1D", object_id);
+        add_class(self, engine, "World", object_id);
+
+        add_class(self, unrealed, "ByteCodeSerializer", object_id);
+        add_class(self, unrealed, "TransBuffer", object_id);
+        add_class(self, unrealed, "TextBuffer", object_id);
+
+        let player_id = get_class(self, "Engine", "Player");
+        add_class(self, engine, "NetConnection", player_id);
+
+        self.add_def(|this, struct_id| {
+            let map = Identifier::from_str("Map").unwrap();
+            this.resolver.add_scoped_ty(map.clone(), object_id);
+            Def::Struct(Box::new(Struct {
+                def_id: struct_id,
+                name: map,
+                owning_class: object_id,
+                self_ty: Ty::struct_from(struct_id),
+                flags: StructFlags::empty(),
+                extends: None,
+                vars: Box::new([]),
+            }))
+        });
+    }
+
     fn fixup_extends<'hir>(&mut self, backrefs: &'hir HirBackrefs) {
         for (&class_id, &hir) in &backrefs.files {
-            let package = self.defs.get_package_of_ty(class_id);
             match &hir.header.kind {
                 uc_ast::ClassHeader::Class {
                     extends,
@@ -238,14 +318,14 @@ impl<'defs> LoweringContext<'defs> {
                 } => {
                     let extends = extends
                         .as_ref()
-                        .map(|n| self.resolver.get_ty(package, self.defs, n).unwrap());
+                        .map(|n| self.resolver.get_ty(class_id, self.defs, n).unwrap());
                     let implements = implements
                         .iter()
-                        .map(|n| self.resolver.get_ty(package, self.defs, n).unwrap())
+                        .map(|n| self.resolver.get_ty(class_id, self.defs, n).unwrap())
                         .collect();
                     let within = within
                         .as_ref()
-                        .map(|n| self.resolver.get_ty(package, self.defs, n).unwrap());
+                        .map(|n| self.resolver.get_ty(class_id, self.defs, n).unwrap());
                     let c = self.defs.get_class_mut(class_id);
                     c.kind = Some(ClassKind::Class {
                         extends,
@@ -254,23 +334,48 @@ impl<'defs> LoweringContext<'defs> {
                     })
                 }
                 uc_ast::ClassHeader::Interface { extends } => {
+                    // Honor an explicit extend on the interface. Otherwise extend `Interface`,
+                    // except for `Interface` which extends `Object`
                     let extends = extends
                         .as_ref()
-                        .map(|n| self.resolver.get_ty(package, self.defs, n).unwrap());
+                        .map(|n| self.resolver.get_ty(class_id, self.defs, n))
+                        .unwrap_or_else(|| {
+                            if &hir.header.name == "Interface" {
+                                self.resolver.get_ty_in(
+                                    None,
+                                    self.defs,
+                                    &Identifier::from_str("Core").unwrap(),
+                                    &Identifier::from_str("Object").unwrap(),
+                                )
+                            } else {
+                                self.resolver.get_ty(
+                                    class_id,
+                                    self.defs,
+                                    &Identifier::from_str("Interface").unwrap(),
+                                )
+                            }
+                        })
+                        .unwrap();
                     let c = self.defs.get_class_mut(class_id);
                     c.kind = Some(ClassKind::Interface { extends })
                 }
             }
+            let dependson = hir
+                .header
+                .dependson
+                .iter()
+                .map(|n| self.resolver.get_ty(class_id, self.defs, n).unwrap())
+                .collect();
+            self.defs.get_class_mut(class_id).dependson = dependson;
         }
 
         for (&struct_id, &struct_def) in &backrefs.structs {
-            let package = self.defs.get_package_of_ty(struct_id);
             let extends = match &struct_def.extends.as_deref() {
                 None => None,
-                Some([name]) => Some(self.resolver.get_ty(package, self.defs, name).unwrap()),
+                Some([name]) => Some(self.resolver.get_ty(struct_id, self.defs, name).unwrap()),
                 Some([class, name]) => Some(
                     self.resolver
-                        .get_ty_in(package, self.defs, class, name)
+                        .get_ty_in(Some(struct_id), self.defs, class, name)
                         .unwrap(),
                 ),
                 Some([..]) => panic!("too many name parts"),
@@ -279,11 +384,52 @@ impl<'defs> LoweringContext<'defs> {
         }
     }
 
+    fn resolve_sigs<'hir>(&mut self, backrefs: &HirBackrefs<'hir>) {
+        for var_ref in &backrefs.vars {
+            let ty = self.decode_ast_ty(&var_ref.1 .0.ty, *var_ref.0);
+            let dim = match &var_ref.1 .0.names[var_ref.1 .1].count {
+                DimCount::Complex(n) => match &**n {
+                    [single] => {
+                        if let Ok(const_id) = self
+                            .resolver
+                            .get_scoped_const(*var_ref.0, self.defs, single)
+                        {
+                            let def = self.defs.get_const(const_id);
+                            match &def.val {
+                                ConstVal::Num(n) => Some(*n as u32),
+                                ConstVal::Other => panic!("invalid const value"),
+                            }
+                        } else if let Ok(en_def) =
+                            self.resolver.get_ty(*var_ref.0, self.defs, single)
+                        {
+                            Some(self.defs.get_enum(en_def).variants.len() as u32)
+                        } else {
+                            panic!("invalid const static array bound")
+                        }
+                    }
+                    [en, enum_count] => {
+                        // IDGAF just stop throwing errors AAA
+                        if enum_count != "EnumCount" && !enum_count.as_ref().ends_with("_MAX") {
+                            panic!("yet another way to specify enums: {}", enum_count)
+                        }
+                        let ty = self
+                            .resolver
+                            .get_ty(*var_ref.0, self.defs, en)
+                            .unwrap_or_else(|e| panic!("failed to find enum {:?}: {:?}", en, e));
+                        Some(self.defs.get_enum(ty).variants.len() as u32)
+                    }
+                    x => panic!("invalid static array length specification: {:?}", x),
+                },
+                DimCount::Number(n) => Some(*n),
+                DimCount::None => None,
+            };
+            self.defs.get_var_mut(*var_ref.0).sig = Some(VarSig { ty, dim });
+        }
+    }
+
     fn lower_enum(&mut self, class_id: DefId, en: &uc_ast::EnumDef) -> DefId {
         self.add_def(|this, enum_id| {
-            this.resolver
-                .add_scoped_ty(class_id, en.name.clone(), enum_id)
-                .unwrap_or_else(|e| this.err_panic(e));
+            this.resolver.add_scoped_ty(en.name.clone(), enum_id);
             Def::Enum(Box::new(Enum {
                 def_id: enum_id,
                 owning_class: class_id,
@@ -297,7 +443,7 @@ impl<'defs> LoweringContext<'defs> {
                         this.add_def(|this, var_id| {
                             this.resolver
                                 .add_global_value(name.clone(), var_id)
-                                .unwrap_or_else(|e| panic!("conflict: {}", name));
+                                .unwrap_or_else(|e| panic!("conflict in {}: {:?}", name, e));
                             Def::EnumVariant(Box::new(EnumVariant {
                                 def_id: var_id,
                                 owning_enum: enum_id,
@@ -320,8 +466,7 @@ impl<'defs> LoweringContext<'defs> {
     ) -> DefId {
         self.add_def(|this, struct_id| {
             this.resolver
-                .add_scoped_ty(class_id, struct_def.name.clone(), struct_id)
-                .unwrap();
+                .add_scoped_ty(struct_def.name.clone(), struct_id);
 
             let var_ids = struct_def
                 .fields
@@ -380,10 +525,15 @@ impl<'defs> LoweringContext<'defs> {
                 .add_scoped_const(owner_id, const_def.name.clone(), const_id)
                 .unwrap();
             consts.insert(const_id, const_def);
+            let val = match &const_def.val {
+                uc_ast::ConstVal::Int(i) => ConstVal::Num(*i),
+                _ => ConstVal::Other,
+            };
             Def::Const(Box::new(Const {
                 def_id: const_id,
                 name: const_def.name.clone(),
                 owner: owner_id,
+                val,
             }))
         })
     }
@@ -516,6 +666,109 @@ impl<'defs> LoweringContext<'defs> {
             }))
         })
     }
+
+    fn decode_ast_ty(&mut self, ty: &uc_ast::Ty, scope: DefId) -> Ty {
+        match ty {
+            uc_ast::Ty::Simple(ident) => {
+                if ident == "int" {
+                    Ty::INT
+                } else if ident == "float" {
+                    Ty::FLOAT
+                } else if ident == "bool" {
+                    Ty::BOOL
+                } else if ident == "byte" {
+                    Ty::BYTE
+                } else if ident == "string" {
+                    Ty::STRING
+                } else if ident == "name" {
+                    Ty::NAME
+                } else {
+                    let ty = self
+                        .resolver
+                        .get_ty(scope, self.defs, ident)
+                        .unwrap_or_else(|e| {
+                            panic!(
+                                "failed to find ty {:?} in scope {:?}: {:?}",
+                                ident,
+                                self.defs.get_def(scope),
+                                e
+                            )
+                        });
+                    match self.defs.get_def(ty) {
+                        Def::Class(c) => match c.kind.as_ref().unwrap() {
+                            ClassKind::Class { .. } => Ty::object_from(ty),
+                            ClassKind::Interface { .. } => Ty::interface_from(ty),
+                        },
+                        Def::Enum(_) => Ty::enum_from(ty),
+                        Def::Struct(_) => Ty::struct_from(ty),
+                        _ => panic!("not a ty"),
+                    }
+                }
+            }
+            uc_ast::Ty::Qualified(parts) => match &**parts {
+                [class, ty] => {
+                    let ty = self
+                        .resolver
+                        .get_ty_in(Some(scope), self.defs, class, ty)
+                        .unwrap_or_else(|e| panic!("failed to find ty {:?}: {:?}", ty, e));
+                    match self.defs.get_def(ty) {
+                        Def::Enum(_) => Ty::enum_from(ty),
+                        Def::Struct(_) => Ty::struct_from(ty),
+                        _ => panic!("not a valid qualified ty"),
+                    }
+                }
+                x => panic!("invalid qualified type {:?}", x),
+            },
+            uc_ast::Ty::Array(arr_ty) => {
+                // This is filtered in the parser
+                assert!(!matches!(&**arr_ty, uc_ast::Ty::Array(_)));
+                Ty::array_from(self.decode_ast_ty(arr_ty, scope))
+            }
+            uc_ast::Ty::Class(ident) => {
+                let ty = self
+                    .resolver
+                    .get_ty(scope, self.defs, ident)
+                    .unwrap_or_else(|e| panic!("failed to find ty {:?}: {:?}", ident, e));
+                match self.defs.get_def(ty) {
+                    Def::Class(c) => match c.kind.as_ref().unwrap() {
+                        ClassKind::Class { .. } => Ty::class_from(ty),
+                        ClassKind::Interface { .. } => Ty::interface_from(ty),
+                    },
+                    _ => panic!("not a class"),
+                }
+            }
+            uc_ast::Ty::Delegate(parts) => {
+                //let class_scope = self.defs.get_function_defining(scope);
+                match &**parts {
+                    [func_name] => {
+                        let func = self
+                            .resolver
+                            .get_scoped_func(scope, self.defs, func_name)
+                            .unwrap_or_else(|e| {
+                                panic!("failed to find ty {:?}: {:?}", func_name, e)
+                            });
+                        Ty::delegate_from(func)
+                    }
+                    [class, func_name] => {
+                        let class_def = self
+                            .resolver
+                            .get_ty(scope, self.defs, class)
+                            .unwrap_or_else(|e| {
+                                panic!("failed to find ty {:?}: {:?}", func_name, e)
+                            });
+                        let func = self
+                            .resolver
+                            .get_scoped_func(class_def, self.defs, func_name)
+                            .unwrap_or_else(|e| {
+                                panic!("failed to find ty {:?}: {:?}", func_name, e)
+                            });
+                        Ty::delegate_from(func)
+                    }
+                    x => panic!("invalid qualified type {:?}", x),
+                }
+            }
+        }
+    }
 }
 
 pub fn lower(input: LoweringInput) -> Defs {
@@ -531,35 +784,4 @@ pub fn lower(input: LoweringInput) -> Defs {
     println!("{:?}", &defs);
 
     defs
-}
-
-// Todo: This needs to take into account the environment when looking at delegates
-fn ast_ty_to_ty(ctx: &Defs, ty: uc_ast::Ty, scope: DefId) -> Ty {
-    match ty {
-        uc_ast::Ty::Simple(ident) => {
-            if ident == *"int" {
-                Ty::INT
-            } else if ident == *"float" {
-                Ty::FLOAT
-            } else if ident == *"bool" {
-                Ty::BOOL
-            } else if ident == *"byte" {
-                Ty::BYTE
-            } else if ident == *"string" {
-                Ty::STRING
-            } else if ident == *"name" {
-                Ty::NAME
-            } else {
-                todo!()
-            }
-        }
-        uc_ast::Ty::Qualified(_) => todo!(),
-        uc_ast::Ty::Array(arr_ty) => {
-            // This is filtered in the parser
-            assert!(!matches!(&*arr_ty, uc_ast::Ty::Array(_)));
-            Ty::array_from(ast_ty_to_ty(ctx, *arr_ty, scope))
-        }
-        uc_ast::Ty::Class(_) => todo!(),
-        uc_ast::Ty::Delegate(_) => todo!(),
-    }
 }

@@ -207,7 +207,7 @@ pub static CLASS_MODIFIERS: Lazy<ModifierConfig<ClassFlags>> = Lazy::new(|| {
     m.insert(Kw::Implements, C::new(CF::IMPLEMENTS, MORE_IDENTS));
 
     m.insert(Kw::Abstract, C::new(CF::ABSTRACT, DF::Nothing));
-    m.insert(Kw::DependsOn, C::new(e, MORE_IDENTS));
+    m.insert(Kw::DependsOn, C::new(CF::DEPENDSON, MORE_IDENTS));
     m.insert(Kw::Transient, C::new(e, DF::Nothing));
     m.insert(Kw::Deprecated, C::new(e, DF::Nothing));
 

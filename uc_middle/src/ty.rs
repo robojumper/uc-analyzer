@@ -3,41 +3,44 @@ use std::num::NonZeroU32;
 use crate::DefId;
 
 const ARRAY_MASK: u32 = 1 << 31;
-const BASE_TY_MASK: u32 = 0xF << 27;
-const DEF_ID_MASK: u32 = 0x7FFFFFF;
+/// Indicates an opaque type created by a `native iterator` function in
+/// a `foreach` loop.
+const ITERATOR_MASK: u32 = 1 << 30;
+const BASE_TY_MASK: u32 = 0xF << 26;
+const DEF_ID_MASK: u32 = 0x3FFFFFF;
 
 pub const MAX_DEF_ID: u32 = DEF_ID_MASK;
 
 const __ASSERT_COVERED: () = {
     let assert_mask_covers_all_bits = [()];
-    let combined_mask = ARRAY_MASK | BASE_TY_MASK | DEF_ID_MASK;
+    let combined_mask = ARRAY_MASK | ITERATOR_MASK | BASE_TY_MASK | DEF_ID_MASK;
     assert_mask_covers_all_bits[((combined_mask != !0) as bool) as usize]
 };
 
 #[derive(Clone, Copy, Debug)]
 enum BaseTy {
     /// Base `int` type.
-    Int = 1 << 27,
+    Int = 1 << 26,
     /// Base `float` type.
-    Float = 2 << 27,
+    Float = 2 << 26,
     /// Base `bool` type.
-    Bool = 3 << 27,
+    Bool = 3 << 26,
     /// Base `byte` type, or an enum if def index != 0
-    Byte = 4 << 27,
+    Byte = 4 << 26,
     /// Base `string` type.
-    String = 5 << 27,
+    String = 5 << 26,
     /// Base `name` type.
-    Name = 6 << 27,
+    Name = 6 << 26,
     /// Any struct type, with def index referencing the struct.
-    Struct = 7 << 27,
+    Struct = 7 << 26,
     /// Any object type, with def index referencing the class.
-    Object = 8 << 27,
+    Object = 8 << 26,
     /// Any class type, with def index referencing the class.
-    Class = 9 << 27,
+    Class = 9 << 26,
     /// Any interface type, with def index referencing the interface.
-    Interface = 10 << 27,
+    Interface = 10 << 26,
     /// Any delegate type, with def index referencing the function.
-    Delegate = 11 << 27,
+    Delegate = 11 << 26,
 }
 
 /// Compact representation of an UnrealScript type.
@@ -104,13 +107,18 @@ impl Ty {
 
     #[inline]
     pub fn array_from(inner: Self) -> Ty {
-        assert!(inner.is_array());
+        assert!(!inner.is_array());
         Ty(NonZeroU32::new(inner.0.get() | ARRAY_MASK).unwrap())
     }
 
     #[inline]
     pub fn object_from(id: DefId) -> Ty {
         Ty(NonZeroU32::new(BaseTy::Object as u32 | id.0.get()).unwrap())
+    }
+
+    #[inline]
+    pub fn class_from(id: DefId) -> Ty {
+        Ty(NonZeroU32::new(BaseTy::Class as u32 | id.0.get()).unwrap())
     }
 
     #[inline]

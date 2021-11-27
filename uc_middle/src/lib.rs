@@ -3,7 +3,7 @@
 
 //! The middle representation of a whole UnrealScript workspace.
 
-use std::num::NonZeroU32;
+use std::{num::NonZeroU32, ops::ControlFlow};
 
 use ty::Ty;
 use uc_def::{ArgFlags, ClassFlags, FuncFlags, Op, StructFlags, VarFlags};
@@ -23,6 +23,12 @@ impl Default for Defs {
     fn default() -> Self {
         Self::new()
     }
+}
+
+#[derive(Clone, Copy)]
+enum ScopeWalkKind {
+    Definitions,
+    Access,
 }
 
 impl Defs {
@@ -66,16 +72,146 @@ impl Defs {
         def
     }
 
-    pub fn get_package_of_ty(&self, mut def_id: DefId) -> DefId {
+    /// Whether the type `item` should be considered "in scope" in case
+    /// of name conflicts. For classes, this means same package, for structs
+    /// and enums, this means same class or superclass.
+    /// Notably, types can always be used from anywhere. This is strictly
+    /// a heuristic to formalize the "last declaration wins" behavior from UCC.
+    pub fn ty_in_scope(&self, scope: DefId, item: DefId) -> bool {
+        let def_scope = match self.get_def(item) {
+            Def::Class(c) => return c.package == self.get_item_package(item),
+            Def::Enum(e) => e.owning_class,
+            Def::Struct(s) => s.owning_class,
+            x => panic!("not valid for ty_in_scope: {:?}", x),
+        };
+
+        match self.walk_scopes_inner(scope, ScopeWalkKind::Definitions, &mut |id| {
+            if id == def_scope {
+                ControlFlow::Break(def_scope)
+            } else {
+                ControlFlow::Continue(())
+            }
+        }) {
+            ControlFlow::Continue(()) => false,
+            ControlFlow::Break(_) => true,
+        }
+    }
+
+    pub fn get_item_package(&self, mut def_id: DefId) -> DefId {
         loop {
             match self.get_def(def_id) {
+                Def::None => unreachable!(),
                 Def::Class(c) => break c.package,
                 Def::Enum(e) => def_id = e.owning_class,
                 Def::Struct(s) => def_id = s.owning_class,
-
-                d => panic!("not a type: {:?}", d),
+                Def::Package(p) => break p.def_id,
+                Def::EnumVariant(v) => def_id = v.owning_enum,
+                Def::Var(v) => def_id = v.owner,
+                Def::Const(c) => def_id = c.owner,
+                Def::State(s) => def_id = s.owner,
+                Def::Operator(o) => def_id = o.owning_class,
+                Def::Function(f) => def_id = f.owner,
+                Def::FuncArg(a) => def_id = a.owner,
             }
         }
+    }
+
+    pub fn get_item_class(&self, mut def_id: DefId) -> DefId {
+        loop {
+            match self.get_def(def_id) {
+                Def::Class(c) => break c.def_id,
+                Def::Enum(e) => break e.owning_class,
+                Def::Struct(s) => break s.owning_class,
+                Def::EnumVariant(v) => def_id = v.owning_enum,
+                Def::Var(v) => def_id = v.owner,
+                Def::Const(c) => def_id = c.owner,
+                Def::State(s) => def_id = s.owner,
+                Def::Operator(o) => def_id = o.owning_class,
+                Def::Function(f) => def_id = f.owner,
+                Def::FuncArg(a) => def_id = a.owner,
+                d => panic!("cannot get class: {:?}", d),
+            }
+        }
+    }
+
+    pub fn walk_defining_scopes<F: FnMut(DefId) -> ControlFlow<DefId>>(
+        &self,
+        def_id: DefId,
+        mut f: F,
+    ) -> Option<DefId> {
+        match self.walk_scopes_inner(def_id, ScopeWalkKind::Definitions, &mut f) {
+            ControlFlow::Break(d) => Some(d),
+            ControlFlow::Continue(_) => None,
+        }
+    }
+
+    /// The two main kinds of scope walks are the defining scope walks
+    /// (to check for type and function definitions) and access scope
+    /// walks (to check for variables and functions).
+    fn walk_scopes_inner<F: FnMut(DefId) -> ControlFlow<DefId>>(
+        &self,
+        def_id: DefId,
+        kind: ScopeWalkKind,
+        cb: &mut F,
+    ) -> ControlFlow<DefId> {
+        match self.get_def(def_id) {
+            Def::None => panic!("none def"),
+            Def::Class(c) => {
+                cb(c.def_id)?;
+                match c.kind.as_ref().unwrap() {
+                    ClassKind::Class {
+                        extends, within, ..
+                    } => {
+                        if let Some(within) = within {
+                            self.walk_scopes_inner(*within, kind, cb)?;
+                        }
+                        if let Some(extends) = extends {
+                            self.walk_scopes_inner(*extends, kind, cb)?;
+                        }
+                    }
+                    ClassKind::Interface { extends } => {
+                        self.walk_scopes_inner(*extends, kind, cb)?;
+                    }
+                }
+                if let ScopeWalkKind::Definitions = kind {
+                    for &dependson in c.dependson.iter() {
+                        self.walk_scopes_inner(dependson, kind, cb)?;
+                    }
+                }
+            }
+            Def::Enum(e) => self.walk_scopes_inner(e.owning_class, kind, cb)?,
+            Def::Struct(s) => match kind {
+                ScopeWalkKind::Access => {
+                    if let Some(extends) = s.extends {
+                        self.walk_scopes_inner(extends, kind, cb)?
+                    }
+                }
+                ScopeWalkKind::Definitions => self.walk_scopes_inner(s.owning_class, kind, cb)?,
+            },
+            Def::State(s) => {
+                cb(s.def_id)?;
+                match kind {
+                    ScopeWalkKind::Access => {
+                        // TODO: Also walk extends
+                        self.walk_scopes_inner(s.owner, kind, cb)?;
+                    }
+                    ScopeWalkKind::Definitions => {
+                        self.walk_scopes_inner(s.owner, kind, cb)?;
+                    }
+                }
+            }
+            Def::Operator(o) => {
+                self.walk_scopes_inner(o.owning_class, kind, cb)?;
+            }
+            Def::Function(f) => {
+                self.walk_scopes_inner(f.owner, kind, cb)?;
+            }
+            Def::Var(v) => {
+                self.walk_scopes_inner(v.owner, kind, cb)?;
+            }
+            x => panic!("not usable for scope walk {:?}", x),
+        }
+        ControlFlow::Continue(())
     }
 
     pub fn get_class(&self, def_id: DefId) -> &Class {
@@ -89,6 +225,34 @@ impl Defs {
         match self.get_def_mut(def_id) {
             Def::Class(c) => c,
             _ => panic!("expected class"),
+        }
+    }
+
+    pub fn get_const(&self, def_id: DefId) -> &Const {
+        match self.get_def(def_id) {
+            Def::Const(c) => c,
+            _ => panic!("expected const"),
+        }
+    }
+
+    pub fn get_const_mut(&mut self, def_id: DefId) -> &mut Const {
+        match self.get_def_mut(def_id) {
+            Def::Const(c) => c,
+            _ => panic!("expected const"),
+        }
+    }
+
+    pub fn get_var(&self, def_id: DefId) -> &Var {
+        match self.get_def(def_id) {
+            Def::Var(v) => v,
+            _ => panic!("expected var"),
+        }
+    }
+
+    pub fn get_var_mut(&mut self, def_id: DefId) -> &mut Var {
+        match self.get_def_mut(def_id) {
+            Def::Var(v) => v,
+            _ => panic!("expected var"),
         }
     }
 
@@ -166,6 +330,7 @@ pub struct Class {
     pub self_ty: Ty,
     pub flags: ClassFlags,
 
+    pub dependson: Box<[DefId]>,
     pub kind: Option<ClassKind>,
 
     pub items: Vec<DefId>,
@@ -179,7 +344,7 @@ pub enum ClassKind {
         within: Option<DefId>,
     },
     Interface {
-        extends: Option<DefId>,
+        extends: DefId,
     },
 }
 
@@ -228,6 +393,13 @@ pub struct Const {
     pub def_id: DefId,
     pub name: Identifier,
     pub owner: DefId, // Class
+    pub val: ConstVal,
+}
+
+#[derive(Debug)]
+pub enum ConstVal {
+    Num(i32),
+    Other,
 }
 
 #[derive(Debug)]

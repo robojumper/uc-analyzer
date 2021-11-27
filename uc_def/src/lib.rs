@@ -10,6 +10,7 @@ bitflags! {
         const PEROBJECTCONFIG = 1 << 3;
         const IMPLEMENTS = 1 << 4;
         const ABSTRACT = 1 << 5;
+        const DEPENDSON = 1 << 6;
     }
 
     pub struct FuncFlags: u32 {

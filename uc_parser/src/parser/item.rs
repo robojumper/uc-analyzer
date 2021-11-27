@@ -2,7 +2,7 @@ use uc_ast::{
     ClassDef, ClassHeader, ConstDef, ConstVal, DimCount, EnumDef, FuncArg, FuncBody, FuncDef,
     FuncName, FuncSig, LocalDef, StateDef, Statement, StructDef, Ty, VarDef, VarInstance,
 };
-use uc_def::Op;
+use uc_def::{ClassFlags, Op};
 
 use super::{ParseError, Parser};
 use crate::{
@@ -74,10 +74,28 @@ impl Parser<'_> {
             (ClassHeader::Interface { extends }, mods)
         };
 
+        let dependson = if mods.flags.contains(ClassFlags::DEPENDSON) {
+            // Key must be present and have identifiers following
+            match mods
+                .followups
+                .get(&ClassFlags::DEPENDSON)
+                .unwrap()
+                .as_ref()
+                .unwrap()
+            {
+                uc_ast::Values::Absent => unreachable!(),
+                uc_ast::Values::Nums(_) => unreachable!(),
+                uc_ast::Values::Idents(i) => i.clone(),
+            }
+        } else {
+            Box::new([])
+        };
+
         Ok(ClassDef {
             kind: def,
             name,
             mods,
+            dependson,
             span: class_m.complete(self),
         })
     }
@@ -87,14 +105,18 @@ impl Parser<'_> {
         match tok.kind {
             Tk::Name => Ok(ConstVal::Name),
             Tk::String => Ok(ConstVal::String),
-            Tk::Number(NumberSyntax::Int | NumberSyntax::Hex) => Ok(ConstVal::Int),
+            Tk::Number(NumberSyntax::Int | NumberSyntax::Hex) => {
+                Ok(ConstVal::Int(self.extract_integer(&tok)?))
+            }
             Tk::Number(NumberSyntax::Float) => Ok(ConstVal::Float),
             Tk::Bool(_) => Ok(ConstVal::Bool),
             Tk::Sym(_) => Ok(ConstVal::ValueReference),
             sig!(Sub) => {
                 let next = self.next_any()?;
                 match next.kind {
-                    Tk::Number(NumberSyntax::Int | NumberSyntax::Hex) => Ok(ConstVal::Int),
+                    Tk::Number(NumberSyntax::Int | NumberSyntax::Hex) => {
+                        Ok(ConstVal::Int(-self.extract_integer(&next)?))
+                    }
                     Tk::Number(NumberSyntax::Float) => Ok(ConstVal::Float),
                     _ => Err(self.fmt_err("expected number after -", Some(tok))),
                 }

@@ -140,9 +140,7 @@ fn main() {
             errs.extend(dangling_else::run(&hir, &sources));
             errs.extend(misleading_indentation::run(&hir, &sources));
             errs.extend(missing_break::run(&hir, &sources));
-            */
             errs.extend(never_loop::run(&hir, &sources));
-            /*
             errs.extend(uneffectful_stmt::run(&hir, &sources));
             */
 

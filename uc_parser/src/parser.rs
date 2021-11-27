@@ -149,20 +149,28 @@ impl<'a> Parser<'a> {
 
     fn expect_nonnegative_integer(&mut self) -> Result<i32, ParseError> {
         let tok = self.next_any()?;
+        let num = self.extract_integer(&tok)?;
+        if num < 0 {
+            Err(self.fmt_err("integer is negative", Some(tok)))
+        } else {
+            Ok(num)
+        }
+    }
+
+    fn extract_integer(&self, tok: &Token) -> Result<i32, ParseError> {
         if let Tk::Number(_) = tok.kind {
             let num = self
                 .lex
-                .extract_number(&tok)
+                .extract_number(tok)
                 .map_err(|_| self.fmt_err("Malformed integer", Some(tok.clone())))?;
             match num {
-                NumberLiteral::Int(i @ 0..) => Ok(i),
-                NumberLiteral::Int(_) => Err(self.fmt_err("integer is negative", Some(tok))),
+                NumberLiteral::Int(i) => Ok(i),
                 NumberLiteral::Float(_) => {
-                    Err(self.fmt_err("expected int but got float", Some(tok)))
+                    Err(self.fmt_err("expected int but got float", Some(tok.clone())))
                 }
             }
         } else {
-            Err(self.fmt_err("Expected number", Some(tok)))
+            Err(self.fmt_err("Expected number", Some(tok.clone())))
         }
     }
 
