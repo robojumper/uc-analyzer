@@ -11,4 +11,5 @@ uc_ast_lowering = { path = "../uc_ast_lowering" }
 uc_files = { path = "../uc_files" }
 uc_middle = { path = "../uc_middle" }
 uc_name = { path = "../uc_name" }
+uc_parser = { path = "../uc_parser" }
 

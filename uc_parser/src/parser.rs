@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 mod expr;
 mod item;
-mod modifiers;
+pub mod modifiers;
 mod stmt;
 
 use uc_ast::{Hir, Ty};
