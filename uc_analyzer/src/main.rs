@@ -143,7 +143,6 @@ fn main() {
             errs.extend(never_loop::run(&hir, &sources));
             errs.extend(uneffectful_stmt::run(&hir, &sources));
             */
-
             errs.iter().for_each(|e| sources.emit_err(e));
 
             p.hirs.push(hir);

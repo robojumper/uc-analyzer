@@ -19,16 +19,16 @@
 
 use std::{collections::HashMap, str::FromStr};
 
-use resolver::{ResolutionError, ResolverContext};
+use resolver::ResolverContext;
 use uc_ast::{DimCount, Hir};
 use uc_def::{ClassFlags, FuncFlags, StructFlags, VarFlags};
 use uc_middle::{
-    ty::Ty, Class, ClassKind, Const, ConstVal, Def, DefId, Defs, Enum, EnumVariant, Function,
-    Operator, Package, State, Struct, Var, VarSig,
+    ty::Ty, Class, ClassKind, Const, ConstVal, Def, DefId, Defs, Enum, EnumVariant, FuncSig,
+    Function, Operator, Package, State, Struct, Var, VarSig,
 };
 use uc_name::Identifier;
 
-mod resolver;
+pub mod resolver;
 
 #[derive(Debug)]
 pub struct LoweringInput {
@@ -425,6 +425,19 @@ impl<'defs> LoweringContext<'defs> {
             };
             self.defs.get_var_mut(*var_ref.0).sig = Some(VarSig { ty, dim });
         }
+
+        for func_ref in &backrefs.funcs {
+            let ty = func_ref
+                .1
+                .sig
+                .ret_ty
+                .as_ref()
+                .map(|ty| self.decode_ast_ty(ty, *func_ref.0));
+            self.defs.get_func_mut(*func_ref.0).sig = Some(FuncSig {
+                ret_ty: ty,
+                args: Box::new([]),
+            });
+        }
     }
 
     fn lower_enum(&mut self, class_id: DefId, en: &uc_ast::EnumDef) -> DefId {
@@ -568,8 +581,6 @@ impl<'defs> LoweringContext<'defs> {
         ops: &mut HashMap<DefId, &'hir uc_ast::FuncDef>,
     ) -> DefId {
         self.add_def(|this, func_id| {
-            funcs.insert(func_id, func_def);
-
             if func_def
                 .mods
                 .flags
@@ -627,6 +638,7 @@ impl<'defs> LoweringContext<'defs> {
                 this.resolver
                     .add_scoped_func(owner_id, func_name.clone(), func_id)
                     .unwrap();
+                funcs.insert(func_id, func_def);
                 Def::Function(Box::new(Function {
                     def_id: func_id,
                     name: func_name,

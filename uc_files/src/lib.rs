@@ -1,14 +1,28 @@
-use std::{borrow::Cow, cmp::Ordering, collections::HashMap, path::PathBuf};
+use std::{borrow::Cow, cmp::Ordering, collections::HashMap, num::NonZeroU32, path::PathBuf};
 
 use annotate_snippets::{
     display_list::{self, FormatOptions},
     snippet::{Annotation, AnnotationType, Slice, Snippet, SourceAnnotation},
 };
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+pub struct BytePos(NonZeroU32);
+
+impl BytePos {
+    #[cfg_attr(debug_assertions, track_caller)]
+    pub fn new(x: u32) -> Self {
+        Self(NonZeroU32::new(x).unwrap())
+    }
+
+    pub fn get(self) -> u32 {
+        self.0.get()
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Span {
-    pub start: u32,
-    pub end: u32,
+    pub start: BytePos,
+    pub end: BytePos,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -26,7 +40,7 @@ struct SourceFileMetadata {
     name: String,
     path: PathBuf,
     span: Span,
-    line_heads: Vec<u32>,
+    line_heads: Vec<BytePos>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -70,10 +84,10 @@ impl Sources {
             panic!("too much data")
         }
 
-        let start = self.data.len() as u32;
-        self.data.extend_from_slice(&*data);
-        let end = self.data.len() as u32;
         self.data.push(0u8);
+        let start = BytePos::new(self.data.len() as u32);
+        self.data.extend_from_slice(&*data);
+        let end = BytePos::new(self.data.len() as u32);
 
         let span = Span { start, end };
 
@@ -81,7 +95,7 @@ impl Sources {
         let line_heads = std::iter::once(start)
             .chain(data.iter().enumerate().filter_map(|(idx, &b)| {
                 if b == b'\n' {
-                    Some(idx as u32 + start + 1)
+                    Some(BytePos::new(idx as u32 + start.get() + 1))
                 } else {
                     None
                 }
@@ -103,8 +117,8 @@ impl Sources {
         self.metadata[f_id.0 as usize].span
     }
 
-    pub fn lookup_file(&self, byte_pos: u32) -> Result<FileId, LookupError> {
-        if byte_pos > self.data.len() as u32 {
+    pub fn lookup_file(&self, byte_pos: BytePos) -> Result<FileId, LookupError> {
+        if byte_pos.get() > self.data.len() as u32 {
             return Err(LookupError::InvalidBytePos);
         }
         Ok(FileId(
@@ -125,7 +139,7 @@ impl Sources {
 
     #[inline]
     pub fn lookup_bytes(&self, span: Span) -> &[u8] {
-        &self.data[span.start as usize..span.end as usize]
+        &self.data[span.start.get() as usize..span.end.get() as usize]
     }
 
     #[inline]
@@ -164,8 +178,10 @@ impl Sources {
             .map(|(msg, span)| {
                 assert!(span.start >= full_span.start && span.end <= full_span.end);
                 let new_span = (
-                    new_pos(span.start - full_span.start + remapped_span.start) as usize,
-                    new_pos(span.end - full_span.start + remapped_span.start) as usize,
+                    new_pos(span.start.get() - full_span.start.get() + remapped_span.0)
+                        as usize,
+                    new_pos(span.end.get() - full_span.start.get() + remapped_span.0)
+                        as usize,
                 );
                 SourceAnnotation {
                     range: new_span,
@@ -196,8 +212,9 @@ impl Sources {
         eprintln!("{}", display_list::DisplayList::from(snippet));
     }
 
-    /// -> FileID, data, first line number, remapped span
-    fn lookup_err_ctx(&self, span: Span) -> Result<(FileId, &str, usize, Span), LookupError> {
+    /// -> FileID, data, first line number, byte positions within data
+    #[allow(clippy::type_complexity)]
+    fn lookup_err_ctx(&self, span: Span) -> Result<(FileId, &str, usize, (u32, u32)), LookupError> {
         let fid_a = self.lookup_file(span.start)?;
         let fid_b = self.lookup_file(span.end)?;
         if fid_a != fid_b {
@@ -216,17 +233,17 @@ impl Sources {
             .map_or_else(|x| x - 1, |x| x);
 
         let start_idx = meta.line_heads[line_idx_a];
-        let end_idx = meta
-            .line_heads
-            .get(line_idx_b + 1)
-            .copied()
-            .unwrap_or(meta.span.end + 1)
-            - 1;
+        let end_idx = BytePos::new(
+            meta.line_heads
+                .get(line_idx_b + 1)
+                .copied()
+                .unwrap_or_else(|| BytePos::new(meta.span.end.get() + 1))
+                .get()
+                - 1,
+        );
 
-        let remapped_span = Span {
-            start: span.start - start_idx,
-            end: span.end - start_idx,
-        };
+        let new_start = span.start.get() - start_idx.get();
+        let new_end = span.end.get() - start_idx.get();
 
         // FIXME
         let str = self
@@ -235,10 +252,10 @@ impl Sources {
                 end: end_idx,
             })
             .unwrap();
-        Ok((fid_a, str, line_idx_a + 1, remapped_span))
+        Ok((fid_a, str, line_idx_a + 1, (new_start, new_end)))
     }
 
-    pub fn lookup_line(&self, byte_pos: u32) -> Result<&str, LookupError> {
+    pub fn lookup_line(&self, byte_pos: BytePos) -> Result<&str, LookupError> {
         let fid = self.lookup_file(byte_pos)?;
 
         let meta = &self.metadata[fid.0 as usize];
@@ -249,12 +266,14 @@ impl Sources {
             .map_or_else(|x| x - 1, |x| x);
 
         let start_idx = meta.line_heads[line_idx];
-        let end_idx = meta
-            .line_heads
-            .get(line_idx + 1)
-            .copied()
-            .unwrap_or(meta.span.end + 1)
-            - 1;
+        let end_idx = BytePos::new(
+            meta.line_heads
+                .get(line_idx + 1)
+                .copied()
+                .unwrap_or_else(|| BytePos::new(meta.span.end.get() + 1))
+                .get()
+                - 1,
+        );
 
         // FIXME
         let str = self

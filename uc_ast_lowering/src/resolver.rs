@@ -21,21 +21,21 @@ pub enum ResolutionError {
 #[derive(Debug, Default)]
 pub struct ResolverContext {
     /// Name -> Package
-    packages: HashMap<Identifier, DefId>,
+    pub packages: HashMap<Identifier, DefId>,
     /// Package -> Name -> Class/Interface
-    package_classes: HashMap<DefId, HashMap<Identifier, DefId>>,
+    pub package_classes: HashMap<DefId, HashMap<Identifier, DefId>>,
     /// Name -> Enum/Struct/Class/Interface
-    global_ty_defs: HashMap<Identifier, Vec<DefId>>,
+    pub global_ty_defs: HashMap<Identifier, Vec<DefId>>,
     /// Name -> Enum variants
-    global_values: HashMap<Identifier, Vec<DefId>>,
+    pub global_values: HashMap<Identifier, Vec<DefId>>,
     /// Class/Struct -> Name -> Var
-    scoped_vars: HashMap<DefId, HashMap<Identifier, DefId>>,
+    pub scoped_vars: HashMap<DefId, HashMap<Identifier, DefId>>,
     /// Class/Struct -> Name -> Const
-    scoped_consts: HashMap<DefId, HashMap<Identifier, DefId>>,
+    pub scoped_consts: HashMap<DefId, HashMap<Identifier, DefId>>,
     /// Class -> Name -> Func
-    scoped_funcs: HashMap<DefId, HashMap<Identifier, DefId>>,
+    pub scoped_funcs: HashMap<DefId, HashMap<Identifier, DefId>>,
     /// Class -> Op -> Func
-    scoped_ops: HashMap<DefId, HashMap<Op, Vec<DefId>>>,
+    pub scoped_ops: HashMap<DefId, HashMap<Op, Vec<DefId>>>,
 }
 
 impl ResolverContext {

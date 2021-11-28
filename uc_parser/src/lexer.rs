@@ -1,6 +1,6 @@
 use std::str::{self, FromStr};
 
-use uc_files::{FileId, Sources, Span};
+use uc_files::{BytePos, FileId, Sources, Span};
 use uc_name::Identifier;
 
 pub use enums::{Keyword, Sigil};
@@ -300,7 +300,7 @@ impl<'a> Lexer<'a> {
         Ok(())
     }
 
-    fn parse_ident(&mut self, first: u32) -> Token {
+    fn parse_ident(&mut self, first: BytePos) -> Token {
         while matches!(
             self.bytes.peek(),
             Some(b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'0'..=b'9')
@@ -370,7 +370,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn parse_eol_comment(&mut self, first: u32) -> Token {
+    fn parse_eol_comment(&mut self, first: BytePos) -> Token {
         while !matches!(self.bytes.peek(), Some(b'\r' | b'\n') | None) {
             self.bytes.next();
         }
@@ -385,7 +385,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn parse_block_comment(&mut self, first: u32) -> Token {
+    fn parse_block_comment(&mut self, first: BytePos) -> Token {
         let mut level = 1;
         loop {
             match self.bytes.next() {
@@ -446,7 +446,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn parse_number(&mut self, first: u32) -> Token {
+    fn parse_number(&mut self, first: BytePos) -> Token {
         let mut hex = false;
         let mut float = false;
         while let Some(c @ (b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' | b'.' | b'x' | b'X')) =
@@ -473,7 +473,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn parse_name(&mut self, first: u32) -> Token {
+    fn parse_name(&mut self, first: BytePos) -> Token {
         let mut seen_dot = false;
         while let Some(x @ (b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'-' | b'.' | b' ')) =
             self.bytes.peek()
@@ -503,7 +503,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn parse_string(&mut self, first: u32) -> Token {
+    fn parse_string(&mut self, first: BytePos) -> Token {
         loop {
             match self.bytes.peek() {
                 Some(b'"') => {
@@ -554,11 +554,11 @@ impl<'a> Lexer<'a> {
 struct Bytes<'a> {
     text: &'a [u8],
     bytes: std::slice::Iter<'a, u8>,
-    start_offset: u32,
+    start_offset: BytePos,
 }
 
 impl<'a> Bytes<'a> {
-    fn new(text: &'a [u8], start_offset: u32) -> Self {
+    fn new(text: &'a [u8], start_offset: BytePos) -> Self {
         Self {
             text,
             bytes: text.iter(),
@@ -566,8 +566,8 @@ impl<'a> Bytes<'a> {
         }
     }
 
-    fn pos(&self) -> u32 {
-        self.text.len() as u32 - self.bytes.as_slice().len() as u32 + self.start_offset
+    fn pos(&self) -> BytePos {
+        BytePos::new(self.text.len() as u32 - self.bytes.as_slice().len() as u32 + self.start_offset.get())
     }
 
     fn peek(&self) -> Option<u8> {

@@ -297,6 +297,20 @@ impl Defs {
             _ => panic!("expected variant"),
         }
     }
+
+    pub fn get_func(&self, def_id: DefId) -> &Function {
+        match self.get_def(def_id) {
+            Def::Function(f) => f,
+            _ => panic!("expected func"),
+        }
+    }
+
+    pub fn get_func_mut(&mut self, def_id: DefId) -> &mut Function {
+        match self.get_def_mut(def_id) {
+            Def::Function(f) => f,
+            _ => panic!("expected func"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -435,7 +449,7 @@ pub struct Function {
 
 #[derive(Debug)]
 pub struct FuncSig {
-    pub ret_ty: Ty,
+    pub ret_ty: Option<Ty>,
     pub args: Box<[DefId]>,
 }
 
