@@ -2,7 +2,7 @@ use uc_ast::{
     visit::{self, Visitor},
     Expr, ExprKind, Hir,
 };
-use uc_files::{ErrorReport, Sources, Span};
+use uc_files::{ErrorReport, Fragment, Sources, Span};
 
 struct AmbigNewVisitor {
     errs: Vec<AmbigNew>,
@@ -18,13 +18,15 @@ pub fn run(hir: &Hir, _: &Sources) -> Vec<ErrorReport> {
         .iter()
         .map(|err| ErrorReport {
             code: "ambiguous-new",
-            full_text: err.new_expr,
             msg: "new with function call is ambiguous".to_owned(),
-            inlay_messages: vec![(
-                "this could be a function call or a field reference with template arguments"
-                    .to_owned(),
-                err.cls_expr,
-            )],
+            fragments: vec![Fragment {
+                full_text: err.new_expr,
+                inlay_messages: vec![(
+                    "this could be a function call or a field reference with template arguments"
+                        .to_owned(),
+                    err.cls_expr,
+                )],
+            }],
         })
         .collect()
 }

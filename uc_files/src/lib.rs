@@ -1,4 +1,4 @@
-use std::{borrow::Cow, cmp::Ordering, collections::HashMap, num::NonZeroU32, path::PathBuf};
+use std::{borrow::Cow, cmp::Ordering, collections::HashMap, mem, num::NonZeroU32, path::PathBuf};
 
 use annotate_snippets::{
     display_list::{self, FormatOptions},
@@ -59,8 +59,22 @@ pub enum InputError {
 pub struct ErrorReport {
     pub code: &'static str,
     pub msg: String,
+    pub fragments: Vec<Fragment>,
+}
+
+pub struct Fragment {
     pub full_text: Span,
     pub inlay_messages: Vec<(String, Span)>,
+}
+
+/// Work around lifetime issues in annotate-snippets.
+/// <https://github.com/rust-lang/annotate-snippets-rs/issues/13> is
+/// considering using Cow instead of &str, which would fix this.
+struct DecodedFragment<'a> {
+    pub source: String,
+    pub line_start: usize,
+    pub origin: Option<&'a str>,
+    pub annotations: Vec<SourceAnnotation<'a>>,
 }
 
 impl Sources {
@@ -152,8 +166,8 @@ impl Sources {
         std::str::from_utf8(self.lookup_bytes(span)).map_err(|_| LookupError::NonUtf8)
     }
 
-    pub fn emit_err(&self, err: &ErrorReport) {
-        let full_span = err.full_text;
+    fn parse_slice<'a>(&'a self, fragment: &'a Fragment) -> DecodedFragment<'a> {
+        let full_span = fragment.full_text;
         let (fid, source, line_start, remapped_span) = self.lookup_err_ctx(full_span).unwrap();
 
         // replace tabs with 4 spaces and adjust spans
@@ -172,16 +186,14 @@ impl Sources {
 
         let source = source.replace('\t', "    ");
 
-        let annotations = err
+        let annotations = fragment
             .inlay_messages
             .iter()
             .map(|(msg, span)| {
                 assert!(span.start >= full_span.start && span.end <= full_span.end);
                 let new_span = (
-                    new_pos(span.start.get() - full_span.start.get() + remapped_span.0)
-                        as usize,
-                    new_pos(span.end.get() - full_span.start.get() + remapped_span.0)
-                        as usize,
+                    new_pos(span.start.get() - full_span.start.get() + remapped_span.0) as usize,
+                    new_pos(span.end.get() - full_span.start.get() + remapped_span.0) as usize,
                 );
                 SourceAnnotation {
                     range: new_span,
@@ -191,13 +203,30 @@ impl Sources {
             })
             .collect();
 
-        let slices = vec![Slice {
-            source: &*source,
+        DecodedFragment {
+            source,
             line_start,
             origin: Some(self.metadata[fid.0 as usize].name.as_ref()),
             annotations,
-            fold: false,
-        }];
+        }
+    }
+
+    pub fn emit_err(&self, err: &ErrorReport) {
+        let mut fragments = err
+            .fragments
+            .iter()
+            .map(|f| self.parse_slice(f))
+            .collect::<Vec<_>>();
+        let slices = fragments
+            .iter_mut()
+            .map(|f| Slice {
+                source: &f.source,
+                line_start: f.line_start,
+                origin: f.origin,
+                annotations: mem::take(&mut f.annotations),
+                fold: false,
+            })
+            .collect();
         let snippet = Snippet {
             title: Some(Annotation {
                 annotation_type: AnnotationType::Warning,

@@ -7,6 +7,7 @@ use std::{num::NonZeroU32, ops::ControlFlow};
 
 use ty::Ty;
 use uc_def::{ArgFlags, ClassFlags, FuncFlags, Op, StructFlags, VarFlags};
+use uc_files::Span;
 use uc_name::Identifier;
 
 pub mod ty;
@@ -214,6 +215,22 @@ impl Defs {
         ControlFlow::Continue(())
     }
 
+    pub fn try_get_span(&self, def_id: DefId) -> Option<Span> {
+        match self.get_def(def_id) {
+            Def::Class(c) => c.span,
+            Def::Enum(e) => e.span,
+            Def::EnumVariant(v) => v.span,
+            Def::Struct(s) => s.span,
+            Def::Var(v) => v.span,
+            Def::Const(c) => c.span,
+            Def::State(s) => s.span,
+            Def::Operator(o) => o.span,
+            Def::Function(f) => f.span,
+            Def::FuncArg(a) => a.span,
+            _ => None,
+        }
+    }
+
     pub fn get_class(&self, def_id: DefId) -> &Class {
         match self.get_def(def_id) {
             Def::Class(c) => c,
@@ -340,6 +357,7 @@ pub struct Package {
 pub struct Class {
     pub def_id: DefId,
     pub name: Identifier,
+    pub span: Option<Span>,
     pub package: DefId,
     pub self_ty: Ty,
     pub flags: ClassFlags,
@@ -365,17 +383,19 @@ pub enum ClassKind {
 #[derive(Debug)]
 pub struct Enum {
     pub def_id: DefId,
+    pub name: Identifier,
+    pub span: Option<Span>,
     pub owning_class: DefId,
     pub self_ty: Ty,
-    pub name: Identifier,
     pub variants: Box<[DefId]>,
 }
 
 #[derive(Debug)]
 pub struct EnumVariant {
     pub def_id: DefId,
-    pub owning_enum: DefId,
     pub name: Identifier,
+    pub span: Option<Span>,
+    pub owning_enum: DefId,
     pub idx: u8,
 }
 
@@ -383,6 +403,7 @@ pub struct EnumVariant {
 pub struct Struct {
     pub def_id: DefId,
     pub name: Identifier,
+    pub span: Option<Span>,
     pub owning_class: DefId,
     pub self_ty: Ty,
     pub flags: StructFlags,
@@ -396,6 +417,7 @@ pub struct Struct {
 pub struct Var {
     pub def_id: DefId,
     pub name: Identifier,
+    pub span: Option<Span>,
     pub owner: DefId, // Class or Struct
     pub flags: VarFlags,
 
@@ -406,6 +428,7 @@ pub struct Var {
 pub struct Const {
     pub def_id: DefId,
     pub name: Identifier,
+    pub span: Option<Span>,
     pub owner: DefId, // Class
     pub val: ConstVal,
 }
@@ -420,6 +443,7 @@ pub enum ConstVal {
 pub struct State {
     pub def_id: DefId,
     pub name: Identifier,
+    pub span: Option<Span>,
     pub owner: DefId, // Class
     pub funcs: Box<[DefId]>,
     pub contents: Option<Statements>,
@@ -429,6 +453,7 @@ pub struct State {
 pub struct Operator {
     pub def_id: DefId,
     pub op: Op,
+    pub span: Option<Span>,
     pub owning_class: DefId,
     pub flags: FuncFlags,
 
@@ -439,6 +464,7 @@ pub struct Operator {
 pub struct Function {
     pub def_id: DefId,
     pub name: Identifier,
+    pub span: Option<Span>,
     pub owner: DefId, // Class or State
     pub flags: FuncFlags,
     pub delegate_prop: Option<DefId>,
@@ -457,6 +483,7 @@ pub struct FuncSig {
 pub struct FuncArg {
     pub def_id: DefId,
     pub name: Identifier,
+    pub span: Option<Span>,
     pub owner: DefId,
     pub flags: ArgFlags,
 

@@ -153,7 +153,7 @@ impl<W: io::Write> PPrinter<W> {
         self.w.write_all(b" {\n")?;
         for var in &s.variants {
             self.w.write_all(b"    ")?;
-            self.w.write_all(var.as_ref().as_bytes())?;
+            self.w.write_all(var.1.as_ref().as_bytes())?;
             self.w.write_all(b",\n")?;
         }
         self.w.write_all(b"};\n\n")?;

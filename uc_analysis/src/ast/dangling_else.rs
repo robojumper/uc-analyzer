@@ -2,7 +2,7 @@ use uc_ast::{
     visit::{self, Visitor},
     Block, Hir, Statement, StatementKind,
 };
-use uc_files::{ErrorReport, Sources, Span};
+use uc_files::{ErrorReport, Fragment, Sources, Span};
 
 struct DanglingElseVisitor {
     errs: Vec<DanglingElse>,
@@ -20,9 +20,10 @@ pub fn run(hir: &Hir, _: &Sources) -> Vec<ErrorReport> {
         .iter()
         .map(|err| ErrorReport {
             code: "dangling-else",
-            full_text: err.whole_thing,
             msg: "if if else is ambiguous".to_owned(),
-            inlay_messages: vec![("this one is if (...) { if (...) { ... } else { ... } } but could be interpreted as if (...) { if (...) { ... } } else { ... }".to_owned(), err.whole_thing)],
+            fragments: vec![Fragment {
+                full_text: err.whole_thing,
+            inlay_messages: vec![("this one is if (...) { if (...) { ... } else { ... } } but could be interpreted as if (...) { if (...) { ... } } else { ... }".to_owned(), err.whole_thing)],}]
         })
         .collect()
 }

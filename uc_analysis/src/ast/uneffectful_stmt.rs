@@ -3,7 +3,7 @@ use uc_ast::{
     visit::{self, Visitor},
     Expr, ExprKind, Hir, Statement, StatementKind,
 };
-use uc_files::{ErrorReport, Sources, Span};
+use uc_files::{ErrorReport, Fragment, Sources, Span};
 
 struct UneffectfulStmtsVisitor {
     errs: Vec<(&'static str, Span)>,
@@ -17,9 +17,11 @@ pub fn run(hir: &Hir, _: &Sources) -> Vec<ErrorReport> {
         .iter()
         .map(|err| ErrorReport {
             code: "uneffectful-statement",
-            full_text: err.1,
             msg: "expression statement has no effect".to_owned(),
-            inlay_messages: vec![(err.0.to_owned(), err.1)],
+            fragments: vec![Fragment {
+                full_text: err.1,
+                inlay_messages: vec![(err.0.to_owned(), err.1)],
+            }],
         })
         .collect()
 }

@@ -2,7 +2,7 @@ use uc_ast::{
     visit::{self, Visitor},
     Block, Hir, Statement, StatementKind,
 };
-use uc_files::{ErrorReport, Sources, Span};
+use uc_files::{ErrorReport, Fragment, Sources, Span};
 
 struct MisleadingIndentVisitor<'a> {
     errs: Vec<MisleadingIndent>,
@@ -37,12 +37,15 @@ pub fn run(hir: &Hir, sources: &Sources) -> Vec<ErrorReport> {
 
             ErrorReport {
                 code: "misleading-indent",
-                full_text: Span {
-                    start: err.guard.1.start,
-                    end: err.affected_statement.end,
-                },
                 msg: "misleading indentation".to_owned(),
-                inlay_messages: vec![first_msg, second_msg],
+                fragments: vec![Fragment {
+                    full_text: Span {
+                        start: err.guard.1.start,
+                        end: err.affected_statement.end,
+                    },
+
+                    inlay_messages: vec![first_msg, second_msg],
+                }],
             }
         })
         .collect()

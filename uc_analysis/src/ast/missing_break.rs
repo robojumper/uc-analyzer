@@ -2,7 +2,7 @@ use uc_ast::{
     visit::{self, Visitor},
     CaseClause, Hir, Statement, StatementKind,
 };
-use uc_files::{ErrorReport, Sources, Span};
+use uc_files::{ErrorReport, Fragment, Sources, Span};
 
 struct MissingBreakVisitor<'a> {
     errs: Vec<MissingBreak>,
@@ -46,9 +46,12 @@ pub fn run(hir: &Hir, sources: &Sources) -> Vec<ErrorReport> {
 
             ErrorReport {
                 code: "implicit-fallthrough",
-                full_text,
                 msg: "implicit switch/case fallthrough".to_owned(),
-                inlay_messages,
+                fragments: vec![Fragment {
+                    full_text,
+
+                    inlay_messages,
+                }],
             }
         })
         .collect()

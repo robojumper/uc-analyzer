@@ -106,7 +106,7 @@ pub struct VarDef {
 #[derive(Debug)]
 pub struct EnumDef {
     pub name: Identifier,
-    pub variants: Vec<Identifier>,
+    pub variants: Vec<(Span, Identifier)>,
     pub span: Span,
 }
 

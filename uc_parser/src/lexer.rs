@@ -328,7 +328,7 @@ impl<'a> Lexer<'a> {
             }
         };
 
-        Token { kind, span }
+        Token { span, kind }
     }
 
     pub fn extract_ident(&self, token: &Token) -> Identifier {
@@ -567,7 +567,9 @@ impl<'a> Bytes<'a> {
     }
 
     fn pos(&self) -> BytePos {
-        BytePos::new(self.text.len() as u32 - self.bytes.as_slice().len() as u32 + self.start_offset.get())
+        BytePos::new(
+            self.text.len() as u32 - self.bytes.as_slice().len() as u32 + self.start_offset.get(),
+        )
     }
 
     fn peek(&self) -> Option<u8> {

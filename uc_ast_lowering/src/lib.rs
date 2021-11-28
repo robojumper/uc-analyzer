@@ -129,6 +129,7 @@ impl<'defs> LoweringContext<'defs> {
             Def::Class(Box::new(Class {
                 def_id: file_id,
                 name: file_name.clone(),
+                span: Some(hir.header.span),
                 package: pack_id,
                 self_ty: ty,
                 flags: hir.header.mods.flags,
@@ -255,6 +256,7 @@ impl<'defs> LoweringContext<'defs> {
                 Def::Class(Box::new(Class {
                     def_id: class_id,
                     name: ident,
+                    span: None,
                     package,
                     self_ty: Ty::object_from(class_id),
                     flags: ClassFlags::empty(),
@@ -299,6 +301,7 @@ impl<'defs> LoweringContext<'defs> {
             Def::Struct(Box::new(Struct {
                 def_id: struct_id,
                 name: map,
+                span: None,
                 owning_class: object_id,
                 self_ty: Ty::struct_from(struct_id),
                 flags: StructFlags::empty(),
@@ -440,19 +443,20 @@ impl<'defs> LoweringContext<'defs> {
         }
     }
 
-    fn lower_enum(&mut self, class_id: DefId, en: &uc_ast::EnumDef) -> DefId {
+    fn lower_enum(&mut self, class_id: DefId, enum_def: &uc_ast::EnumDef) -> DefId {
         self.add_def(|this, enum_id| {
-            this.resolver.add_scoped_ty(en.name.clone(), enum_id);
+            this.resolver.add_scoped_ty(enum_def.name.clone(), enum_id);
             Def::Enum(Box::new(Enum {
                 def_id: enum_id,
+                span: Some(enum_def.span),
                 owning_class: class_id,
                 self_ty: Ty::enum_from(enum_id),
-                name: en.name.clone(),
-                variants: en
+                name: enum_def.name.clone(),
+                variants: enum_def
                     .variants
                     .iter()
                     .enumerate()
-                    .map(|(idx, name)| {
+                    .map(|(idx, &(span, ref name))| {
                         this.add_def(|this, var_id| {
                             this.resolver
                                 .add_global_value(name.clone(), var_id)
@@ -461,6 +465,7 @@ impl<'defs> LoweringContext<'defs> {
                                 def_id: var_id,
                                 owning_enum: enum_id,
                                 name: name.clone(),
+                                span: Some(span),
                                 idx: idx.try_into().expect("too many variants"),
                             }))
                         })
@@ -491,6 +496,7 @@ impl<'defs> LoweringContext<'defs> {
                 def_id: struct_id,
                 owning_class: class_id,
                 name: struct_def.name.clone(),
+                span: Some(struct_def.span),
                 self_ty: Ty::struct_from(struct_id),
                 flags: struct_def.mods.flags,
                 extends: None,
@@ -518,6 +524,7 @@ impl<'defs> LoweringContext<'defs> {
                     Def::Var(Box::new(Var {
                         def_id: var_id,
                         name: inst.name.clone(),
+                        span: Some(var_def.span),
                         owner: owner_id,
                         flags: var_def.mods.flags,
                         sig: None,
@@ -545,6 +552,7 @@ impl<'defs> LoweringContext<'defs> {
             Def::Const(Box::new(Const {
                 def_id: const_id,
                 name: const_def.name.clone(),
+                span: Some(const_def.span),
                 owner: owner_id,
                 val,
             }))
@@ -596,6 +604,7 @@ impl<'defs> LoweringContext<'defs> {
                 let op_def = Def::Operator(Box::new(Operator {
                     def_id: func_id,
                     op,
+                    span: Some(func_def.span),
                     owning_class: owner_id,
                     flags: func_def.mods.flags,
                     sig: None,
@@ -619,6 +628,7 @@ impl<'defs> LoweringContext<'defs> {
                         let var = Def::Var(Box::new(Var {
                             def_id: var_id,
                             name: name.clone(),
+                            span: Some(func_def.span),
                             owner: owner_id,
                             flags: VarFlags::empty(),
                             sig: Some(VarSig {
@@ -642,6 +652,7 @@ impl<'defs> LoweringContext<'defs> {
                 Def::Function(Box::new(Function {
                     def_id: func_id,
                     name: func_name,
+                    span: Some(func_def.span),
                     owner: owner_id,
                     flags: func_def.mods.flags,
                     delegate_prop: var_id,
@@ -672,6 +683,7 @@ impl<'defs> LoweringContext<'defs> {
             Def::State(Box::new(State {
                 def_id: state_id,
                 name: state_def.name.clone(),
+                span: Some(state_def.span),
                 owner: owner_id,
                 funcs,
                 contents: None,
@@ -783,7 +795,7 @@ impl<'defs> LoweringContext<'defs> {
     }
 }
 
-pub fn lower(input: LoweringInput) -> Defs {
+pub fn lower(input: LoweringInput) -> (Defs, ResolverContext) {
     let mut defs = Defs::new();
 
     let mut l_ctx = LoweringContext {
@@ -793,7 +805,7 @@ pub fn lower(input: LoweringInput) -> Defs {
 
     l_ctx.run(&input);
 
-    println!("{:?}", &defs);
-
-    defs
+    println!("{:?}", &l_ctx.defs);
+    let resolver = l_ctx.resolver;
+    (defs, resolver)
 }

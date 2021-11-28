@@ -243,7 +243,7 @@ impl Parser<'_> {
             }
             let tok = self.next_any()?;
             if let Tk::Sym(_) = tok.kind {
-                variants.push(self.sym_to_ident(&tok));
+                variants.push((tok.span, self.sym_to_ident(&tok)));
                 // Editor metadata
                 if self.eat(sig!(Lt)) {
                     self.ignore_foreign_block(sig!(Lt))?;
