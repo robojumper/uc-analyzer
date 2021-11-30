@@ -2,6 +2,7 @@ use std::num::NonZeroU32;
 
 use crate::DefId;
 
+/// Indicates an array type.
 const ARRAY_MASK: u32 = 1 << 31;
 /// Indicates an opaque type created by a `native iterator` function in
 /// a `foreach` loop.
@@ -144,5 +145,10 @@ impl Ty {
     #[inline]
     pub fn is_array(&self) -> bool {
         self.0.get() & ARRAY_MASK != 0
+    }
+
+    #[inline]
+    pub fn is_iterator(&self) -> bool {
+        self.0.get() & ITERATOR_MASK != 0
     }
 }

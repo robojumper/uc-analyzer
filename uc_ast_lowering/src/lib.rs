@@ -22,8 +22,9 @@ use std::{collections::HashMap, str::FromStr};
 use resolver::ResolverContext;
 use uc_ast::{DimCount, Hir};
 use uc_def::{ClassFlags, FuncFlags, StructFlags, VarFlags};
+use uc_files::Span;
 use uc_middle::{
-    ty::Ty, Class, ClassKind, Const, ConstVal, Def, DefId, Defs, Enum, EnumVariant, FuncSig,
+    ty::Ty, Class, ClassKind, Const, ConstVal, DefId, DefKind, Defs, Enum, EnumVariant, FuncSig,
     Function, Operator, Package, State, Struct, Var, VarSig,
 };
 use uc_name::Identifier;
@@ -67,7 +68,7 @@ impl AsMut<Defs> for LoweringContext<'_> {
 }
 
 impl<'defs> LoweringContext<'defs> {
-    fn add_def<F: FnOnce(&mut Self, DefId) -> Def>(&mut self, f: F) -> DefId {
+    fn add_def<F: FnOnce(&mut Self, DefId) -> (DefKind, Option<Span>)>(&mut self, f: F) -> DefId {
         Defs::add_def(self, f)
     }
 
@@ -93,19 +94,21 @@ impl<'defs> LoweringContext<'defs> {
                     this.resolver
                         .add_package(pack_name.clone(), pack_id)
                         .unwrap();
-                    Def::Package(Box::new(Package {
-                        def_id: pack_id,
-                        name: pack_name.clone(),
-                        classes: package
-                            .files
-                            .iter()
-                            .map(|(file_name, hir)| {
-                                let def_id = this.lower_class(file_name, hir, pack_id);
-                                backrefs.files.insert(def_id, hir);
-                                def_id
-                            })
-                            .collect(),
-                    }))
+                    (
+                        DefKind::Package(Box::new(Package {
+                            name: pack_name.clone(),
+                            classes: package
+                                .files
+                                .iter()
+                                .map(|(file_name, hir)| {
+                                    let def_id = this.lower_class(file_name, hir, pack_id);
+                                    backrefs.files.insert(def_id, hir);
+                                    def_id
+                                })
+                                .collect(),
+                        })),
+                        None,
+                    )
                 })
             })
             .collect::<Vec<_>>();
@@ -126,17 +129,18 @@ impl<'defs> LoweringContext<'defs> {
                 uc_ast::ClassHeader::Class { .. } => Ty::object_from(file_id),
                 uc_ast::ClassHeader::Interface { .. } => Ty::interface_from(file_id),
             };
-            Def::Class(Box::new(Class {
-                def_id: file_id,
-                name: file_name.clone(),
-                span: Some(hir.header.span),
-                package: pack_id,
-                self_ty: ty,
-                flags: hir.header.mods.flags,
-                dependson: Box::new([]),
-                kind: None,
-                items: vec![],
-            }))
+            (
+                DefKind::Class(Box::new(Class {
+                    name: file_name.clone(),
+                    package: pack_id,
+                    self_ty: ty,
+                    flags: hir.header.mods.flags,
+                    dependson: Box::new([]),
+                    kind: None,
+                    items: vec![],
+                })),
+                Some(hir.header.span),
+            )
         })
     }
 
@@ -253,21 +257,22 @@ impl<'defs> LoweringContext<'defs> {
                 this.resolver
                     .add_class(package, ident.clone(), class_id)
                     .unwrap();
-                Def::Class(Box::new(Class {
-                    def_id: class_id,
-                    name: ident,
-                    span: None,
-                    package,
-                    self_ty: Ty::object_from(class_id),
-                    flags: ClassFlags::empty(),
-                    dependson: Box::new([]),
-                    kind: Some(ClassKind::Class {
-                        extends: Some(parent),
-                        implements: Box::new([]),
-                        within: None,
-                    }),
-                    items: vec![],
-                }))
+                (
+                    DefKind::Class(Box::new(Class {
+                        name: ident,
+                        package,
+                        self_ty: Ty::object_from(class_id),
+                        flags: ClassFlags::empty(),
+                        dependson: Box::new([]),
+                        kind: Some(ClassKind::Class {
+                            extends: Some(parent),
+                            implements: Box::new([]),
+                            within: None,
+                        }),
+                        items: vec![],
+                    })),
+                    None,
+                )
             })
         };
 
@@ -298,16 +303,17 @@ impl<'defs> LoweringContext<'defs> {
         self.add_def(|this, struct_id| {
             let map = Identifier::from_str("Map").unwrap();
             this.resolver.add_scoped_ty(map.clone(), object_id);
-            Def::Struct(Box::new(Struct {
-                def_id: struct_id,
-                name: map,
-                span: None,
-                owning_class: object_id,
-                self_ty: Ty::struct_from(struct_id),
-                flags: StructFlags::empty(),
-                extends: None,
-                vars: Box::new([]),
-            }))
+            (
+                DefKind::Struct(Box::new(Struct {
+                    name: map,
+                    owning_class: object_id,
+                    self_ty: Ty::struct_from(struct_id),
+                    flags: StructFlags::empty(),
+                    extends: None,
+                    vars: Box::new([]),
+                })),
+                None,
+            )
         });
     }
 
@@ -446,33 +452,35 @@ impl<'defs> LoweringContext<'defs> {
     fn lower_enum(&mut self, class_id: DefId, enum_def: &uc_ast::EnumDef) -> DefId {
         self.add_def(|this, enum_id| {
             this.resolver.add_scoped_ty(enum_def.name.clone(), enum_id);
-            Def::Enum(Box::new(Enum {
-                def_id: enum_id,
-                span: Some(enum_def.span),
-                owning_class: class_id,
-                self_ty: Ty::enum_from(enum_id),
-                name: enum_def.name.clone(),
-                variants: enum_def
-                    .variants
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, &(span, ref name))| {
-                        this.add_def(|this, var_id| {
-                            this.resolver
-                                .add_global_value(name.clone(), var_id)
-                                .unwrap_or_else(|e| panic!("conflict in {}: {:?}", name, e));
-                            Def::EnumVariant(Box::new(EnumVariant {
-                                def_id: var_id,
-                                owning_enum: enum_id,
-                                name: name.clone(),
-                                span: Some(span),
-                                idx: idx.try_into().expect("too many variants"),
-                            }))
+            (
+                DefKind::Enum(Box::new(Enum {
+                    owning_class: class_id,
+                    self_ty: Ty::enum_from(enum_id),
+                    name: enum_def.name.clone(),
+                    variants: enum_def
+                        .variants
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, &(span, ref name))| {
+                            this.add_def(|this, var_id| {
+                                this.resolver
+                                    .add_global_value(name.clone(), var_id)
+                                    .unwrap_or_else(|e| panic!("conflict in {}: {:?}", name, e));
+                                (
+                                    DefKind::EnumVariant(Box::new(EnumVariant {
+                                        owning_enum: enum_id,
+                                        name: name.clone(),
+                                        idx: idx.try_into().expect("too many variants"),
+                                    })),
+                                    Some(span),
+                                )
+                            })
                         })
-                    })
-                    .collect::<Vec<_>>()
-                    .into_boxed_slice(),
-            }))
+                        .collect::<Vec<_>>()
+                        .into_boxed_slice(),
+                })),
+                Some(enum_def.span),
+            )
         })
     }
 
@@ -492,16 +500,17 @@ impl<'defs> LoweringContext<'defs> {
                 .flat_map(|var_def| this.lower_var(struct_id, var_def, vars))
                 .collect::<Box<[_]>>();
 
-            Def::Struct(Box::new(Struct {
-                def_id: struct_id,
-                owning_class: class_id,
-                name: struct_def.name.clone(),
-                span: Some(struct_def.span),
-                self_ty: Ty::struct_from(struct_id),
-                flags: struct_def.mods.flags,
-                extends: None,
-                vars: var_ids,
-            }))
+            (
+                DefKind::Struct(Box::new(Struct {
+                    owning_class: class_id,
+                    name: struct_def.name.clone(),
+                    self_ty: Ty::struct_from(struct_id),
+                    flags: struct_def.mods.flags,
+                    extends: None,
+                    vars: var_ids,
+                })),
+                Some(struct_def.span),
+            )
         })
     }
 
@@ -521,14 +530,15 @@ impl<'defs> LoweringContext<'defs> {
                         .add_scoped_var(owner_id, inst.name.clone(), var_id)
                         .unwrap();
                     vars.insert(var_id, (var_def, idx));
-                    Def::Var(Box::new(Var {
-                        def_id: var_id,
-                        name: inst.name.clone(),
-                        span: Some(var_def.span),
-                        owner: owner_id,
-                        flags: var_def.mods.flags,
-                        sig: None,
-                    }))
+                    (
+                        DefKind::Var(Box::new(Var {
+                            name: inst.name.clone(),
+                            owner: owner_id,
+                            flags: var_def.mods.flags,
+                            sig: None,
+                        })),
+                        Some(var_def.span),
+                    )
                 })
             })
             .collect()
@@ -549,13 +559,14 @@ impl<'defs> LoweringContext<'defs> {
                 uc_ast::ConstVal::Int(i) => ConstVal::Num(*i),
                 _ => ConstVal::Other,
             };
-            Def::Const(Box::new(Const {
-                def_id: const_id,
-                name: const_def.name.clone(),
-                span: Some(const_def.span),
-                owner: owner_id,
-                val,
-            }))
+            (
+                DefKind::Const(Box::new(Const {
+                    name: const_def.name.clone(),
+                    owner: owner_id,
+                    val,
+                })),
+                Some(const_def.span),
+            )
         })
     }
 
@@ -594,6 +605,7 @@ impl<'defs> LoweringContext<'defs> {
                 .flags
                 .intersects(FuncFlags::OPERATOR | FuncFlags::PREOPERATOR | FuncFlags::POSTOPERATOR)
             {
+                assert!(func_def.mods.flags.contains(FuncFlags::STATIC));
                 let op = match &func_def.name {
                     uc_ast::FuncName::Oper(op) => *op,
                     uc_ast::FuncName::Iden(i) => {
@@ -601,14 +613,15 @@ impl<'defs> LoweringContext<'defs> {
                     }
                 };
 
-                let op_def = Def::Operator(Box::new(Operator {
-                    def_id: func_id,
-                    op,
-                    span: Some(func_def.span),
-                    owning_class: owner_id,
-                    flags: func_def.mods.flags,
-                    sig: None,
-                }));
+                let op_def = (
+                    DefKind::Operator(Box::new(Operator {
+                        op,
+                        owning_class: owner_id,
+                        flags: func_def.mods.flags,
+                        sig: None,
+                    })),
+                    Some(func_def.span),
+                );
                 this.resolver.add_scoped_op(owner_id, op, func_id).unwrap();
                 ops.insert(func_id, func_def);
                 op_def
@@ -625,17 +638,18 @@ impl<'defs> LoweringContext<'defs> {
                         let name =
                             Identifier::from_str(&("__delegate_".to_owned() + func_name.as_ref()))
                                 .unwrap();
-                        let var = Def::Var(Box::new(Var {
-                            def_id: var_id,
-                            name: name.clone(),
-                            span: Some(func_def.span),
-                            owner: owner_id,
-                            flags: VarFlags::empty(),
-                            sig: Some(VarSig {
-                                ty: Ty::delegate_from(func_id),
-                                dim: None,
-                            }),
-                        }));
+                        let var = (
+                            DefKind::Var(Box::new(Var {
+                                name: name.clone(),
+                                owner: owner_id,
+                                flags: VarFlags::empty(),
+                                sig: Some(VarSig {
+                                    ty: Ty::delegate_from(func_id),
+                                    dim: None,
+                                }),
+                            })),
+                            Some(func_def.span),
+                        );
                         this.resolver
                             .add_scoped_var(owner_id, name, var_id)
                             .unwrap();
@@ -649,16 +663,17 @@ impl<'defs> LoweringContext<'defs> {
                     .add_scoped_func(owner_id, func_name.clone(), func_id)
                     .unwrap();
                 funcs.insert(func_id, func_def);
-                Def::Function(Box::new(Function {
-                    def_id: func_id,
-                    name: func_name,
-                    span: Some(func_def.span),
-                    owner: owner_id,
-                    flags: func_def.mods.flags,
-                    delegate_prop: var_id,
-                    sig: None,
-                    contents: None,
-                }))
+                (
+                    DefKind::Function(Box::new(Function {
+                        name: func_name,
+                        owner: owner_id,
+                        flags: func_def.mods.flags,
+                        delegate_prop: var_id,
+                        sig: None,
+                        contents: None,
+                    })),
+                    Some(func_def.span),
+                )
             }
         })
     }
@@ -680,14 +695,15 @@ impl<'defs> LoweringContext<'defs> {
                 .collect();
             assert!(ops.is_empty());
 
-            Def::State(Box::new(State {
-                def_id: state_id,
-                name: state_def.name.clone(),
-                span: Some(state_def.span),
-                owner: owner_id,
-                funcs,
-                contents: None,
-            }))
+            (
+                DefKind::State(Box::new(State {
+                    name: state_def.name.clone(),
+                    owner: owner_id,
+                    funcs,
+                    contents: None,
+                })),
+                Some(state_def.span),
+            )
         })
     }
 
@@ -718,13 +734,13 @@ impl<'defs> LoweringContext<'defs> {
                                 e
                             )
                         });
-                    match self.defs.get_def(ty) {
-                        Def::Class(c) => match c.kind.as_ref().unwrap() {
+                    match &self.defs.get_def(ty).kind {
+                        DefKind::Class(c) => match c.kind.as_ref().unwrap() {
                             ClassKind::Class { .. } => Ty::object_from(ty),
                             ClassKind::Interface { .. } => Ty::interface_from(ty),
                         },
-                        Def::Enum(_) => Ty::enum_from(ty),
-                        Def::Struct(_) => Ty::struct_from(ty),
+                        DefKind::Enum(_) => Ty::enum_from(ty),
+                        DefKind::Struct(_) => Ty::struct_from(ty),
                         _ => panic!("not a ty"),
                     }
                 }
@@ -735,9 +751,9 @@ impl<'defs> LoweringContext<'defs> {
                         .resolver
                         .get_ty_in(Some(scope), self.defs, class, ty)
                         .unwrap_or_else(|e| panic!("failed to find ty {:?}: {:?}", ty, e));
-                    match self.defs.get_def(ty) {
-                        Def::Enum(_) => Ty::enum_from(ty),
-                        Def::Struct(_) => Ty::struct_from(ty),
+                    match &self.defs.get_def(ty).kind {
+                        DefKind::Enum(_) => Ty::enum_from(ty),
+                        DefKind::Struct(_) => Ty::struct_from(ty),
                         _ => panic!("not a valid qualified ty"),
                     }
                 }
@@ -753,8 +769,8 @@ impl<'defs> LoweringContext<'defs> {
                     .resolver
                     .get_ty(scope, self.defs, ident)
                     .unwrap_or_else(|e| panic!("failed to find ty {:?}: {:?}", ident, e));
-                match self.defs.get_def(ty) {
-                    Def::Class(c) => match c.kind.as_ref().unwrap() {
+                match &self.defs.get_def(ty).kind {
+                    DefKind::Class(c) => match c.kind.as_ref().unwrap() {
                         ClassKind::Class { .. } => Ty::class_from(ty),
                         ClassKind::Interface { .. } => Ty::interface_from(ty),
                     },
