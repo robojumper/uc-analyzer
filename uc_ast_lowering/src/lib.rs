@@ -95,7 +95,7 @@ impl<'defs> LoweringContext<'defs> {
                         .add_package(pack_name.clone(), pack_id)
                         .unwrap();
                     (
-                        DefKind::Package(Box::new(Package {
+                        DefKind::Package(Package {
                             name: pack_name.clone(),
                             classes: package
                                 .files
@@ -106,7 +106,7 @@ impl<'defs> LoweringContext<'defs> {
                                     def_id
                                 })
                                 .collect(),
-                        })),
+                        }),
                         None,
                     )
                 })
@@ -304,14 +304,14 @@ impl<'defs> LoweringContext<'defs> {
             let map = Identifier::from_str("Map").unwrap();
             this.resolver.add_scoped_ty(map.clone(), object_id);
             (
-                DefKind::Struct(Box::new(Struct {
+                DefKind::Struct(Struct {
                     name: map,
                     owning_class: object_id,
                     self_ty: Ty::struct_from(struct_id),
                     flags: StructFlags::empty(),
                     extends: None,
                     vars: Box::new([]),
-                })),
+                }),
                 None,
             )
         });
@@ -453,7 +453,7 @@ impl<'defs> LoweringContext<'defs> {
         self.add_def(|this, enum_id| {
             this.resolver.add_scoped_ty(enum_def.name.clone(), enum_id);
             (
-                DefKind::Enum(Box::new(Enum {
+                DefKind::Enum(Enum {
                     owning_class: class_id,
                     self_ty: Ty::enum_from(enum_id),
                     name: enum_def.name.clone(),
@@ -467,18 +467,18 @@ impl<'defs> LoweringContext<'defs> {
                                     .add_global_value(name.clone(), var_id)
                                     .unwrap_or_else(|e| panic!("conflict in {}: {:?}", name, e));
                                 (
-                                    DefKind::EnumVariant(Box::new(EnumVariant {
+                                    DefKind::EnumVariant(EnumVariant {
                                         owning_enum: enum_id,
                                         name: name.clone(),
                                         idx: idx.try_into().expect("too many variants"),
-                                    })),
+                                    }),
                                     Some(span),
                                 )
                             })
                         })
                         .collect::<Vec<_>>()
                         .into_boxed_slice(),
-                })),
+                }),
                 Some(enum_def.span),
             )
         })
@@ -501,14 +501,14 @@ impl<'defs> LoweringContext<'defs> {
                 .collect::<Box<[_]>>();
 
             (
-                DefKind::Struct(Box::new(Struct {
+                DefKind::Struct(Struct {
                     owning_class: class_id,
                     name: struct_def.name.clone(),
                     self_ty: Ty::struct_from(struct_id),
                     flags: struct_def.mods.flags,
                     extends: None,
                     vars: var_ids,
-                })),
+                }),
                 Some(struct_def.span),
             )
         })
@@ -531,12 +531,12 @@ impl<'defs> LoweringContext<'defs> {
                         .unwrap();
                     vars.insert(var_id, (var_def, idx));
                     (
-                        DefKind::Var(Box::new(Var {
+                        DefKind::Var(Var {
                             name: inst.name.clone(),
                             owner: owner_id,
                             flags: var_def.mods.flags,
                             sig: None,
-                        })),
+                        }),
                         Some(var_def.span),
                     )
                 })
@@ -560,11 +560,11 @@ impl<'defs> LoweringContext<'defs> {
                 _ => ConstVal::Other,
             };
             (
-                DefKind::Const(Box::new(Const {
+                DefKind::Const(Const {
                     name: const_def.name.clone(),
                     owner: owner_id,
                     val,
-                })),
+                }),
                 Some(const_def.span),
             )
         })
@@ -614,12 +614,12 @@ impl<'defs> LoweringContext<'defs> {
                 };
 
                 let op_def = (
-                    DefKind::Operator(Box::new(Operator {
+                    DefKind::Operator(Operator {
                         op,
                         owning_class: owner_id,
                         flags: func_def.mods.flags,
                         sig: None,
-                    })),
+                    }),
                     Some(func_def.span),
                 );
                 this.resolver.add_scoped_op(owner_id, op, func_id).unwrap();
@@ -639,7 +639,7 @@ impl<'defs> LoweringContext<'defs> {
                             Identifier::from_str(&("__delegate_".to_owned() + func_name.as_ref()))
                                 .unwrap();
                         let var = (
-                            DefKind::Var(Box::new(Var {
+                            DefKind::Var(Var {
                                 name: name.clone(),
                                 owner: owner_id,
                                 flags: VarFlags::empty(),
@@ -647,7 +647,7 @@ impl<'defs> LoweringContext<'defs> {
                                     ty: Ty::delegate_from(func_id),
                                     dim: None,
                                 }),
-                            })),
+                            }),
                             Some(func_def.span),
                         );
                         this.resolver
@@ -664,14 +664,14 @@ impl<'defs> LoweringContext<'defs> {
                     .unwrap();
                 funcs.insert(func_id, func_def);
                 (
-                    DefKind::Function(Box::new(Function {
+                    DefKind::Function(Function {
                         name: func_name,
                         owner: owner_id,
                         flags: func_def.mods.flags,
                         delegate_prop: var_id,
                         sig: None,
                         contents: None,
-                    })),
+                    }),
                     Some(func_def.span),
                 )
             }
@@ -696,12 +696,12 @@ impl<'defs> LoweringContext<'defs> {
             assert!(ops.is_empty());
 
             (
-                DefKind::State(Box::new(State {
+                DefKind::State(State {
                     name: state_def.name.clone(),
                     owner: owner_id,
                     funcs,
                     contents: None,
-                })),
+                }),
                 Some(state_def.span),
             )
         })

@@ -345,17 +345,18 @@ pub struct Def {
 
 #[derive(Debug)]
 pub enum DefKind {
-    Package(Box<Package>),
+    Package(Package),
+    // This box halves the size of this enum
     Class(Box<Class>),
-    Enum(Box<Enum>),
-    EnumVariant(Box<EnumVariant>),
-    Struct(Box<Struct>),
-    Var(Box<Var>),
-    Const(Box<Const>),
-    State(Box<State>),
-    Operator(Box<Operator>),
-    Function(Box<Function>),
-    FuncArg(Box<FuncArg>),
+    Enum(Enum),
+    EnumVariant(EnumVariant),
+    Struct(Struct),
+    Var(Var),
+    Const(Const),
+    State(State),
+    Operator(Operator),
+    Function(Function),
+    FuncArg(FuncArg),
 }
 
 #[derive(Debug)]
