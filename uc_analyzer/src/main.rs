@@ -6,7 +6,7 @@ use uc_analysis::ast::{
     ambiguous_new_template, dangling_else, misleading_indentation, missing_break, never_loop,
     uneffectful_stmt,
 };
-use uc_analysis::middle::bad_type_name;
+use uc_analysis::middle::{bad_enum_values, bad_type_name};
 use uc_ast::Hir;
 use uc_ast_lowering::{LoweringInput, LoweringInputPackage};
 use uc_files::{ErrorReport, FileId, Fragment, Sources};
@@ -138,14 +138,14 @@ fn main() {
             }
 
             let mut errs = vec![];
-            /*
+
             errs.extend(ambiguous_new_template::run(&hir, &sources));
             errs.extend(dangling_else::run(&hir, &sources));
             errs.extend(misleading_indentation::run(&hir, &sources));
             errs.extend(missing_break::run(&hir, &sources));
             errs.extend(never_loop::run(&hir, &sources));
             errs.extend(uneffectful_stmt::run(&hir, &sources));
-            */
+
             errs.iter().for_each(|e| sources.emit_err(e));
 
             p.hirs.push(hir);
@@ -171,5 +171,6 @@ fn main() {
     let (defs, resolver) = uc_ast_lowering::lower(input);
     let mut errs = vec![];
     errs.extend(bad_type_name::run(&defs, &resolver, &sources));
+    errs.extend(bad_enum_values::run(&defs, &resolver, &sources));
     errs.iter().for_each(|e| sources.emit_err(e));
 }

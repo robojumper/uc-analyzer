@@ -21,15 +21,16 @@ use std::{collections::HashMap, str::FromStr};
 
 use resolver::ResolverContext;
 use uc_ast::{DimCount, Hir};
-use uc_def::{ClassFlags, FuncFlags, StructFlags, VarFlags};
+use uc_def::{ArgFlags, ClassFlags, FuncFlags, StructFlags, VarFlags};
 use uc_files::Span;
 use uc_middle::{
-    ty::Ty, Class, ClassKind, Const, ConstVal, DefId, DefKind, Defs, Enum, EnumVariant, FuncSig,
-    Function, Operator, Package, State, Struct, Var, VarSig,
+    ty::Ty, Class, ClassKind, Const, ConstVal, DefId, DefKind, Defs, Enum, EnumVariant, FuncArg,
+    FuncContents, FuncSig, Function, Local, Operator, Package, State, Struct, Var,
 };
 use uc_name::Identifier;
 
 pub mod resolver;
+mod stmts;
 
 #[derive(Debug)]
 pub struct LoweringInput {
@@ -51,13 +52,24 @@ struct HirBackrefs<'hir> {
     funcs: HashMap<DefId, &'hir uc_ast::FuncDef>,
     ops: HashMap<DefId, &'hir uc_ast::FuncDef>,
     states: HashMap<DefId, &'hir uc_ast::StateDef>,
-    args: HashMap<DefId, &'hir uc_ast::FuncArg>,
-    locals: HashMap<DefId, (&'hir uc_ast::LocalDef, usize)>,
+}
+
+#[derive(Debug, Default)]
+pub struct SpecialItems {
+    /// The DefId of the Core.Object class
+    pub object_id: Option<DefId>,
+    /// The DefId of the Core.Interface class
+    pub interface_id: Option<DefId>,
+    /// The DefId of the synthetically generated __DynArrayIterator iterator
+    pub dyn_array_iterator: Option<DefId>,
+    /// Side table for native iterator functions
+    pub iterator_table: Vec<DefId>,
 }
 
 #[derive(Debug)]
 struct LoweringContext<'defs> {
     defs: &'defs mut Defs,
+    special_items: SpecialItems,
     resolver: ResolverContext,
 }
 
@@ -228,7 +240,8 @@ impl<'defs> LoweringContext<'defs> {
 
     fn add_builtin_items(&mut self) {
         // Add the classes that exist in native engine code, but aren't
-        // declared in UnrealScript
+        // declared in UnrealScript. This list is incomplete and may require
+        // further additions.
 
         let get_package = |this: &mut Self, package: &str| {
             let name = Identifier::from_str(package).unwrap();
@@ -250,6 +263,7 @@ impl<'defs> LoweringContext<'defs> {
         let unrealed = get_package(self, "UnrealEd");
 
         let object_id = get_class(self, "Core", "Object");
+        self.special_items.object_id = Some(object_id);
 
         let add_class = |this: &mut Self, package, class_name: &str, parent| {
             let ident = Identifier::from_str(class_name).unwrap();
@@ -298,7 +312,9 @@ impl<'defs> LoweringContext<'defs> {
         add_class(self, unrealed, "TextBuffer", object_id);
 
         let player_id = get_class(self, "Engine", "Player");
-        add_class(self, engine, "NetConnection", player_id);
+        let net_conn_id = add_class(self, engine, "NetConnection", player_id);
+        add_class(self, engine, "ChildConnection", net_conn_id);
+
 
         self.add_def(|this, struct_id| {
             let map = Identifier::from_str("Map").unwrap();
@@ -315,6 +331,60 @@ impl<'defs> LoweringContext<'defs> {
                 None,
             )
         });
+
+        // For consistency, add the native iterator as a function
+        let iterator_id = self.add_def(|this, func_id| {
+            let iterator_idx = this.special_items.iterator_table.len().try_into().unwrap();
+            this.special_items.iterator_table.push(func_id);
+            let array_arg = this.add_def(|_, _| {
+                (
+                    DefKind::FuncArg(FuncArg {
+                        name: Identifier::from_str("array_value").unwrap(),
+                        owner: func_id,
+                        flags: ArgFlags::OUT | ArgFlags::CONST,
+                        ty: Ty::dyn_array_from(Ty::PLACEHOLDER),
+                    }),
+                    None,
+                )
+            });
+            let val_arg = this.add_def(|_, _| {
+                (
+                    DefKind::FuncArg(FuncArg {
+                        name: Identifier::from_str("element").unwrap(),
+                        owner: func_id,
+                        flags: ArgFlags::OUTONLY,
+                        ty: Ty::PLACEHOLDER,
+                    }),
+                    None,
+                )
+            });
+            let idx_arg = this.add_def(|_, _| {
+                (
+                    DefKind::FuncArg(FuncArg {
+                        name: Identifier::from_str("idx").unwrap(),
+                        owner: func_id,
+                        flags: ArgFlags::OUTONLY | ArgFlags::OPTIONAL,
+                        ty: Ty::INT,
+                    }),
+                    None,
+                )
+            });
+            (
+                DefKind::Function(Function {
+                    name: Identifier::from_str("__DynArrayIterator").unwrap(),
+                    owner: object_id,
+                    flags: FuncFlags::NATIVE | FuncFlags::ITERATOR | FuncFlags::STATIC,
+                    delegate_prop: None,
+                    sig: Some(FuncSig {
+                        ret_ty: Some(Ty::iterator(Ty::PLACEHOLDER, iterator_idx)),
+                        args: Box::new([array_arg, val_arg, idx_arg]),
+                    }),
+                    contents: None,
+                }),
+                None,
+            )
+        });
+        self.special_items.dyn_array_iterator = Some(iterator_id);
     }
 
     fn fixup_extends<'hir>(&mut self, backrefs: &'hir HirBackrefs) {
@@ -350,6 +420,7 @@ impl<'defs> LoweringContext<'defs> {
                         .map(|n| self.resolver.get_ty(class_id, self.defs, n))
                         .unwrap_or_else(|| {
                             if &hir.header.name == "Interface" {
+                                self.special_items.interface_id = Some(class_id);
                                 self.resolver.get_ty_in(
                                     None,
                                     self.defs,
@@ -393,59 +464,126 @@ impl<'defs> LoweringContext<'defs> {
         }
     }
 
+    fn resolve_dim(&self, dim: &uc_ast::DimCount, scope: DefId) -> u16 {
+        match dim {
+            DimCount::Complex(n) => match &**n {
+                [single] => {
+                    if let Ok(const_id) = self.resolver.get_scoped_const(scope, self.defs, single) {
+                        let def = self.defs.get_const(const_id);
+                        match &def.val {
+                            ConstVal::Num(n) => *n as u16,
+                            ConstVal::Other => panic!("invalid const value"),
+                        }
+                    } else if let Ok(en_def) = self.resolver.get_ty(scope, self.defs, single) {
+                        self.defs.get_enum(en_def).variants.len() as u16
+                    } else {
+                        panic!("invalid const static array bound")
+                    }
+                }
+                [en, enum_count] => {
+                    // IDGAF just stop throwing errors AAA
+                    if enum_count != "EnumCount" && !enum_count.as_ref().ends_with("_MAX") {
+                        panic!("yet another way to specify enums: {}", enum_count)
+                    }
+                    let en_def = self
+                        .resolver
+                        .get_ty(scope, self.defs, en)
+                        .unwrap_or_else(|e| panic!("failed to find enum {:?}: {:?}", en, e));
+                    self.defs.get_enum(en_def).variants.len() as u16
+                }
+                x => panic!("invalid static array length specification: {:?}", x),
+            },
+            DimCount::Number(n) => *n as u16,
+            DimCount::None => panic!(),
+        }
+    }
+
     fn resolve_sigs<'hir>(&mut self, backrefs: &HirBackrefs<'hir>) {
         for var_ref in &backrefs.vars {
-            let ty = self.decode_ast_ty(&var_ref.1 .0.ty, *var_ref.0);
-            let dim = match &var_ref.1 .0.names[var_ref.1 .1].count {
-                DimCount::Complex(n) => match &**n {
-                    [single] => {
-                        if let Ok(const_id) = self
-                            .resolver
-                            .get_scoped_const(*var_ref.0, self.defs, single)
-                        {
-                            let def = self.defs.get_const(const_id);
-                            match &def.val {
-                                ConstVal::Num(n) => Some(*n as u32),
-                                ConstVal::Other => panic!("invalid const value"),
-                            }
-                        } else if let Ok(en_def) =
-                            self.resolver.get_ty(*var_ref.0, self.defs, single)
-                        {
-                            Some(self.defs.get_enum(en_def).variants.len() as u32)
-                        } else {
-                            panic!("invalid const static array bound")
-                        }
-                    }
-                    [en, enum_count] => {
-                        // IDGAF just stop throwing errors AAA
-                        if enum_count != "EnumCount" && !enum_count.as_ref().ends_with("_MAX") {
-                            panic!("yet another way to specify enums: {}", enum_count)
-                        }
-                        let ty = self
-                            .resolver
-                            .get_ty(*var_ref.0, self.defs, en)
-                            .unwrap_or_else(|e| panic!("failed to find enum {:?}: {:?}", en, e));
-                        Some(self.defs.get_enum(ty).variants.len() as u32)
-                    }
-                    x => panic!("invalid static array length specification: {:?}", x),
-                },
-                DimCount::Number(n) => Some(*n),
-                DimCount::None => None,
+            let inner_ty = self.decode_ast_ty(&var_ref.1 .0.ty, *var_ref.0);
+            let dim = &var_ref.1 .0.names[var_ref.1 .1].count;
+            let ty = match dim {
+                DimCount::None => inner_ty,
+                x => Ty::stat_array_from(inner_ty, self.resolve_dim(x, *var_ref.0)),
             };
-            self.defs.get_var_mut(*var_ref.0).sig = Some(VarSig { ty, dim });
+            self.defs.get_var_mut(*var_ref.0).ty = Some(ty);
         }
 
-        for func_ref in &backrefs.funcs {
-            let ty = func_ref
-                .1
+        for (&func_id, &func_ref) in &backrefs.funcs {
+            let mut ret_ty = func_ref
                 .sig
                 .ret_ty
                 .as_ref()
-                .map(|ty| self.decode_ast_ty(ty, *func_ref.0));
-            self.defs.get_func_mut(*func_ref.0).sig = Some(FuncSig {
-                ret_ty: ty,
-                args: Box::new([]),
-            });
+                .map(|ty| self.decode_ast_ty(ty, func_id));
+            let args = func_ref
+                .sig
+                .args
+                .iter()
+                .map(|arg| {
+                    self.add_def(|this, _| {
+                        (
+                            DefKind::FuncArg(FuncArg {
+                                name: arg.name.clone(),
+                                owner: func_id,
+                                flags: arg.mods.flags,
+                                ty: this.decode_ast_ty(&arg.ty, func_id),
+                            }),
+                            Some(arg.span),
+                        )
+                    })
+                })
+                .collect::<Box<_>>();
+
+            // Special treatment for native iterators, where the second out object type
+            // is determined by the class in the first argument
+            if func_ref.mods.flags.contains(FuncFlags::ITERATOR) {
+                assert!(func_ref.mods.flags.contains(FuncFlags::NATIVE));
+                let iterator_idx = self.special_items.iterator_table.len().try_into().unwrap();
+                self.special_items.iterator_table.push(func_id);
+                if args.len() >= 2
+                    && self.defs.get_arg(args[0]).ty.is_class()
+                    && self.defs.get_arg(args[1]).ty.is_object()
+                {
+                    self.defs.get_arg_mut(args[1]).ty = Ty::PLACEHOLDER;
+                    ret_ty = Some(Ty::iterator(Ty::PLACEHOLDER, iterator_idx));
+                }
+            }
+            self.defs.get_func_mut(func_id).sig = Some(FuncSig { ret_ty, args });
+
+            if let Some(body) = &func_ref.body {
+                let locals = body
+                    .locals
+                    .iter()
+                    .flat_map(|local| {
+                        let local_ty = self.decode_ast_ty(&local.ty, func_id);
+                        let mut insts = vec![];
+                        for inst in &local.names {
+                            let inst_id = self.add_def(|this, _| {
+                                let ty = match &inst.count {
+                                    DimCount::None => local_ty,
+                                    x => {
+                                        Ty::stat_array_from(local_ty, this.resolve_dim(x, func_id))
+                                    }
+                                };
+                                (
+                                    DefKind::Local(Local {
+                                        name: inst.name.clone(),
+                                        owner: func_id,
+                                        ty,
+                                    }),
+                                    Some(inst.span),
+                                )
+                            });
+                            insts.push(inst_id);
+                        }
+                        insts
+                    })
+                    .collect::<Box<_>>();
+                self.defs.get_func_mut(func_id).contents = Some(FuncContents {
+                    locals,
+                    statements: None,
+                });
+            }
         }
     }
 
@@ -535,7 +673,7 @@ impl<'defs> LoweringContext<'defs> {
                             name: inst.name.clone(),
                             owner: owner_id,
                             flags: var_def.mods.flags,
-                            sig: None,
+                            ty: None,
                         }),
                         Some(var_def.span),
                     )
@@ -643,10 +781,7 @@ impl<'defs> LoweringContext<'defs> {
                                 name: name.clone(),
                                 owner: owner_id,
                                 flags: VarFlags::empty(),
-                                sig: Some(VarSig {
-                                    ty: Ty::delegate_from(func_id),
-                                    dim: None,
-                                }),
+                                ty: Some(Ty::delegate_from(func_id)),
                             }),
                             Some(func_def.span),
                         );
@@ -762,7 +897,7 @@ impl<'defs> LoweringContext<'defs> {
             uc_ast::Ty::Array(arr_ty) => {
                 // This is filtered in the parser
                 assert!(!matches!(&**arr_ty, uc_ast::Ty::Array(_)));
-                Ty::array_from(self.decode_ast_ty(arr_ty, scope))
+                Ty::dyn_array_from(self.decode_ast_ty(arr_ty, scope))
             }
             uc_ast::Ty::Class(ident) => {
                 let ty = self
@@ -816,6 +951,7 @@ pub fn lower(input: LoweringInput) -> (Defs, ResolverContext) {
 
     let mut l_ctx = LoweringContext {
         defs: &mut defs,
+        special_items: SpecialItems::default(),
         resolver: ResolverContext::default(),
     };
 

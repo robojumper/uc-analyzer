@@ -52,6 +52,9 @@ bitflags! {
         const SKIP = 1 << 3;
         const OUT = 1 << 4;
         const REF = 1 << 5;
+        /// For native iterator functions which are known
+        /// to not look at their out arguments.
+        const OUTONLY = 1 << 6;
     }
 
     pub struct StructFlags: u32 {

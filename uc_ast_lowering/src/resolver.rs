@@ -189,7 +189,7 @@ impl ResolverContext {
     }
 
     pub fn get_scoped_const(
-        &mut self,
+        &self,
         scope: DefId,
         defs: &Defs,
         const_name: &Identifier,

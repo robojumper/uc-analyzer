@@ -3,9 +3,9 @@ use std::str::FromStr;
 use uc_ast_lowering::resolver::ResolverContext;
 use uc_files::{ErrorReport, Fragment, Sources};
 use uc_middle::Defs;
-use uc_parser::{lexer, parser, Keyword};
+use uc_parser::{parser, Keyword};
 
-pub fn run(defs: &Defs, resolver: &ResolverContext, sources: &Sources) -> Vec<ErrorReport> {
+pub fn run(defs: &Defs, resolver: &ResolverContext, _: &Sources) -> Vec<ErrorReport> {
     let mut errs = vec![];
     // Report type name ambiguities
     for (name, ids) in &resolver.global_ty_defs {

@@ -167,6 +167,7 @@ impl Parser<'_> {
         let mut names = vec![];
 
         loop {
+            let name_marker = self.marker();
             let var_name = self.expect_ident()?;
             let count = if self.eat(sig!(LBrack)) {
                 let peeked = self.peek_any()?;
@@ -191,6 +192,8 @@ impl Parser<'_> {
                 DimCount::None
             };
 
+            let span = name_marker.complete(self);
+
             // Native export text
             if self.eat(sig!(LBrace)) {
                 self.ignore_foreign_block(sig!(LBrace))?;
@@ -203,6 +206,7 @@ impl Parser<'_> {
             names.push(VarInstance {
                 name: var_name,
                 count,
+                span,
             });
 
             if !self.eat(Tk::Comma) {
@@ -465,6 +469,7 @@ impl Parser<'_> {
         let ty = self.parse_ty(None)?;
         let mut names = vec![];
         loop {
+            let name_marker = self.marker();
             let var_name = self.expect_ident()?;
             let count = if self.eat(sig!(LBrack)) {
                 let peeked = self.peek_any()?;
@@ -490,6 +495,7 @@ impl Parser<'_> {
             names.push(VarInstance {
                 name: var_name,
                 count,
+                span: name_marker.complete(self),
             });
 
             if !self.eat(Tk::Comma) {

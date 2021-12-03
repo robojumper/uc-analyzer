@@ -139,6 +139,9 @@ pub fn walk_expr<V: Visitor>(visit: &mut V, expr: &Expr) {
             visit.visit_expr(expr);
         }
         ExprKind::NewExpr { args, cls, arch } => {
+            for arg in args.iter().flatten() {
+                visit.visit_expr(arg);
+            }
             visit.visit_expr(cls);
             if let Some(arch) = arch {
                 visit.visit_expr(arch);

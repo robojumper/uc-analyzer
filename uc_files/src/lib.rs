@@ -38,7 +38,7 @@ pub struct Sources {
 #[derive(Debug)]
 struct SourceFileMetadata {
     name: String,
-    path: PathBuf,
+    _path: PathBuf,
     span: Span,
     line_heads: Vec<BytePos>,
 }
@@ -117,7 +117,7 @@ impl Sources {
             .collect();
         self.metadata.push(SourceFileMetadata {
             name: name.clone(),
-            path,
+            _path: path,
             span,
             line_heads,
         });

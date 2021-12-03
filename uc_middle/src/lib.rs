@@ -1,6 +1,3 @@
-#![feature(inline_const_pat)]
-#![feature(const_option)]
-
 //! The middle representation of a whole UnrealScript workspace.
 
 use std::{num::NonZeroU32, ops::ControlFlow};
@@ -10,6 +7,7 @@ use uc_def::{ArgFlags, ClassFlags, FuncFlags, Op, StructFlags, VarFlags};
 use uc_files::Span;
 use uc_name::Identifier;
 
+pub mod body;
 pub mod ty;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -52,7 +50,7 @@ impl Defs {
         f: F,
     ) -> DefId {
         let next_id = t.as_mut().defs.len();
-        if next_id > ty::MAX_DEF_ID as usize {
+        if next_id > u32::MAX as usize {
             panic!("too many definitions");
         }
         t.as_mut().defs.push(DefSlot::Empty);
@@ -124,6 +122,7 @@ impl Defs {
                 DefKind::Operator(o) => def_id = o.owning_class,
                 DefKind::Function(f) => def_id = f.owner,
                 DefKind::FuncArg(a) => def_id = a.owner,
+                DefKind::Local(l) => def_id = l.owner,
             }
         }
     }
@@ -142,6 +141,7 @@ impl Defs {
                 DefKind::Operator(o) => def_id = o.owning_class,
                 DefKind::Function(f) => def_id = f.owner,
                 DefKind::FuncArg(a) => def_id = a.owner,
+                DefKind::Local(l) => def_id = l.owner,
                 d => panic!("cannot get class: {:?}", d),
             }
         }
@@ -328,6 +328,20 @@ impl Defs {
             _ => panic!("expected func"),
         }
     }
+
+    pub fn get_arg(&self, def_id: DefId) -> &FuncArg {
+        match &self.get_def(def_id).kind {
+            DefKind::FuncArg(f) => f,
+            _ => panic!("expected arg"),
+        }
+    }
+
+    pub fn get_arg_mut(&mut self, def_id: DefId) -> &mut FuncArg {
+        match &mut self.get_def_mut(def_id).kind {
+            DefKind::FuncArg(f) => f,
+            _ => panic!("expected arg"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -357,6 +371,7 @@ pub enum DefKind {
     Operator(Operator),
     Function(Function),
     FuncArg(FuncArg),
+    Local(Local),
 }
 
 #[derive(Debug)]
@@ -423,7 +438,7 @@ pub struct Var {
     pub owner: DefId, // Class or Struct
     pub flags: VarFlags,
 
-    pub sig: Option<VarSig>,
+    pub ty: Option<Ty>,
 }
 
 #[derive(Debug)]
@@ -464,7 +479,7 @@ pub struct Function {
     pub delegate_prop: Option<DefId>,
 
     pub sig: Option<FuncSig>,
-    pub contents: Option<Statements>,
+    pub contents: Option<FuncContents>,
 }
 
 #[derive(Debug)]
@@ -476,17 +491,24 @@ pub struct FuncSig {
 #[derive(Debug)]
 pub struct FuncArg {
     pub name: Identifier,
-    pub span: Option<Span>,
     pub owner: DefId,
     pub flags: ArgFlags,
 
-    pub sig: Option<VarSig>,
+    pub ty: Ty,
 }
 
 #[derive(Debug)]
-pub struct VarSig {
+pub struct Local {
+    pub name: Identifier,
+    pub owner: DefId,
+
     pub ty: Ty,
-    pub dim: Option<u32>,
+}
+
+#[derive(Debug)]
+pub struct FuncContents {
+    pub locals: Box<[DefId]>,
+    pub statements: Option<Statements>,
 }
 
 #[derive(Debug)]

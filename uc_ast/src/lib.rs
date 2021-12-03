@@ -93,6 +93,7 @@ pub enum ConstVal {
 pub struct VarInstance {
     pub name: Identifier,
     pub count: DimCount,
+    pub span: Span,
 }
 
 #[derive(Debug)]

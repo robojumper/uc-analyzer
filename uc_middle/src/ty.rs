@@ -1,154 +1,178 @@
-use std::num::NonZeroU32;
-
 use crate::DefId;
 
-/// Indicates an array type.
-const ARRAY_MASK: u32 = 1 << 31;
-/// Indicates an opaque type created by a `native iterator` function in
-/// a `foreach` loop.
-const ITERATOR_MASK: u32 = 1 << 30;
-const BASE_TY_MASK: u32 = 0xF << 26;
-const DEF_ID_MASK: u32 = 0x3FFFFFF;
-
-pub const MAX_DEF_ID: u32 = DEF_ID_MASK;
-
-const __ASSERT_COVERED: () = {
-    let assert_mask_covers_all_bits = [()];
-    let combined_mask = ARRAY_MASK | ITERATOR_MASK | BASE_TY_MASK | DEF_ID_MASK;
-    assert_mask_covers_all_bits[((combined_mask != !0) as bool) as usize]
-};
+#[derive(Clone, Copy, Debug)]
+enum BaseTyCtor {
+    /// Placeholder type, only valid for native iterator function
+    /// arguments where the types aren't known in advance.
+    Placeholder,
+    /// Base `int` type.
+    Int,
+    /// Base `float` type.
+    Float,
+    /// Base `bool` type.
+    Bool,
+    /// Base `byte` type, or an enum if def index != 0
+    /// TODO: Add an Enum type and subtyping/coercion?
+    Byte,
+    /// Base `string` type.
+    String,
+    /// Base `name` type.
+    Name,
+    /// Any struct type, with def index referencing the struct.
+    Struct,
+    /// Any object type, with def index referencing the class.
+    Object,
+    /// Any class type, with def index referencing the class.
+    Class,
+    /// Any interface type, with def index referencing the interface.
+    Interface,
+    /// Any delegate type, with def index referencing the function.
+    Delegate,
+}
 
 #[derive(Clone, Copy, Debug)]
-enum BaseTy {
-    /// Base `int` type.
-    Int = 1 << 26,
-    /// Base `float` type.
-    Float = 2 << 26,
-    /// Base `bool` type.
-    Bool = 3 << 26,
-    /// Base `byte` type, or an enum if def index != 0
-    Byte = 4 << 26,
-    /// Base `string` type.
-    String = 5 << 26,
-    /// Base `name` type.
-    Name = 6 << 26,
-    /// Any struct type, with def index referencing the struct.
-    Struct = 7 << 26,
-    /// Any object type, with def index referencing the class.
-    Object = 8 << 26,
-    /// Any class type, with def index referencing the class.
-    Class = 9 << 26,
-    /// Any interface type, with def index referencing the interface.
-    Interface = 10 << 26,
-    /// Any delegate type, with def index referencing the function.
-    Delegate = 11 << 26,
+/// The mutually exclusive, non-recursive type decorators.
+enum TyDecorator {
+    /// The referred-to type, unchanged.
+    None,
+    /// The result of a native iterator call. The u16 is an index into
+    /// a side table linking back to the function definition, the type is
+    /// the specific iterable type in the function, if any.
+    /// For an iterator over an array<T>, the substitution is T.
+    /// For a native function iterator, this is the type of the second argument.
+    Iterator(u16),
+    /// The `array<T>` type, with the referred-to type in place of the `T`.
+    DynArray,
+    /// The `T _[X]` type, with the referred-to type in place of the `T`
+    /// and the size in place of the `X`.
+    StaticArray(u16),
 }
 
-/// Compact representation of an UnrealScript type.
-/// - NonZero to accomodate Option/None optimization.
-/// - array<_> represented with a single bit flag because
-///   array<array<_>> is not supported by the language.
-/// - base type represented with 4 bits
-/// - 27 bits for indexing back into the thing that defined the
-///   type (134 million classes+structs+enums+interfaces).
-#[derive(Copy, Clone, Eq, PartialEq)]
-#[repr(transparent)]
-pub struct Ty(NonZeroU32);
-
-impl std::fmt::Debug for Ty {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut builder = f.debug_tuple("Ty");
-        builder.field(&self.base_ty());
-        if let Some(id) = self.get_def() {
-            builder.field(&id);
-        }
-        builder.finish()
-    }
+#[derive(Copy, Clone, Debug)]
+pub struct Ty {
+    decorator: TyDecorator,
+    base_ctor: BaseTyCtor,
+    subst: Option<DefId>,
 }
+
+const _: () = assert!(std::mem::size_of::<Ty>() == std::mem::size_of::<Option<Ty>>());
 
 impl Ty {
-    pub const INT: Self = Ty(NonZeroU32::new(BaseTy::Int as u32).unwrap());
-    pub const FLOAT: Self = Ty(NonZeroU32::new(BaseTy::Float as u32).unwrap());
-    pub const BOOL: Self = Ty(NonZeroU32::new(BaseTy::Bool as u32).unwrap());
-    pub const BYTE: Self = Ty(NonZeroU32::new(BaseTy::Byte as u32).unwrap());
-    pub const STRING: Self = Ty(NonZeroU32::new(BaseTy::String as u32).unwrap());
-    pub const NAME: Self = Ty(NonZeroU32::new(BaseTy::Name as u32).unwrap());
+    pub const PLACEHOLDER: Ty = Ty::simple(BaseTyCtor::Placeholder);
+    pub const INT: Ty = Ty::simple(BaseTyCtor::Int);
+    pub const FLOAT: Ty = Ty::simple(BaseTyCtor::Float);
+    pub const BOOL: Ty = Ty::simple(BaseTyCtor::Bool);
+    pub const BYTE: Ty = Ty::simple(BaseTyCtor::Byte);
+    pub const NAME: Ty = Ty::simple(BaseTyCtor::Name);
+    pub const STRING: Ty = Ty::simple(BaseTyCtor::String);
 
-    pub fn get_def(&self) -> Option<NonZeroU32> {
-        if self.is_array() {
-            return None;
-        }
-        match self.base_ty() {
-            BaseTy::Int | BaseTy::Float | BaseTy::Bool | BaseTy::String | BaseTy::Name => None,
-            BaseTy::Struct
-            | BaseTy::Object
-            | BaseTy::Class
-            | BaseTy::Interface
-            | BaseTy::Delegate => Some(NonZeroU32::new(self.0.get() & DEF_ID_MASK).unwrap()),
-            BaseTy::Byte => NonZeroU32::new(self.0.get() & DEF_ID_MASK),
+    const fn simple(ctor: BaseTyCtor) -> Ty {
+        Self {
+            decorator: TyDecorator::None,
+            base_ctor: ctor,
+            subst: None,
         }
     }
 
-    fn base_ty(&self) -> BaseTy {
-        match self.0.get() & BASE_TY_MASK {
-            const { BaseTy::Int as u32 } => BaseTy::Int,
-            const { BaseTy::Float as u32 } => BaseTy::Float,
-            const { BaseTy::Bool as u32 } => BaseTy::Bool,
-            const { BaseTy::Byte as u32 } => BaseTy::Byte,
-            const { BaseTy::String as u32 } => BaseTy::String,
-            const { BaseTy::Name as u32 } => BaseTy::Name,
-            const { BaseTy::Struct as u32 } => BaseTy::Struct,
-            const { BaseTy::Object as u32 } => BaseTy::Object,
-            const { BaseTy::Class as u32 } => BaseTy::Class,
-            const { BaseTy::Interface as u32 } => BaseTy::Interface,
-            const { BaseTy::Delegate as u32 } => BaseTy::Delegate,
-            _ => unreachable!(),
+    const fn with_def(ctor: BaseTyCtor, id: DefId) -> Ty {
+        Self {
+            decorator: TyDecorator::None,
+            base_ctor: ctor,
+            subst: Some(id),
+        }
+    }
+
+    pub fn get_def(&self) -> Option<DefId> {
+        self.subst
+    }
+
+    #[inline]
+    pub fn dyn_array_from(inner: Self) -> Ty {
+        assert!(inner.is_undecorated());
+        Self {
+            subst: inner.subst,
+            decorator: TyDecorator::DynArray,
+            base_ctor: inner.base_ctor,
         }
     }
 
     #[inline]
-    pub fn array_from(inner: Self) -> Ty {
-        assert!(!inner.is_array());
-        Ty(NonZeroU32::new(inner.0.get() | ARRAY_MASK).unwrap())
+    pub fn stat_array_from(inner: Self, count: u16) -> Ty {
+        assert!(inner.is_undecorated());
+        Self {
+            subst: inner.subst,
+            decorator: TyDecorator::StaticArray(count),
+            base_ctor: inner.base_ctor,
+        }
+    }
+
+    #[inline]
+    pub fn iterator(subst: Self, iterator_idx: u16) -> Ty {
+        assert!(subst.is_undecorated());
+        Self {
+            subst: subst.subst,
+            decorator: TyDecorator::Iterator(iterator_idx),
+            base_ctor: subst.base_ctor,
+        }
     }
 
     #[inline]
     pub fn object_from(id: DefId) -> Ty {
-        Ty(NonZeroU32::new(BaseTy::Object as u32 | id.0.get()).unwrap())
+        Ty::with_def(BaseTyCtor::Object, id)
     }
 
     #[inline]
     pub fn class_from(id: DefId) -> Ty {
-        Ty(NonZeroU32::new(BaseTy::Class as u32 | id.0.get()).unwrap())
+        Ty::with_def(BaseTyCtor::Class, id)
     }
 
     #[inline]
     pub fn interface_from(id: DefId) -> Ty {
-        Ty(NonZeroU32::new(BaseTy::Interface as u32 | id.0.get()).unwrap())
+        Ty::with_def(BaseTyCtor::Interface, id)
     }
 
     #[inline]
     pub fn enum_from(id: DefId) -> Ty {
-        Ty(NonZeroU32::new(BaseTy::Byte as u32 | id.0.get()).unwrap())
+        Ty::with_def(BaseTyCtor::Byte, id)
     }
 
     #[inline]
     pub fn struct_from(id: DefId) -> Ty {
-        Ty(NonZeroU32::new(BaseTy::Struct as u32 | id.0.get()).unwrap())
+        Ty::with_def(BaseTyCtor::Struct, id)
     }
 
     #[inline]
     pub fn delegate_from(id: DefId) -> Ty {
-        Ty(NonZeroU32::new(BaseTy::Delegate as u32 | id.0.get()).unwrap())
+        Ty::with_def(BaseTyCtor::Delegate, id)
     }
 
     #[inline]
-    pub fn is_array(&self) -> bool {
-        self.0.get() & ARRAY_MASK != 0
+    pub fn is_class(&self) -> bool {
+        self.is_undecorated() && matches!(self.base_ctor, BaseTyCtor::Class)
+    }
+
+    #[inline]
+    pub fn is_object(&self) -> bool {
+        self.is_undecorated() && matches!(self.base_ctor, BaseTyCtor::Object)
+    }
+
+    #[inline]
+    pub fn is_undecorated(&self) -> bool {
+        matches!(self.decorator, TyDecorator::None)
+    }
+
+    #[inline]
+    pub fn is_dyn_array(&self) -> bool {
+        matches!(self.decorator, TyDecorator::DynArray)
+    }
+
+    #[inline]
+    pub fn is_stat_array(&self) -> bool {
+        matches!(self.decorator, TyDecorator::StaticArray(_))
     }
 
     #[inline]
     pub fn is_iterator(&self) -> bool {
-        self.0.get() & ITERATOR_MASK != 0
+        matches!(self.decorator, TyDecorator::Iterator(_))
     }
 }
