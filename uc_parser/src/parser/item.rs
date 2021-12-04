@@ -2,7 +2,7 @@ use uc_ast::{
     ClassDef, ClassHeader, ConstDef, ConstVal, DimCount, EnumDef, FuncArg, FuncBody, FuncDef,
     FuncName, FuncSig, LocalDef, StateDef, Statement, StructDef, Ty, VarDef, VarInstance,
 };
-use uc_def::{ClassFlags, Op};
+use uc_def::{ArgFlags, ClassFlags, Op};
 
 use super::{ParseError, Parser};
 use crate::{
@@ -365,7 +365,7 @@ impl Parser<'_> {
 
             let arg_span = self.marker();
 
-            let mods = self.parse_kws(&*modifiers::ARG_MODIFIERS)?;
+            let mut mods = self.parse_kws(&*modifiers::ARG_MODIFIERS)?;
             let ty = self.parse_ty(None)?;
             let name = self.expect_ident()?;
 
@@ -391,6 +391,7 @@ impl Parser<'_> {
             };
 
             let def = if self.eat(sig!(Eq)) {
+                mods.flags = mods.flags.union(ArgFlags::OPTIONAL);
                 Some(self.parse_base_expression()?)
             } else {
                 None

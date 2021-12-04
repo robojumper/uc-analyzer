@@ -168,7 +168,20 @@ fn main() {
             .collect(),
     };
 
-    let (defs, resolver) = uc_ast_lowering::lower(input);
+    let (defs, resolver, body_errs) = uc_ast_lowering::lower(input);
+
+    body_errs.iter().for_each(|b| {
+        let err = ErrorReport {
+            code: "body-lowering-error",
+            msg: format!("failed to lower function body: {:?}", b.kind),
+            fragments: vec![Fragment {
+                full_text: b.span,
+                inlay_messages: vec![("here".to_owned(), b.span)],
+            }],
+        };
+        sources.emit_err(&err);
+    });
+
     let mut errs = vec![];
     /*
     errs.extend(bad_type_name::run(&defs, &resolver, &sources));

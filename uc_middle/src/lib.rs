@@ -197,14 +197,19 @@ impl Defs {
                 }
             }
             DefKind::Enum(e) => self.walk_scopes_inner(e.owning_class, kind, cb)?,
-            DefKind::Struct(s) => match kind {
-                ScopeWalkKind::Access => {
-                    if let Some(extends) = s.extends {
-                        self.walk_scopes_inner(extends, kind, cb)?
+            DefKind::Struct(s) => {
+                cb(def.id)?;
+                match kind {
+                    ScopeWalkKind::Access => {
+                        if let Some(extends) = s.extends {
+                            self.walk_scopes_inner(extends, kind, cb)?
+                        }
+                    }
+                    ScopeWalkKind::Definitions => {
+                        self.walk_scopes_inner(s.owning_class, kind, cb)?
                     }
                 }
-                ScopeWalkKind::Definitions => self.walk_scopes_inner(s.owning_class, kind, cb)?,
-            },
+            }
             DefKind::State(s) => {
                 cb(def.id)?;
                 match kind {

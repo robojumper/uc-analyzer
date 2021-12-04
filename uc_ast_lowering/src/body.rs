@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use uc_def::{ArgFlags, FuncFlags};
+use uc_files::Span;
 use uc_middle::{
     body::{
         Block, BlockId, Body, Expr, ExprId, ExprKind, ExprTy, Literal, LoopDesugaring,
@@ -23,7 +24,13 @@ struct FuncLowerer<'hir, 'a: 'hir> {
 }
 
 #[derive(Debug)]
-pub enum BodyError {
+pub struct BodyError {
+    pub kind: BodyErrorKind,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub enum BodyErrorKind {
     /// An expression evaluating to no type at all was found where a type was expected.
     VoidType { expected: Option<Ty> },
     /// Indexing into not-an-array.
@@ -50,10 +57,16 @@ pub enum BodyError {
     MissingNonOptional,
     /// An out/by-ref argument was not a place
     ByRefArgNotPlace,
+    /// TODO
+    NotYetImplemented,
 }
 
 impl<'hir> LoweringContext<'hir> {
-    pub fn lower_body(&self, func_scope: DefId, statements: &[uc_ast::Statement]) -> Body {
+    pub fn lower_body(
+        &self,
+        func_scope: DefId,
+        statements: &[uc_ast::Statement],
+    ) -> Result<Body, BodyError> {
         let class_did = self.defs.get_item_class(func_scope);
         let class_ty = self.defs.get_class(class_did).self_ty;
         let self_ty = if self
@@ -75,9 +88,7 @@ impl<'hir> LoweringContext<'hir> {
             class_did,
             self_ty,
         };
-        lowerer
-            .lower_body(statements)
-            .expect("failed to lower func body")
+        lowerer.lower_body(statements)
     }
 }
 
@@ -173,7 +184,12 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     },
                 )
             }
-            uc_ast::StatementKind::ForeachStatement { source, run } => todo!(),
+            uc_ast::StatementKind::ForeachStatement { source, run } => {
+                return Err(BodyError {
+                    kind: BodyErrorKind::NotYetImplemented,
+                    span: stmt.span,
+                })
+            }
             uc_ast::StatementKind::WhileStatement { cond, run } => {
                 let c = self.lower_expr(cond, Some(Ty::BOOL), false, false)?;
                 let mut inner_stmts = self.lower_statements(&run.stmts)?;
@@ -224,10 +240,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             }
             uc_ast::StatementKind::SwitchStatement { scrutinee, cases } => {
                 let scrut = self.lower_expr(scrutinee, None, false, false)?;
-                let scrut_ty = self
-                    .body
-                    .get_expr_ty(scrut)
-                    .ty_or(BodyError::VoidType { expected: None })?;
+                let scrut_ty = self.body.get_expr_ty(scrut).ty_or(BodyError {
+                    kind: BodyErrorKind::VoidType { expected: None },
+                    span: scrutinee.span,
+                })?;
                 let mut default = None;
                 let mut clauses = vec![];
                 let mut stmts = vec![];
@@ -271,14 +287,18 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     .transpose()?;
                 StatementKind::Return(e)
             }
-            uc_ast::StatementKind::Label { name } => todo!(),
+            uc_ast::StatementKind::Label { name } => {
+                return Err(BodyError {
+                    kind: BodyErrorKind::NotYetImplemented,
+                    span: stmt.span,
+                })
+            }
             uc_ast::StatementKind::Assignment { lhs, rhs } => {
                 let l = self.lower_expr(lhs, None, true, false)?;
-                let l_ty = self
-                    .body
-                    .get_expr(l)
-                    .ty
-                    .ty_or(BodyError::VoidType { expected: None })?;
+                let l_ty = self.body.get_expr(l).ty.ty_or(BodyError {
+                    kind: BodyErrorKind::VoidType { expected: None },
+                    span: lhs.span,
+                })?;
                 assert!(!l_ty.is_stat_array());
                 let r = self.lower_expr(rhs, Some(l_ty), false, false)?;
                 StatementKind::Assign(l, r)
@@ -299,25 +319,31 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         to_type: Ty,
     ) -> Result<ExprKind, BodyError> {
         let expr = self.lower_expr(inner_expr, None, false, false)?;
-        let expr_ty = self
-            .body
-            .get_expr_ty(expr)
-            .ty_or(BodyError::VoidType { expected: None })?;
+        let expr_ty = self.body.get_expr_ty(expr).ty_or(BodyError {
+            kind: BodyErrorKind::VoidType { expected: None },
+            span: inner_expr.span,
+        })?;
         if self.ty_match(expr_ty, to_type).is_some() {
             // We cast to a subtype. Note the reversed arguments
         } else {
             let cc = self.conversion_cost(to_type, expr_ty, true);
             match cc {
                 TyConversionCost::Same | TyConversionCost::Generalization(_) => {
-                    return Err(BodyError::UnnecessaryCast {
-                        to: to_type,
-                        from: expr_ty,
+                    return Err(BodyError {
+                        kind: BodyErrorKind::UnnecessaryCast {
+                            to: to_type,
+                            from: expr_ty,
+                        },
+                        span: inner_expr.span,
                     })
                 }
                 TyConversionCost::Disallowed => {
-                    return Err(BodyError::InvalidCast {
-                        to: to_type,
-                        from: expr_ty,
+                    return Err(BodyError {
+                        kind: BodyErrorKind::InvalidCast {
+                            to: to_type,
+                            from: expr_ty,
+                        },
+                        span: inner_expr.span,
                     })
                 }
                 TyConversionCost::Expansion
@@ -336,15 +362,22 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         &mut self,
         sig: &'hir FuncSig,
         args: &'hir [Option<uc_ast::Expr>],
+        span: Span,
         func_flags: FuncFlags,
     ) -> Result<(ExprTy, Vec<Option<ExprId>>), BodyError> {
         if func_flags.contains(FuncFlags::ITERATOR) {
-            todo!()
+            Err(BodyError {
+                kind: BodyErrorKind::NotYetImplemented,
+                span,
+            })
         } else {
             if args.len() > sig.args.len() {
-                return Err(BodyError::ArgCountError {
-                    expected: sig.args.len() as u32,
-                    got: args.len() as u32,
+                return Err(BodyError {
+                    kind: BodyErrorKind::ArgCountError {
+                        expected: sig.args.len() as u32,
+                        got: args.len() as u32,
+                    },
+                    span,
                 });
             }
             let mut arg_exprs = vec![];
@@ -355,7 +388,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             {
                 let arg = self.ctx.defs.get_arg(arg_def);
                 if !arg.flags.contains(ArgFlags::OPTIONAL) && arg_expr.is_none() {
-                    return Err(BodyError::MissingNonOptional);
+                    return Err(BodyError {
+                        kind: BodyErrorKind::MissingNonOptional,
+                        span,
+                    });
                 }
                 if let Some(arg_expr) = arg_expr {
                     let exp_id = self.lower_expr(
@@ -370,7 +406,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         .contains(ArgFlags::OUT | ArgFlags::OUTONLY | ArgFlags::REF)
                         && !matches!(expr.kind, ExprKind::Place(_))
                     {
-                        return Err(BodyError::ByRefArgNotPlace);
+                        return Err(BodyError {
+                            kind: BodyErrorKind::ByRefArgNotPlace,
+                            span,
+                        });
                     }
                     arg_exprs.push(Some(exp_id));
                 } else {
@@ -404,27 +443,30 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         let (kind, ty) = match &expr.kind {
             uc_ast::ExprKind::IndexExpr { base, idx } => {
                 let idx = self.lower_expr(idx, Some(Ty::INT), false, false)?;
-                let base = self.lower_expr(base, None, false, false)?;
-                let arr_ty = self
-                    .body
-                    .get_expr_ty(base)
-                    .ty_or(BodyError::VoidType { expected: None })?;
+                let base_id = self.lower_expr(base, None, false, false)?;
+                let arr_ty = self.body.get_expr_ty(base_id).ty_or(BodyError {
+                    kind: BodyErrorKind::VoidType { expected: None },
+                    span: base.span,
+                })?;
                 if !arr_ty.is_dyn_array() && !arr_ty.is_stat_array() {
-                    return Err(BodyError::NonArrayType { found: arr_ty });
+                    return Err(BodyError {
+                        kind: BodyErrorKind::NonArrayType { found: arr_ty },
+                        span: base.span,
+                    });
                 }
                 let inner_ty = arr_ty.drop_array();
                 (
-                    ExprKind::Place(PlaceExprKind::Index(base, idx)),
+                    ExprKind::Place(PlaceExprKind::Index(base_id, idx)),
                     ExprTy::Ty(inner_ty),
                 )
             }
             uc_ast::ExprKind::FieldExpr { lhs, rhs } => {
                 // TODO: Pseudo-field-exprs like x.?default.field / x.?const.field
                 let l = self.lower_expr(lhs, None, false, false)?;
-                let ty = self
-                    .body
-                    .get_expr_ty(l)
-                    .ty_or(BodyError::VoidType { expected: None })?;
+                let ty = self.body.get_expr_ty(l).ty_or(BodyError {
+                    kind: BodyErrorKind::VoidType { expected: None },
+                    span: lhs.span,
+                })?;
                 if ty.is_dyn_array() {
                     assert!(rhs == "Length");
                     (
@@ -441,7 +483,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         .ctx
                         .resolver
                         .get_scoped_var(scope, self.ctx.defs, ScopeWalkKind::Access, rhs)
-                        .unwrap_or_else(|e| panic!("{} not found: {:?}", rhs, expr));
+                        .map_err(|_| BodyError {
+                            kind: BodyErrorKind::SymNotFound { name: rhs.clone() },
+                            span: expr.span,
+                        })?;
                     let var = self.ctx.defs.get_var(prop);
                     (
                         ExprKind::Place(PlaceExprKind::Field(l, prop)),
@@ -454,38 +499,115 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             uc_ast::ExprKind::FuncCallExpr { lhs, name, args } => {
                 match lhs {
                     Some(lhs) => {
-                        if matches!(&lhs.kind, uc_ast::ExprKind::FieldExpr { rhs, .. } | uc_ast::ExprKind::SymExpr { sym: rhs } if rhs == "static") {
-                            match &lhs.kind {
-                                uc_ast::ExprKind::FieldExpr { lhs, rhs } => todo!(),
-                                uc_ast::ExprKind::SymExpr { sym } => {
-                                    todo!()
+                        if matches!(&lhs.kind, uc_ast::ExprKind::FieldExpr { rhs, .. } | uc_ast::ExprKind::SymExpr { sym: rhs } if rhs == "static")
+                        {
+                            let receiver = match &lhs.kind {
+                                uc_ast::ExprKind::FieldExpr { lhs, .. } => match &lhs.kind {
+                                    uc_ast::ExprKind::LiteralExpr { lit } => {
+                                        match self.ast_to_middle_lit(lit, lhs.span)? {
+                                            (x @ Literal::Class(_), ty) => {
+                                                self.body.add_expr(Expr {
+                                                    kind: ExprKind::Value(ValueExprKind::Lit(x)),
+                                                    ty: ExprTy::Ty(ty),
+                                                    span: Some(lhs.span),
+                                                })
+                                            }
+                                            _ => {
+                                                return Err(BodyError {
+                                                    kind: BodyErrorKind::NotYetImplemented,
+                                                    span: expr.span,
+                                                })
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        return Err(BodyError {
+                                            kind: BodyErrorKind::NotYetImplemented,
+                                            span: expr.span,
+                                        })
+                                    }
                                 },
-                                _ => unreachable!()
-                            }
+                                uc_ast::ExprKind::SymExpr { .. } => self.body.add_expr(Expr {
+                                    kind: ExprKind::Value(ValueExprKind::Lit(Literal::Class(
+                                        self.class_did,
+                                    ))),
+                                    ty: ExprTy::Ty(Ty::class_from(self.class_did)),
+                                    span: Some(lhs.span),
+                                }),
+                                _ => unreachable!(),
+                            };
+
+                            let receiver_def = self.body.get_expr_ty(receiver);
+
+                            let func = self
+                                .ctx
+                                .resolver
+                                .get_scoped_func(
+                                    receiver_def
+                                        .expect_ty("just created class")
+                                        .get_def()
+                                        .unwrap(),
+                                    self.ctx.defs,
+                                    ScopeWalkKind::Access,
+                                    name,
+                                )
+                                .map_err(|_| BodyError {
+                                    kind: BodyErrorKind::FuncNotFound { name: name.clone() },
+                                    span: expr.span,
+                                })?;
+                            let def = self.ctx.defs.get_func(func);
+                            assert!(!def.flags.intersects(
+                                FuncFlags::OPERATOR
+                                    | FuncFlags::PREOPERATOR
+                                    | FuncFlags::POSTOPERATOR
+                                    | FuncFlags::ITERATOR
+                            ));
+
+                            let (ret_ty, arg_exprs) = self.lower_call_sig(
+                                def.sig.as_ref().unwrap(),
+                                args,
+                                expr.span,
+                                def.flags,
+                            )?;
+                            (
+                                ExprKind::Value(ValueExprKind::FuncCall(
+                                    func,
+                                    receiver,
+                                    arg_exprs.into_boxed_slice(),
+                                )),
+                                ret_ty,
+                            )
                         } else {
                             let receiver = self.lower_expr(lhs, None, false, false)?;
-                            let mut receiver_ty = self
-                                .body
-                                .get_expr_ty(receiver)
-                                .ty_or(BodyError::VoidType { expected: None })?;
+                            let mut receiver_ty =
+                                self.body.get_expr_ty(receiver).ty_or(BodyError {
+                                    kind: BodyErrorKind::VoidType { expected: None },
+                                    span: lhs.span,
+                                })?;
                             if receiver_ty.is_class() {
                                 // downgrade classes to objects
                                 receiver_ty = Ty::object_from(receiver_ty.get_def().unwrap());
                             }
 
                             if receiver_ty.is_dyn_array() {
-                                todo!("dyn array call {}", name)
+                                return Err(BodyError {
+                                    kind: BodyErrorKind::NotYetImplemented,
+                                    span: expr.span,
+                                });
                             } else if receiver_ty.is_interface() || receiver_ty.is_object() {
                                 let func = self
                                     .ctx
                                     .resolver
                                     .get_scoped_func(
-                                        self.func_scope,
+                                        receiver_ty.get_def().unwrap(),
                                         self.ctx.defs,
                                         ScopeWalkKind::Access,
                                         name,
                                     )
-                                    .map_err(|_| BodyError::FuncNotFound { name: name.clone() })?;
+                                    .map_err(|_| BodyError {
+                                        kind: BodyErrorKind::FuncNotFound { name: name.clone() },
+                                        span: lhs.span,
+                                    })?;
                                 let def = self.ctx.defs.get_func(func);
                                 assert!(!def.flags.intersects(
                                     FuncFlags::OPERATOR
@@ -494,8 +616,12 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                         | FuncFlags::ITERATOR
                                 ));
 
-                                let (ret_ty, arg_exprs) =
-                                    self.lower_call_sig(def.sig.as_ref().unwrap(), args, def.flags)?;
+                                let (ret_ty, arg_exprs) = self.lower_call_sig(
+                                    def.sig.as_ref().unwrap(),
+                                    args,
+                                    expr.span,
+                                    def.flags,
+                                )?;
                                 (
                                     ExprKind::Value(ValueExprKind::FuncCall(
                                         func,
@@ -519,9 +645,12 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                         (self.lower_cast(arg, cast_ty)?, ExprTy::Ty(cast_ty))
                                     }
                                     x => {
-                                        return Err(BodyError::ArgCountError {
-                                            expected: 1,
-                                            got: x.len() as u32,
+                                        return Err(BodyError {
+                                            kind: BodyErrorKind::ArgCountError {
+                                                expected: 1,
+                                                got: x.len() as u32,
+                                            },
+                                            span: expr.span,
                                         })
                                     }
                                 }
@@ -551,10 +680,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                             })
                                         } else {
                                             self.body.add_expr(Expr {
-                                                ty: ExprTy::Ty(
-                                                    self.self_ty
-                                                        .ok_or(BodyError::InvalidSelfAccess)?,
-                                                ),
+                                                ty: ExprTy::Ty(self.self_ty.ok_or(BodyError {
+                                                    kind: BodyErrorKind::InvalidSelfAccess,
+                                                    span: expr.span,
+                                                })?),
                                                 kind: ExprKind::Place(PlaceExprKind::SelfAccess),
                                                 span: None,
                                             })
@@ -562,6 +691,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                         let (ret_ty, arg_exprs) = self.lower_call_sig(
                                             def.sig.as_ref().unwrap(),
                                             args,
+                                            expr.span,
                                             def.flags,
                                         )?;
                                         (
@@ -574,7 +704,12 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                         )
                                     }
                                     Err(_) => {
-                                        return Err(BodyError::FuncNotFound { name: name.clone() })
+                                        return Err(BodyError {
+                                            kind: BodyErrorKind::FuncNotFound {
+                                                name: name.clone(),
+                                            },
+                                            span: expr.span,
+                                        })
                                     }
                                 }
                             }
@@ -582,7 +717,12 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     }
                 }
             }
-            uc_ast::ExprKind::DelegateCallExpr { lhs, args } => todo!(),
+            uc_ast::ExprKind::DelegateCallExpr { lhs, args } => {
+                return Err(BodyError {
+                    kind: BodyErrorKind::NotYetImplemented,
+                    span: expr.span,
+                })
+            }
             uc_ast::ExprKind::ClassMetaCastExpr { ty, expr } => {
                 let cast_ty = self.ctx.decode_ast_ty(ty, self.func_scope).unwrap();
                 (self.lower_cast(expr, cast_ty)?, ExprTy::Ty(cast_ty))
@@ -601,21 +741,27 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             .transpose()?,
                     ),
                     x => {
-                        return Err(BodyError::ArgCountError {
-                            expected: 2,
-                            got: x.len() as u32,
+                        return Err(BodyError {
+                            kind: BodyErrorKind::ArgCountError {
+                                expected: 2,
+                                got: x.len() as u32,
+                            },
+                            span: expr.span,
                         })
                     }
                 };
                 let cls_expr = self.lower_expr(cls, None, false, false)?;
-                let cls_ty = self
-                    .body
-                    .get_expr_ty(cls_expr)
-                    .ty_or(BodyError::VoidType { expected: None })?;
+                let cls_ty = self.body.get_expr_ty(cls_expr).ty_or(BodyError {
+                    kind: BodyErrorKind::VoidType { expected: None },
+                    span: cls.span,
+                })?;
                 let inst_ty = if cls_ty.is_class() {
                     cls_ty.instanciate_class()
                 } else {
-                    return Err(BodyError::NonClassType { found: cls_ty });
+                    return Err(BodyError {
+                        kind: BodyErrorKind::NonClassType { found: cls_ty },
+                        span: cls.span,
+                    });
                 };
                 let arch = arch
                     .as_ref()
@@ -632,9 +778,24 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     ExprTy::Ty(inst_ty),
                 )
             }
-            uc_ast::ExprKind::PreOpExpr { op, rhs } => todo!(),
-            uc_ast::ExprKind::PostOpExpr { lhs, op } => todo!(),
-            uc_ast::ExprKind::BinOpExpr { lhs, op, rhs } => todo!(),
+            uc_ast::ExprKind::PreOpExpr { op, rhs } => {
+                return Err(BodyError {
+                    kind: BodyErrorKind::NotYetImplemented,
+                    span: expr.span,
+                })
+            }
+            uc_ast::ExprKind::PostOpExpr { lhs, op } => {
+                return Err(BodyError {
+                    kind: BodyErrorKind::NotYetImplemented,
+                    span: expr.span,
+                })
+            }
+            uc_ast::ExprKind::BinOpExpr { lhs, op, rhs } => {
+                return Err(BodyError {
+                    kind: BodyErrorKind::NotYetImplemented,
+                    span: expr.span,
+                })
+            }
             uc_ast::ExprKind::TernExpr { cond, then, alt } => {
                 let e = self.lower_expr(cond, Some(Ty::BOOL), false, false)?;
                 let then = self.lower_expr(then, passdown_expected_type, false, false)?;
@@ -653,6 +814,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     ScopeWalkKind::Access,
                     sym,
                 ) {
+                    return Err(BodyError {
+                        kind: BodyErrorKind::NotYetImplemented,
+                        span: expr.span,
+                    });
                     (
                         ExprKind::Value(ValueExprKind::Const(konst)),
                         ExprTy::Ty(self.konst_ty(konst)),
@@ -677,7 +842,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     match &def.kind {
                         uc_middle::DefKind::Var(var) => {
                             let s = self.body.add_expr(Expr {
-                                ty: ExprTy::Ty(self.self_ty.ok_or(BodyError::InvalidSelfAccess)?),
+                                ty: ExprTy::Ty(self.self_ty.ok_or(BodyError {
+                                    kind: BodyErrorKind::InvalidSelfAccess,
+                                    span: expr.span,
+                                })?),
                                 kind: ExprKind::Place(PlaceExprKind::SelfAccess),
                                 span: None,
                             });
@@ -701,24 +869,30 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         ExprKind::Place(PlaceExprKind::SelfAccess),
                         ExprTy::Ty(self.self_ty.expect("access to self var in static func")),
                     )
+                } else if sym == "super" {
+                    return Err(BodyError {
+                        kind: BodyErrorKind::NotYetImplemented,
+                        span: expr.span,
+                    });
                 } else {
-                    todo!(
-                        "unresolved symbol {} in {:?}, scope: {:?}",
-                        sym,
-                        expr,
-                        self.ctx.defs.get_func(self.func_scope)
-                    )
+                    return Err(BodyError {
+                        kind: BodyErrorKind::SymNotFound { name: sym.clone() },
+                        span: expr.span,
+                    });
                 }
             }
             uc_ast::ExprKind::LiteralExpr { lit } => {
-                let (lit, ty) = self.ast_to_middle_lit(lit);
+                let (lit, ty) = self.ast_to_middle_lit(lit, expr.span)?;
                 (ExprKind::Value(ValueExprKind::Lit(lit)), ExprTy::Ty(ty))
             }
         };
 
         if let Some(expected_ty) = expected_type {
-            let got_non_void = ty.ty_or(BodyError::VoidType {
-                expected: Some(expected_ty),
+            let got_non_void = ty.ty_or(BodyError {
+                kind: BodyErrorKind::VoidType {
+                    expected: Some(expected_ty),
+                },
+                span: expr.span,
             })?;
             if self.ty_match(expected_ty, got_non_void).is_some() {
                 Ok(self.body.add_expr(Expr {
@@ -728,9 +902,12 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 }))
             } else {
                 match ty::classify_conversion(got_non_void, expected_ty) {
-                    ty::ConversionClassification::Forbidden => Err(BodyError::TyMismatch {
-                        expected: expected_ty,
-                        found: got_non_void,
+                    ty::ConversionClassification::Forbidden => Err(BodyError {
+                        kind: BodyErrorKind::TyMismatch {
+                            expected: expected_ty,
+                            found: got_non_void,
+                        },
+                        span: expr.span,
                     }),
                     ty::ConversionClassification::Allowed { auto, truncation } => {
                         if auto || coerce {
@@ -749,9 +926,12 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                 span: Some(expr.span),
                             }))
                         } else {
-                            Err(BodyError::MissingCast {
-                                to: expected_ty,
-                                from: got_non_void,
+                            Err(BodyError {
+                                kind: BodyErrorKind::MissingCast {
+                                    to: expected_ty,
+                                    from: got_non_void,
+                                },
+                                span: expr.span,
                             })
                         }
                     }
@@ -789,9 +969,13 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         }
     }
 
-    fn ast_to_middle_lit(&self, lit: &uc_ast::Literal) -> (Literal, Ty) {
+    fn ast_to_middle_lit(
+        &self,
+        lit: &uc_ast::Literal,
+        span: Span,
+    ) -> Result<(Literal, Ty), BodyError> {
         match lit {
-            uc_ast::Literal::None => (Literal::None, Ty::NONE),
+            uc_ast::Literal::None => Ok((Literal::None, Ty::NONE)),
             uc_ast::Literal::ObjReference(a, b) => {
                 if a == "class" {
                     let parts = b
@@ -806,32 +990,41 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             .ctx
                             .resolver
                             .get_ty(self.func_scope, self.ctx.defs, name)
-                            .expect("need class"),
+                            .map_err(|e| BodyError {
+                                kind: BodyErrorKind::SymNotFound { name: name.clone() },
+                                span,
+                            })?,
                         [package, name] => self
                             .ctx
                             .resolver
                             .get_ty_in(Some(self.func_scope), self.ctx.defs, package, name)
-                            .expect("need class"),
+                            .map_err(|e| BodyError {
+                                kind: BodyErrorKind::SymNotFound { name: name.clone() },
+                                span,
+                            })?,
                         [..] => panic!("too many name parts"),
                     };
 
-                    (
+                    Ok((
                         Literal::Class(referenced_class),
                         Ty::class_from(referenced_class),
-                    )
+                    ))
                 } else {
                     let ty = self
                         .ctx
                         .resolver
                         .get_ty(self.func_scope, self.ctx.defs, a)
-                        .expect("need class");
-                    (Literal::Object(ty), Ty::object_from(ty))
+                        .map_err(|e| BodyError {
+                            kind: BodyErrorKind::SymNotFound { name: a.clone() },
+                            span,
+                        })?;
+                    Ok((Literal::Object(ty), Ty::object_from(ty)))
                 }
             }
-            uc_ast::Literal::Number => (Literal::Float, Ty::FLOAT),
-            uc_ast::Literal::Bool => (Literal::Bool, Ty::BOOL),
-            uc_ast::Literal::Name => (Literal::Name, Ty::NAME),
-            uc_ast::Literal::String(_) => (Literal::String, Ty::STRING),
+            uc_ast::Literal::Number => Ok((Literal::Float, Ty::FLOAT)),
+            uc_ast::Literal::Bool => Ok((Literal::Bool, Ty::BOOL)),
+            uc_ast::Literal::Name => Ok((Literal::Name, Ty::NAME)),
+            uc_ast::Literal::String(_) => Ok((Literal::String, Ty::STRING)),
         }
     }
 

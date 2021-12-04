@@ -18,6 +18,7 @@
 
 use std::{collections::HashMap, str::FromStr};
 
+use body::BodyError;
 use resolver::ResolverContext;
 use uc_ast::{DimCount, Hir};
 use uc_def::{ArgFlags, ClassFlags, FuncFlags, StructFlags, VarFlags};
@@ -83,7 +84,7 @@ impl<'defs> LoweringContext<'defs> {
         Defs::add_def(self, f)
     }
 
-    fn run(&mut self, input: &LoweringInput) {
+    fn run(&mut self, input: &LoweringInput) -> Vec<BodyError> {
         let mut backrefs = HirBackrefs::default();
         self.create_packages_class_frames(&input.packages, &mut backrefs);
         self.discover_items(&mut backrefs);
@@ -91,7 +92,7 @@ impl<'defs> LoweringContext<'defs> {
         self.add_builtin_items();
         self.resolve_sigs(&backrefs);
         //println!("{:?}", self.defs);
-        self.lower_bodies(&backrefs.funcs);
+        self.lower_bodies(&backrefs.funcs)
     }
 
     /// Create DefIds for packages and classes
@@ -856,19 +857,31 @@ impl<'defs> LoweringContext<'defs> {
         })
     }
 
-    fn lower_bodies<'hir>(&mut self, funcs: &HashMap<DefId, &'hir uc_ast::FuncDef>) {
+    fn lower_bodies<'hir>(
+        &mut self,
+        funcs: &HashMap<DefId, &'hir uc_ast::FuncDef>,
+    ) -> Vec<BodyError> {
+        let mut body_count = 0u32;
+        let mut errs = vec![];
         for (&did, &def) in funcs {
             if let Some(body) = &def.body {
-                let body = self.lower_body(did, &body.statements);
-                dbg!(&body);
-                self.defs
-                    .get_func_mut(did)
-                    .contents
-                    .as_mut()
-                    .unwrap()
-                    .statements = Some(body);
+                match self.lower_body(did, &body.statements) {
+                    Ok(b) => {
+                        body_count += 1;
+                        self.defs
+                            .get_func_mut(did)
+                            .contents
+                            .as_mut()
+                            .unwrap()
+                            .statements = Some(b)
+                    }
+                    Err(e) => errs.push(e),
+                }
             }
         }
+        dbg!(body_count);
+        dbg!(errs.len());
+        errs
     }
 
     fn decode_simple_ty(&self, ident: &Identifier, scope: DefId) -> Option<Ty> {
@@ -979,7 +992,7 @@ impl<'defs> LoweringContext<'defs> {
     }
 }
 
-pub fn lower(input: LoweringInput) -> (Defs, ResolverContext) {
+pub fn lower(input: LoweringInput) -> (Defs, ResolverContext, Vec<BodyError>) {
     let mut defs = Defs::new();
 
     let mut l_ctx = LoweringContext {
@@ -988,8 +1001,8 @@ pub fn lower(input: LoweringInput) -> (Defs, ResolverContext) {
         resolver: ResolverContext::default(),
     };
 
-    l_ctx.run(&input);
+    let errs = l_ctx.run(&input);
 
     let resolver = l_ctx.resolver;
-    (defs, resolver)
+    (defs, resolver, errs)
 }
