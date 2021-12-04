@@ -253,7 +253,12 @@ impl<W: io::Write> PPrinter<W> {
     fn format_lit(&mut self, l: &Literal) -> io::Result<()> {
         match l {
             Literal::None => self.w.write_all(b"None")?,
-            Literal::ObjReference => self.w.write_all(b"`ObjectReference`")?,
+            Literal::ObjReference(a, b) => {
+                self.w.write_all(a.as_ref().as_bytes())?;
+                self.w.write_all(b"'")?;
+                self.w.write_all(b.as_ref().as_bytes())?;
+                self.w.write_all(b"'")?;
+            }
             Literal::Number => self.w.write_all(b"`Number`")?,
             Literal::Bool => self.w.write_all(b"`Bool`")?,
             Literal::Name => self.w.write_all(b"`Name`")?,

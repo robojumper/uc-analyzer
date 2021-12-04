@@ -2,6 +2,7 @@
 
 use std::{num::NonZeroU32, ops::ControlFlow};
 
+use body::Body;
 use ty::Ty;
 use uc_def::{ArgFlags, ClassFlags, FuncFlags, Op, StructFlags, VarFlags};
 use uc_files::Span;
@@ -25,7 +26,7 @@ impl Default for Defs {
 }
 
 #[derive(Clone, Copy)]
-enum ScopeWalkKind {
+pub enum ScopeWalkKind {
     Definitions,
     Access,
 }
@@ -147,12 +148,13 @@ impl Defs {
         }
     }
 
-    pub fn walk_defining_scopes<F: FnMut(DefId) -> ControlFlow<DefId>>(
+    pub fn walk_scopes<F: FnMut(DefId) -> ControlFlow<DefId>>(
         &self,
         def_id: DefId,
+        kind: ScopeWalkKind,
         mut f: F,
     ) -> Option<DefId> {
-        match self.walk_scopes_inner(def_id, ScopeWalkKind::Definitions, &mut f) {
+        match self.walk_scopes_inner(def_id, kind, &mut f) {
             ControlFlow::Break(d) => Some(d),
             ControlFlow::Continue(_) => None,
         }
@@ -183,7 +185,9 @@ impl Defs {
                         }
                     }
                     ClassKind::Interface { extends } => {
-                        self.walk_scopes_inner(*extends, kind, cb)?;
+                        if let Some(extends) = extends {
+                            self.walk_scopes_inner(*extends, kind, cb)?;
+                        }
                     }
                 }
                 if let ScopeWalkKind::Definitions = kind {
@@ -214,9 +218,11 @@ impl Defs {
                 }
             }
             DefKind::Operator(o) => {
+                cb(def.id)?;
                 self.walk_scopes_inner(o.owning_class, kind, cb)?;
             }
             DefKind::Function(f) => {
+                cb(def.id)?;
                 self.walk_scopes_inner(f.owner, kind, cb)?;
             }
             DefKind::Var(v) => {
@@ -401,7 +407,7 @@ pub enum ClassKind {
         within: Option<DefId>,
     },
     Interface {
-        extends: DefId,
+        extends: Option<DefId>,
     },
 }
 
@@ -459,7 +465,7 @@ pub struct State {
     pub name: Identifier,
     pub owner: DefId, // Class
     pub funcs: Box<[DefId]>,
-    pub contents: Option<Statements>,
+    pub contents: Option<Body>,
 }
 
 #[derive(Debug)]
@@ -508,8 +514,5 @@ pub struct Local {
 #[derive(Debug)]
 pub struct FuncContents {
     pub locals: Box<[DefId]>,
-    pub statements: Option<Statements>,
+    pub statements: Option<Body>,
 }
-
-#[derive(Debug)]
-pub struct Statements {}

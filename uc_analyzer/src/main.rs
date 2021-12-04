@@ -138,14 +138,14 @@ fn main() {
             }
 
             let mut errs = vec![];
-
+            /*
             errs.extend(ambiguous_new_template::run(&hir, &sources));
             errs.extend(dangling_else::run(&hir, &sources));
             errs.extend(misleading_indentation::run(&hir, &sources));
             errs.extend(missing_break::run(&hir, &sources));
             errs.extend(never_loop::run(&hir, &sources));
             errs.extend(uneffectful_stmt::run(&hir, &sources));
-
+            */
             errs.iter().for_each(|e| sources.emit_err(e));
 
             p.hirs.push(hir);
@@ -170,7 +170,9 @@ fn main() {
 
     let (defs, resolver) = uc_ast_lowering::lower(input);
     let mut errs = vec![];
+    /*
     errs.extend(bad_type_name::run(&defs, &resolver, &sources));
     errs.extend(bad_enum_values::run(&defs, &resolver, &sources));
+    */
     errs.iter().for_each(|e| sources.emit_err(e));
 }

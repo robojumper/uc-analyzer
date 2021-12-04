@@ -343,8 +343,15 @@ impl<'a> Lexer<'a> {
     pub fn extract_string(&self, token: &Token) -> Box<str> {
         assert_eq!(token.kind, TokenKind::String);
         let bytes = self.source.lookup_bytes(token.span);
-        let string = String::from_utf8_lossy(bytes);
+        let string = String::from_utf8_lossy(&bytes[1..bytes.len() - 1]);
         string.into_owned().into_boxed_str()
+    }
+
+    pub fn extract_name(&self, token: &Token) -> Identifier {
+        assert!(matches!(token.kind, TokenKind::Name | TokenKind::DotName));
+        let bytes = self.source.lookup_bytes(token.span);
+        let str = str::from_utf8(&bytes[1..bytes.len() - 1]).unwrap();
+        Identifier::from_str(str).unwrap()
     }
 
     pub fn extract_number(&self, token: &Token) -> Result<NumberLiteral, String> {

@@ -62,7 +62,7 @@ impl Visitor for NeverLoopVisitor {
                             e,
                             Expr {
                                 kind: ExprKind::LiteralExpr {
-                                    lit: Literal::ObjReference
+                                    lit: Literal::ObjReference(_, _)
                                 },
                                 ..
                             }

@@ -4,7 +4,7 @@ use std::{
 };
 
 use uc_def::Op;
-use uc_middle::{DefId, Defs};
+use uc_middle::{DefId, Defs, ScopeWalkKind};
 use uc_name::Identifier;
 
 pub type Result<T> = std::result::Result<T, ResolutionError>;
@@ -85,12 +85,7 @@ impl ResolverContext {
             .ok_or(ResolutionError::NotFound)
     }
 
-    pub fn get_global_value(
-        &mut self,
-        current_class: DefId,
-        defs: &Defs,
-        name: &Identifier,
-    ) -> Result<DefId> {
+    pub fn get_global_value(&self, scope: DefId, defs: &Defs, name: &Identifier) -> Result<DefId> {
         match self.global_values.get(name).map(|v| &**v) {
             Some([single]) => Ok(*single),
             Some([multiple @ ..]) => {
@@ -98,7 +93,7 @@ impl ResolverContext {
                     .iter()
                     .copied()
                     .filter(|&t| {
-                        current_class == defs.get_enum(defs.get_variant(t).owning_enum).owning_class
+                        scope == defs.get_enum(defs.get_variant(t).owning_enum).owning_class
                     })
                     .collect::<Vec<_>>();
                 match &*matches {
@@ -178,7 +173,7 @@ impl ResolverContext {
         let consts = self
             .scoped_consts
             .entry(scope)
-            .or_insert_with(HashMap::default); // TODO: Explicit add scope function
+            .or_insert_with(HashMap::default);
         match consts.entry(name) {
             Entry::Occupied(_) => return Err(ResolutionError::ExistsInExactScope),
             Entry::Vacant(e) => {
@@ -192,15 +187,17 @@ impl ResolverContext {
         &self,
         scope: DefId,
         defs: &Defs,
+        kind: ScopeWalkKind,
         const_name: &Identifier,
     ) -> Result<DefId> {
-        match defs.walk_defining_scopes(scope, |def_id| match self.scoped_consts.get(&def_id) {
-            // TODO: Use unwrap for scope when other TODOs adressed
-            Some(consts) => match consts.get(const_name) {
-                Some(&d) => ControlFlow::Break(d),
+        match defs.walk_scopes(scope, kind, |def_id| {
+            match self.scoped_consts.get(&def_id) {
+                Some(consts) => match consts.get(const_name) {
+                    Some(&d) => ControlFlow::Break(d),
+                    None => ControlFlow::Continue(()),
+                },
                 None => ControlFlow::Continue(()),
-            },
-            None => ControlFlow::Continue(()),
+            }
         }) {
             Some(d) => Ok(d),
             None => Err(ResolutionError::NotFound),
@@ -220,7 +217,7 @@ impl ResolverContext {
         let funcs = self
             .scoped_funcs
             .entry(scope)
-            .or_insert_with(HashMap::default); // TODO: Explicit add scope function
+            .or_insert_with(HashMap::default);
         match funcs.entry(name) {
             Entry::Occupied(_) => return Err(ResolutionError::ExistsInExactScope),
             Entry::Vacant(e) => {
@@ -234,7 +231,7 @@ impl ResolverContext {
         let ops = self
             .scoped_ops
             .entry(scope)
-            .or_insert_with(HashMap::default); // TODO: Explicit add scope function
+            .or_insert_with(HashMap::default);
         match ops.entry(name) {
             Entry::Occupied(mut e) => e.get_mut().push(op),
             Entry::Vacant(e) => {
@@ -245,21 +242,37 @@ impl ResolverContext {
     }
 
     pub fn get_scoped_func(
-        &mut self,
+        &self,
         scope: DefId,
         defs: &Defs,
+        kind: ScopeWalkKind,
         func_name: &Identifier,
     ) -> Result<DefId> {
-        match defs.walk_defining_scopes(scope, |def_id| {
-            match self
-                .scoped_funcs
-                .get(&def_id)
-                .expect("unknown scope")
-                .get(func_name)
-            {
+        match defs.walk_scopes(scope, kind, |def_id| match self.scoped_funcs.get(&def_id) {
+            Some(funcs) => match funcs.get(func_name) {
                 Some(&f) => ControlFlow::Break(f),
                 None => ControlFlow::Continue(()),
-            }
+            },
+            None => ControlFlow::Continue(()),
+        }) {
+            Some(d) => Ok(d),
+            None => Err(ResolutionError::NotFound),
+        }
+    }
+
+    pub fn get_scoped_var(
+        &self,
+        scope: DefId,
+        defs: &Defs,
+        kind: ScopeWalkKind,
+        var_name: &Identifier,
+    ) -> Result<DefId> {
+        match defs.walk_scopes(scope, kind, |def_id| match self.scoped_vars.get(&def_id) {
+            Some(vars) => match vars.get(var_name) {
+                Some(&d) => ControlFlow::Break(d),
+                None => ControlFlow::Continue(()),
+            },
+            None => ControlFlow::Continue(()),
         }) {
             Some(d) => Ok(d),
             None => Err(ResolutionError::NotFound),

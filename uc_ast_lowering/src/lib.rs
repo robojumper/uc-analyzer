@@ -15,7 +15,6 @@
 //! The [`LoweringContext`] internal to this package contains all
 //! the contextual information needed to resolve things, but the
 //! DefHierarchy is ideally fully resolved.
-//!
 
 use std::{collections::HashMap, str::FromStr};
 
@@ -25,12 +24,12 @@ use uc_def::{ArgFlags, ClassFlags, FuncFlags, StructFlags, VarFlags};
 use uc_files::Span;
 use uc_middle::{
     ty::Ty, Class, ClassKind, Const, ConstVal, DefId, DefKind, Defs, Enum, EnumVariant, FuncArg,
-    FuncContents, FuncSig, Function, Local, Operator, Package, State, Struct, Var,
+    FuncContents, FuncSig, Function, Local, Operator, Package, ScopeWalkKind, State, Struct, Var,
 };
 use uc_name::Identifier;
 
+mod body;
 pub mod resolver;
-mod stmts;
 
 #[derive(Debug)]
 pub struct LoweringInput {
@@ -91,6 +90,8 @@ impl<'defs> LoweringContext<'defs> {
         self.fixup_extends(&backrefs);
         self.add_builtin_items();
         self.resolve_sigs(&backrefs);
+        //println!("{:?}", self.defs);
+        self.lower_bodies(&backrefs.funcs);
     }
 
     /// Create DefIds for packages and classes
@@ -315,7 +316,6 @@ impl<'defs> LoweringContext<'defs> {
         let net_conn_id = add_class(self, engine, "NetConnection", player_id);
         add_class(self, engine, "ChildConnection", net_conn_id);
 
-
         self.add_def(|this, struct_id| {
             let map = Identifier::from_str("Map").unwrap();
             this.resolver.add_scoped_ty(map.clone(), object_id);
@@ -414,28 +414,31 @@ impl<'defs> LoweringContext<'defs> {
                 }
                 uc_ast::ClassHeader::Interface { extends } => {
                     // Honor an explicit extend on the interface. Otherwise extend `Interface`,
-                    // except for `Interface` which extends `Object`
                     let extends = extends
                         .as_ref()
-                        .map(|n| self.resolver.get_ty(class_id, self.defs, n))
-                        .unwrap_or_else(|| {
+                        .map(|n| self.resolver.get_ty(class_id, self.defs, n).unwrap())
+                        .or_else(|| {
                             if &hir.header.name == "Interface" {
                                 self.special_items.interface_id = Some(class_id);
-                                self.resolver.get_ty_in(
+                                None
+                                /*self.resolver.get_ty_in(
                                     None,
                                     self.defs,
                                     &Identifier::from_str("Core").unwrap(),
                                     &Identifier::from_str("Object").unwrap(),
-                                )
+                                )*/
                             } else {
-                                self.resolver.get_ty(
-                                    class_id,
-                                    self.defs,
-                                    &Identifier::from_str("Interface").unwrap(),
+                                Some(
+                                    self.resolver
+                                        .get_ty(
+                                            class_id,
+                                            self.defs,
+                                            &Identifier::from_str("Interface").unwrap(),
+                                        )
+                                        .unwrap(),
                                 )
                             }
-                        })
-                        .unwrap();
+                        });
                     let c = self.defs.get_class_mut(class_id);
                     c.kind = Some(ClassKind::Interface { extends })
                 }
@@ -468,7 +471,12 @@ impl<'defs> LoweringContext<'defs> {
         match dim {
             DimCount::Complex(n) => match &**n {
                 [single] => {
-                    if let Ok(const_id) = self.resolver.get_scoped_const(scope, self.defs, single) {
+                    if let Ok(const_id) = self.resolver.get_scoped_const(
+                        scope,
+                        self.defs,
+                        ScopeWalkKind::Definitions,
+                        single,
+                    ) {
                         let def = self.defs.get_const(const_id);
                         match &def.val {
                             ConstVal::Num(n) => *n as u16,
@@ -500,7 +508,7 @@ impl<'defs> LoweringContext<'defs> {
 
     fn resolve_sigs<'hir>(&mut self, backrefs: &HirBackrefs<'hir>) {
         for var_ref in &backrefs.vars {
-            let inner_ty = self.decode_ast_ty(&var_ref.1 .0.ty, *var_ref.0);
+            let inner_ty = self.decode_ast_ty(&var_ref.1 .0.ty, *var_ref.0).unwrap();
             let dim = &var_ref.1 .0.names[var_ref.1 .1].count;
             let ty = match dim {
                 DimCount::None => inner_ty,
@@ -514,19 +522,22 @@ impl<'defs> LoweringContext<'defs> {
                 .sig
                 .ret_ty
                 .as_ref()
-                .map(|ty| self.decode_ast_ty(ty, func_id));
+                .map(|ty| self.decode_ast_ty(ty, func_id).unwrap());
             let args = func_ref
                 .sig
                 .args
                 .iter()
                 .map(|arg| {
-                    self.add_def(|this, _| {
+                    self.add_def(|this, arg_id| {
+                        this.resolver
+                            .add_scoped_var(func_id, arg.name.clone(), arg_id)
+                            .expect("duplicate arg");
                         (
                             DefKind::FuncArg(FuncArg {
                                 name: arg.name.clone(),
                                 owner: func_id,
                                 flags: arg.mods.flags,
-                                ty: this.decode_ast_ty(&arg.ty, func_id),
+                                ty: this.decode_ast_ty(&arg.ty, func_id).unwrap(),
                             }),
                             Some(arg.span),
                         )
@@ -555,10 +566,13 @@ impl<'defs> LoweringContext<'defs> {
                     .locals
                     .iter()
                     .flat_map(|local| {
-                        let local_ty = self.decode_ast_ty(&local.ty, func_id);
+                        let local_ty = self.decode_ast_ty(&local.ty, func_id).unwrap();
                         let mut insts = vec![];
                         for inst in &local.names {
-                            let inst_id = self.add_def(|this, _| {
+                            let inst_id = self.add_def(|this, local_id| {
+                                this.resolver
+                                    .add_scoped_var(func_id, inst.name.clone(), local_id)
+                                    .expect("duplicate local");
                                 let ty = match &inst.count {
                                     DimCount::None => local_ty,
                                     x => {
@@ -722,7 +736,7 @@ impl<'defs> LoweringContext<'defs> {
     /// var delegate<OnCompletedDelegate> __Delegate_OnCompletedDelegate;
     /// function bool OnCompletedDelegate(int arg) {
     ///     if (self.__Delegate_OnCompletedDelegate != none) {
-    ///         return self.__Delegate_OnCompletedDelegate(arg);
+    ///         return (self.__Delegate_OnCompletedDelegate)(arg);
     ///     }
     ///     // default body
     ///     return false;
@@ -842,44 +856,51 @@ impl<'defs> LoweringContext<'defs> {
         })
     }
 
-    fn decode_ast_ty(&mut self, ty: &uc_ast::Ty, scope: DefId) -> Ty {
-        match ty {
-            uc_ast::Ty::Simple(ident) => {
-                if ident == "int" {
-                    Ty::INT
-                } else if ident == "float" {
-                    Ty::FLOAT
-                } else if ident == "bool" {
-                    Ty::BOOL
-                } else if ident == "byte" {
-                    Ty::BYTE
-                } else if ident == "string" {
-                    Ty::STRING
-                } else if ident == "name" {
-                    Ty::NAME
-                } else {
-                    let ty = self
-                        .resolver
-                        .get_ty(scope, self.defs, ident)
-                        .unwrap_or_else(|e| {
-                            panic!(
-                                "failed to find ty {:?} in scope {:?}: {:?}",
-                                ident,
-                                self.defs.get_def(scope),
-                                e
-                            )
-                        });
-                    match &self.defs.get_def(ty).kind {
-                        DefKind::Class(c) => match c.kind.as_ref().unwrap() {
-                            ClassKind::Class { .. } => Ty::object_from(ty),
-                            ClassKind::Interface { .. } => Ty::interface_from(ty),
-                        },
-                        DefKind::Enum(_) => Ty::enum_from(ty),
-                        DefKind::Struct(_) => Ty::struct_from(ty),
-                        _ => panic!("not a ty"),
-                    }
-                }
+    fn lower_bodies<'hir>(&mut self, funcs: &HashMap<DefId, &'hir uc_ast::FuncDef>) {
+        for (&did, &def) in funcs {
+            if let Some(body) = &def.body {
+                let body = self.lower_body(did, &body.statements);
+                dbg!(&body);
+                self.defs
+                    .get_func_mut(did)
+                    .contents
+                    .as_mut()
+                    .unwrap()
+                    .statements = Some(body);
             }
+        }
+    }
+
+    fn decode_simple_ty(&self, ident: &Identifier, scope: DefId) -> Option<Ty> {
+        if ident == "int" {
+            Some(Ty::INT)
+        } else if ident == "float" {
+            Some(Ty::FLOAT)
+        } else if ident == "bool" {
+            Some(Ty::BOOL)
+        } else if ident == "byte" {
+            Some(Ty::BYTE)
+        } else if ident == "string" {
+            Some(Ty::STRING)
+        } else if ident == "name" {
+            Some(Ty::NAME)
+        } else {
+            let ty = self.resolver.get_ty(scope, self.defs, ident).ok()?;
+            match &self.defs.get_def(ty).kind {
+                DefKind::Class(c) => match c.kind.as_ref().unwrap() {
+                    ClassKind::Class { .. } => Some(Ty::object_from(ty)),
+                    ClassKind::Interface { .. } => Some(Ty::interface_from(ty)),
+                },
+                DefKind::Enum(_) => Some(Ty::enum_from(ty)),
+                DefKind::Struct(_) => Some(Ty::struct_from(ty)),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    fn decode_ast_ty(&self, ty: &uc_ast::Ty, scope: DefId) -> Option<Ty> {
+        match ty {
+            uc_ast::Ty::Simple(ident) => self.decode_simple_ty(ident, scope),
             uc_ast::Ty::Qualified(parts) => match &**parts {
                 [class, ty] => {
                     let ty = self
@@ -887,8 +908,8 @@ impl<'defs> LoweringContext<'defs> {
                         .get_ty_in(Some(scope), self.defs, class, ty)
                         .unwrap_or_else(|e| panic!("failed to find ty {:?}: {:?}", ty, e));
                     match &self.defs.get_def(ty).kind {
-                        DefKind::Enum(_) => Ty::enum_from(ty),
-                        DefKind::Struct(_) => Ty::struct_from(ty),
+                        DefKind::Enum(_) => Some(Ty::enum_from(ty)),
+                        DefKind::Struct(_) => Some(Ty::struct_from(ty)),
                         _ => panic!("not a valid qualified ty"),
                     }
                 }
@@ -897,7 +918,9 @@ impl<'defs> LoweringContext<'defs> {
             uc_ast::Ty::Array(arr_ty) => {
                 // This is filtered in the parser
                 assert!(!matches!(&**arr_ty, uc_ast::Ty::Array(_)));
-                Ty::dyn_array_from(self.decode_ast_ty(arr_ty, scope))
+                Some(Ty::dyn_array_from(
+                    self.decode_ast_ty(arr_ty, scope).unwrap(),
+                ))
             }
             uc_ast::Ty::Class(ident) => {
                 let ty = self
@@ -906,8 +929,8 @@ impl<'defs> LoweringContext<'defs> {
                     .unwrap_or_else(|e| panic!("failed to find ty {:?}: {:?}", ident, e));
                 match &self.defs.get_def(ty).kind {
                     DefKind::Class(c) => match c.kind.as_ref().unwrap() {
-                        ClassKind::Class { .. } => Ty::class_from(ty),
-                        ClassKind::Interface { .. } => Ty::interface_from(ty),
+                        ClassKind::Class { .. } => Some(Ty::class_from(ty)),
+                        ClassKind::Interface { .. } => Some(Ty::interface_from(ty)),
                     },
                     _ => panic!("not a class"),
                 }
@@ -918,11 +941,16 @@ impl<'defs> LoweringContext<'defs> {
                     [func_name] => {
                         let func = self
                             .resolver
-                            .get_scoped_func(scope, self.defs, func_name)
+                            .get_scoped_func(
+                                scope,
+                                self.defs,
+                                ScopeWalkKind::Definitions,
+                                func_name,
+                            )
                             .unwrap_or_else(|e| {
                                 panic!("failed to find ty {:?}: {:?}", func_name, e)
                             });
-                        Ty::delegate_from(func)
+                        Some(Ty::delegate_from(func))
                     }
                     [class, func_name] => {
                         let class_def = self
@@ -933,11 +961,16 @@ impl<'defs> LoweringContext<'defs> {
                             });
                         let func = self
                             .resolver
-                            .get_scoped_func(class_def, self.defs, func_name)
+                            .get_scoped_func(
+                                class_def,
+                                self.defs,
+                                ScopeWalkKind::Definitions,
+                                func_name,
+                            )
                             .unwrap_or_else(|e| {
                                 panic!("failed to find ty {:?}: {:?}", func_name, e)
                             });
-                        Ty::delegate_from(func)
+                        Some(Ty::delegate_from(func))
                     }
                     x => panic!("invalid qualified type {:?}", x),
                 }
@@ -957,7 +990,6 @@ pub fn lower(input: LoweringInput) -> (Defs, ResolverContext) {
 
     l_ctx.run(&input);
 
-    println!("{:?}", &l_ctx.defs);
     let resolver = l_ctx.resolver;
     (defs, resolver)
 }

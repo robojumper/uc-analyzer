@@ -204,12 +204,14 @@ impl Parser<'_> {
                         })
                     ) =>
                 {
-                    self.next();
+                    let nm_tok = self.next().unwrap();
+                    let a = self.sym_to_ident(&tok);
+                    let b = self.lex.extract_name(&nm_tok);
                     Expr {
                         span: lhs_marker.complete(self),
                         paren: false,
                         kind: ExprKind::LiteralExpr {
-                            lit: uc_ast::Literal::ObjReference,
+                            lit: uc_ast::Literal::ObjReference(a, b),
                         },
                     }
                 }

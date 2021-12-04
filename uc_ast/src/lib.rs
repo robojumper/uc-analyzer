@@ -303,7 +303,7 @@ pub enum ExprKind {
 #[derive(Debug)]
 pub enum Literal {
     None,
-    ObjReference,
+    ObjReference(Identifier, Identifier),
     Number,
     Bool,
     Name,
