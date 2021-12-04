@@ -259,7 +259,8 @@ impl<W: io::Write> PPrinter<W> {
                 self.w.write_all(b.as_ref().as_bytes())?;
                 self.w.write_all(b"'")?;
             }
-            Literal::Number => self.w.write_all(b"`Number`")?,
+            Literal::Float => self.w.write_all(b"`Float`")?,
+            Literal::Int => self.w.write_all(b"`Int`")?,
             Literal::Bool => self.w.write_all(b"`Bool`")?,
             Literal::Name => self.w.write_all(b"`Name`")?,
             Literal::String(s) => self.w.write_all(s.as_bytes())?,

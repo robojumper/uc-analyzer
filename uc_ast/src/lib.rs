@@ -304,7 +304,8 @@ pub enum ExprKind {
 pub enum Literal {
     None,
     ObjReference(Identifier, Identifier),
-    Number,
+    Float,
+    Int,
     Bool,
     Name,
     String(Box<str>),

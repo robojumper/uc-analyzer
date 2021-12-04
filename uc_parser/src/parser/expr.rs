@@ -10,7 +10,7 @@ use uc_name::Identifier;
 
 use crate::{
     kw,
-    lexer::{Sigil, Token, TokenKind as Tk},
+    lexer::{NumberSyntax, Sigil, Token, TokenKind as Tk},
     sig,
 };
 
@@ -125,12 +125,26 @@ impl Parser<'_> {
                                     })
                                 )
                             {
-                                self.next();
+                                let tok = self.next().unwrap();
+                                let syn = match tok.kind {
+                                    Tk::Number(f) => f,
+                                    _ => unreachable!(),
+                                };
                                 Expr {
                                     span: lhs_marker.complete(self),
                                     paren: false,
                                     kind: ExprKind::LiteralExpr {
-                                        lit: uc_ast::Literal::Number,
+                                        lit: match syn {
+                                            NumberSyntax::Int | NumberSyntax::Hex => {
+                                                uc_ast::Literal::Int
+                                            }
+                                            NumberSyntax::Float => uc_ast::Literal::Float,
+                                            NumberSyntax::Wild => {
+                                                return Err(
+                                                    self.fmt_err("bad number syntax", Some(tok))
+                                                )
+                                            }
+                                        },
                                     },
                                 }
                             } else {
@@ -244,11 +258,17 @@ impl Parser<'_> {
                         }
                     }
                 }
-                Tk::Number(_) => Expr {
+                Tk::Number(syn) => Expr {
                     span: lhs_marker.complete(self),
                     paren: false,
                     kind: ExprKind::LiteralExpr {
-                        lit: uc_ast::Literal::Number,
+                        lit: match syn {
+                            NumberSyntax::Int | NumberSyntax::Hex => uc_ast::Literal::Int,
+                            NumberSyntax::Float => uc_ast::Literal::Float,
+                            NumberSyntax::Wild => {
+                                return Err(self.fmt_err("bad number syntax", Some(tok)))
+                            }
+                        },
                     },
                 },
                 Tk::String => Expr {

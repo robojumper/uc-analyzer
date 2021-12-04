@@ -92,7 +92,7 @@ impl<'defs> LoweringContext<'defs> {
         self.add_builtin_items();
         self.resolve_sigs(&backrefs);
         //println!("{:?}", self.defs);
-        self.lower_bodies(&backrefs.funcs)
+        self.lower_bodies(&backrefs.funcs, &backrefs.ops)
     }
 
     /// Create DefIds for packages and classes
@@ -540,6 +540,66 @@ impl<'defs> LoweringContext<'defs> {
         }
     }
 
+    fn resolve_sig(&mut self, func_id: DefId, sig: &uc_ast::FuncSig) -> (Option<Ty>, Box<[DefId]>) {
+        let ret_ty = sig
+            .ret_ty
+            .as_ref()
+            .map(|ty| self.decode_ast_ty(ty, func_id).unwrap());
+        let args = sig
+            .args
+            .iter()
+            .map(|arg| {
+                self.add_def(|this, arg_id| {
+                    this.resolver
+                        .add_scoped_var(func_id, arg.name.clone(), arg_id)
+                        .expect("duplicate arg");
+                    (
+                        DefKind::FuncArg(FuncArg {
+                            name: arg.name.clone(),
+                            owner: func_id,
+                            flags: arg.mods.flags,
+                            ty: this.decode_ast_ty(&arg.ty, func_id).unwrap(),
+                        }),
+                        Some(arg.span),
+                    )
+                })
+            })
+            .collect::<Box<_>>();
+
+        (ret_ty, args)
+    }
+
+    fn resolve_locals(&mut self, func_id: DefId, body: &uc_ast::FuncBody) -> Box<[DefId]> {
+        body.locals
+            .iter()
+            .flat_map(|local| {
+                let local_ty = self.decode_ast_ty(&local.ty, func_id).unwrap();
+                let mut insts = vec![];
+                for inst in &local.names {
+                    let inst_id = self.add_def(|this, local_id| {
+                        this.resolver
+                            .add_scoped_var(func_id, inst.name.clone(), local_id)
+                            .expect("duplicate local");
+                        let ty = match &inst.count {
+                            DimCount::None => local_ty,
+                            x => Ty::stat_array_from(local_ty, this.resolve_dim(x, func_id)),
+                        };
+                        (
+                            DefKind::Local(Local {
+                                name: inst.name.clone(),
+                                owner: func_id,
+                                ty,
+                            }),
+                            Some(inst.span),
+                        )
+                    });
+                    insts.push(inst_id);
+                }
+                insts
+            })
+            .collect::<Box<_>>()
+    }
+
     fn resolve_sigs<'hir>(&mut self, backrefs: &HirBackrefs<'hir>) {
         for var_ref in &backrefs.vars {
             let inner_ty = self.decode_ast_ty(&var_ref.1 .0.ty, *var_ref.0).unwrap();
@@ -552,33 +612,7 @@ impl<'defs> LoweringContext<'defs> {
         }
 
         for (&func_id, &func_ref) in &backrefs.funcs {
-            let mut ret_ty = func_ref
-                .sig
-                .ret_ty
-                .as_ref()
-                .map(|ty| self.decode_ast_ty(ty, func_id).unwrap());
-            let args = func_ref
-                .sig
-                .args
-                .iter()
-                .map(|arg| {
-                    self.add_def(|this, arg_id| {
-                        this.resolver
-                            .add_scoped_var(func_id, arg.name.clone(), arg_id)
-                            .expect("duplicate arg");
-                        (
-                            DefKind::FuncArg(FuncArg {
-                                name: arg.name.clone(),
-                                owner: func_id,
-                                flags: arg.mods.flags,
-                                ty: this.decode_ast_ty(&arg.ty, func_id).unwrap(),
-                            }),
-                            Some(arg.span),
-                        )
-                    })
-                })
-                .collect::<Box<_>>();
-
+            let (mut ret_ty, args) = self.resolve_sig(func_id, &func_ref.sig);
             // Special treatment for native iterators, where the second out object type
             // is determined by the class in the first argument
             if func_ref.mods.flags.contains(FuncFlags::ITERATOR) {
@@ -596,38 +630,21 @@ impl<'defs> LoweringContext<'defs> {
             self.defs.get_func_mut(func_id).sig = Some(FuncSig { ret_ty, args });
 
             if let Some(body) = &func_ref.body {
-                let locals = body
-                    .locals
-                    .iter()
-                    .flat_map(|local| {
-                        let local_ty = self.decode_ast_ty(&local.ty, func_id).unwrap();
-                        let mut insts = vec![];
-                        for inst in &local.names {
-                            let inst_id = self.add_def(|this, local_id| {
-                                this.resolver
-                                    .add_scoped_var(func_id, inst.name.clone(), local_id)
-                                    .expect("duplicate local");
-                                let ty = match &inst.count {
-                                    DimCount::None => local_ty,
-                                    x => {
-                                        Ty::stat_array_from(local_ty, this.resolve_dim(x, func_id))
-                                    }
-                                };
-                                (
-                                    DefKind::Local(Local {
-                                        name: inst.name.clone(),
-                                        owner: func_id,
-                                        ty,
-                                    }),
-                                    Some(inst.span),
-                                )
-                            });
-                            insts.push(inst_id);
-                        }
-                        insts
-                    })
-                    .collect::<Box<_>>();
+                let locals = self.resolve_locals(func_id, body);
                 self.defs.get_func_mut(func_id).contents = Some(FuncContents {
+                    locals,
+                    statements: None,
+                });
+            }
+        }
+
+        for (&op_id, &op_ref) in &backrefs.ops {
+            let (ret_ty, args) = self.resolve_sig(op_id, &op_ref.sig);
+            self.defs.get_op_mut(op_id).sig = Some(FuncSig { ret_ty, args });
+
+            if let Some(body) = &op_ref.body {
+                let locals = self.resolve_locals(op_id, body);
+                self.defs.get_op_mut(op_id).contents = Some(FuncContents {
                     locals,
                     statements: None,
                 });
@@ -792,6 +809,7 @@ impl<'defs> LoweringContext<'defs> {
                 .intersects(FuncFlags::OPERATOR | FuncFlags::PREOPERATOR | FuncFlags::POSTOPERATOR)
             {
                 assert!(func_def.mods.flags.contains(FuncFlags::STATIC));
+                assert!(!func_def.mods.flags.intersects(FuncFlags::ITERATOR));
                 let op = match &func_def.name {
                     uc_ast::FuncName::Oper(op) => *op,
                     uc_ast::FuncName::Iden(i) => {
@@ -805,6 +823,7 @@ impl<'defs> LoweringContext<'defs> {
                         owning_class: owner_id,
                         flags: func_def.mods.flags,
                         sig: None,
+                        contents: None,
                     }),
                     Some(func_def.span),
                 );
@@ -893,6 +912,7 @@ impl<'defs> LoweringContext<'defs> {
     fn lower_bodies<'hir>(
         &mut self,
         funcs: &HashMap<DefId, &'hir uc_ast::FuncDef>,
+        ops: &HashMap<DefId, &'hir uc_ast::FuncDef>,
     ) -> Vec<BodyError> {
         let mut body_count = 0u32;
         let mut errs = vec![];

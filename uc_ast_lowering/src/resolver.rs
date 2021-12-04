@@ -278,4 +278,25 @@ impl ResolverContext {
             None => Err(ResolutionError::NotFound),
         }
     }
+
+    pub fn collect_scoped_ops(
+        &self,
+        scope: DefId,
+        defs: &Defs,
+        kind: ScopeWalkKind,
+        op: Op,
+    ) -> Vec<DefId> {
+        let mut candidate_ops = vec![];
+        defs.walk_scopes(scope, kind, |def_id| match self.scoped_ops.get(&def_id) {
+            Some(ops) => match ops.get(&op) {
+                Some(d) => {
+                    candidate_ops.extend_from_slice(&**d);
+                    ControlFlow::Continue(())
+                }
+                None => ControlFlow::Continue(()),
+            },
+            None => ControlFlow::Continue(()),
+        });
+        candidate_ops
+    }
 }

@@ -11,7 +11,7 @@ use uc_name::Identifier;
 pub mod body;
 pub mod ty;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DefId(NonZeroU32);
 
 #[derive(Debug)]
@@ -340,6 +340,20 @@ impl Defs {
         }
     }
 
+    pub fn get_op(&self, def_id: DefId) -> &Operator {
+        match &self.get_def(def_id).kind {
+            DefKind::Operator(o) => o,
+            _ => panic!("expected op"),
+        }
+    }
+
+    pub fn get_op_mut(&mut self, def_id: DefId) -> &mut Operator {
+        match &mut self.get_def_mut(def_id).kind {
+            DefKind::Operator(o) => o,
+            _ => panic!("expected op"),
+        }
+    }
+
     pub fn get_arg(&self, def_id: DefId) -> &FuncArg {
         match &self.get_def(def_id).kind {
             DefKind::FuncArg(f) => f,
@@ -480,6 +494,7 @@ pub struct Operator {
     pub flags: FuncFlags,
 
     pub sig: Option<FuncSig>,
+    pub contents: Option<FuncContents>,
 }
 
 #[derive(Debug)]

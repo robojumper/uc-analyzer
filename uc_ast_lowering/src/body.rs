@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use uc_def::{ArgFlags, FuncFlags};
+use uc_def::{ArgFlags, FuncFlags, Op};
 use uc_files::Span;
 use uc_middle::{
     body::{
@@ -17,7 +17,8 @@ use crate::LoweringContext;
 struct FuncLowerer<'hir, 'a: 'hir> {
     ctx: &'a LoweringContext<'hir>,
     body: Body,
-    func_scope: DefId,
+    body_scope: DefId,
+    ret_ty: Option<Ty>,
     class_did: DefId,
     class_ty: Ty,
     self_ty: Option<Ty>,
@@ -66,26 +67,33 @@ pub enum BodyErrorKind {
 impl<'hir> LoweringContext<'hir> {
     pub fn lower_body(
         &self,
-        func_scope: DefId,
+        body_scope: DefId,
         statements: &[uc_ast::Statement],
     ) -> Result<Body, BodyError> {
-        let class_did = self.defs.get_item_class(func_scope);
+        let class_did = self.defs.get_item_class(body_scope);
         let class_ty = self.defs.get_class(class_did).self_ty;
-        let self_ty = if self
-            .defs
-            .get_func(func_scope)
-            .flags
-            .contains(FuncFlags::STATIC)
-        {
-            None
-        } else {
-            Some(class_ty)
+        let (self_ty, ret_ty) = match &self.defs.get_def(body_scope).kind {
+            uc_middle::DefKind::Operator(o) => {
+                assert!(o.flags.contains(FuncFlags::STATIC));
+                (None, o.sig.as_ref().unwrap().ret_ty)
+            }
+            uc_middle::DefKind::Function(f) => {
+                let self_ty = if f.flags.contains(FuncFlags::STATIC) {
+                    None
+                } else {
+                    Some(class_ty)
+                };
+                (self_ty, f.sig.as_ref().unwrap().ret_ty)
+            }
+            uc_middle::DefKind::State(_) => todo!(),
+            _ => unreachable!(),
         };
 
         let lowerer = FuncLowerer {
             ctx: self,
             body: Body::new(),
-            func_scope,
+            body_scope,
+            ret_ty,
             class_ty,
             class_did,
             self_ty,
@@ -275,14 +283,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             uc_ast::StatementKind::BreakStatement => StatementKind::Break,
             uc_ast::StatementKind::ContinueStatement => StatementKind::Continue,
             uc_ast::StatementKind::ReturnStatement { expr } => {
-                let ret_ty = self
-                    .ctx
-                    .defs
-                    .get_func(self.func_scope)
-                    .sig
-                    .as_ref()
-                    .unwrap()
-                    .ret_ty;
+                let ret_ty = self.ret_ty;
                 let e = expr
                     .as_ref()
                     .map(|e| self.lower_expr(e, ret_ty, false, false))
@@ -447,6 +448,63 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         }
     }
 
+    fn lower_unary_op<F: Fn(DefId) -> bool>(
+        &mut self,
+        rhs: &'hir uc_ast::Expr,
+        op: Op,
+        filter: F,
+    ) -> Result<(ExprKind, ExprTy), BodyError> {
+        let r = self.lower_expr(rhs, None, false, false)?;
+        let r_ty = self.body.get_expr_ty(r).expect_ty("unary operator");
+        let mut candidate_ops = self.ctx.resolver.collect_scoped_ops(
+            self.body_scope,
+            self.ctx.defs,
+            ScopeWalkKind::Access,
+            op,
+        );
+        candidate_ops.sort_unstable();
+        candidate_ops.dedup();
+        // Preoperators never have argument coercion going on, so simply collect the best op
+        let mut best = candidate_ops
+            .iter()
+            .filter(|&op| filter(*op))
+            .filter_map(|&op| {
+                let op_def = self.ctx.defs.get_op(op);
+                let arg = op_def.sig.as_ref().unwrap().args[0];
+                let arg_def = self.ctx.defs.get_arg(arg);
+                self.ty_match(arg_def.ty, r_ty).map(|p| (p, op))
+            })
+            .collect::<Vec<_>>();
+        best.sort_unstable_by_key(|(p, _)| *p);
+        let best = match &*best {
+            [] => panic!("no matching operators"),
+            [(_, def)] => *def,
+            [(p_a, def_a), (p_b, _), ..] => {
+                if p_a == p_b {
+                    panic!(
+                        "non-unique operator {:?} ({} == {}) for ty {:?}",
+                        op, p_a, p_b, r_ty
+                    )
+                } else {
+                    *def_a
+                }
+            }
+        };
+        let ret_ty = self
+            .ctx
+            .defs
+            .get_op(best)
+            .sig
+            .as_ref()
+            .unwrap()
+            .ret_ty
+            .unwrap();
+        Ok((
+            ExprKind::Value(ValueExprKind::OpCall(best, r, None)),
+            ExprTy::Ty(ret_ty),
+        ))
+    }
+
     fn lower_expr(
         &mut self,
         expr: &'hir uc_ast::Expr,
@@ -520,7 +578,11 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             let receiver = match &lhs.kind {
                                 uc_ast::ExprKind::FieldExpr { lhs, .. } => match &lhs.kind {
                                     uc_ast::ExprKind::LiteralExpr { lit } => {
-                                        match self.ast_to_middle_lit(lit, lhs.span)? {
+                                        match self.ast_to_middle_lit(
+                                            lit,
+                                            passdown_expected_type,
+                                            lhs.span,
+                                        )? {
                                             (x @ Literal::Class(_), ty) => {
                                                 self.body.add_expr(Expr {
                                                     kind: ExprKind::Value(ValueExprKind::Lit(x)),
@@ -653,7 +715,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     }
                     None => {
                         // A freestanding function call could be a cast. Check if name is a type
-                        match self.ctx.decode_simple_ty(name, self.func_scope) {
+                        match self.ctx.decode_simple_ty(name, self.body_scope) {
                             Some(cast_ty) => {
                                 // We have a cast. Forget everything about expected types...
                                 match &**args {
@@ -673,7 +735,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             }
                             None => {
                                 match self.ctx.resolver.get_scoped_func(
-                                    self.func_scope,
+                                    self.body_scope,
                                     self.ctx.defs,
                                     ScopeWalkKind::Access,
                                     name,
@@ -740,7 +802,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 })
             }
             uc_ast::ExprKind::ClassMetaCastExpr { ty, expr } => {
-                let cast_ty = self.ctx.decode_ast_ty(ty, self.func_scope).unwrap();
+                let cast_ty = self.ctx.decode_ast_ty(ty, self.body_scope).unwrap();
                 (self.lower_cast(expr, cast_ty)?, ExprTy::Ty(cast_ty))
             }
             uc_ast::ExprKind::NewExpr { args, cls, arch } => {
@@ -794,18 +856,20 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     ExprTy::Ty(inst_ty),
                 )
             }
-            uc_ast::ExprKind::PreOpExpr { op, rhs } => {
-                return Err(BodyError {
-                    kind: BodyErrorKind::NotYetImplemented,
-                    span: expr.span,
-                })
-            }
-            uc_ast::ExprKind::PostOpExpr { lhs, op } => {
-                return Err(BodyError {
-                    kind: BodyErrorKind::NotYetImplemented,
-                    span: expr.span,
-                })
-            }
+            uc_ast::ExprKind::PreOpExpr { op, rhs } => self.lower_unary_op(rhs, *op, |def| {
+                self.ctx
+                    .defs
+                    .get_op(def)
+                    .flags
+                    .contains(FuncFlags::PREOPERATOR)
+            })?,
+            uc_ast::ExprKind::PostOpExpr { lhs, op } => self.lower_unary_op(lhs, *op, |def| {
+                self.ctx
+                    .defs
+                    .get_op(def)
+                    .flags
+                    .contains(FuncFlags::POSTOPERATOR)
+            })?,
             uc_ast::ExprKind::BinOpExpr { lhs, op, rhs } => {
                 return Err(BodyError {
                     kind: BodyErrorKind::NotYetImplemented,
@@ -825,7 +889,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 // This could be 1. a constant in scope, 2. an enum value, 3. a local or arg 4. a class variable or function 5. a self 6. delegate function
                 // TODO: Order?
                 if let Ok(var) = self.ctx.resolver.get_scoped_var(
-                    self.func_scope,
+                    self.body_scope,
                     self.ctx.defs,
                     ScopeWalkKind::Access,
                     sym,
@@ -867,7 +931,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         span: expr.span,
                     });
                 } else if let Ok(konst) = self.ctx.resolver.get_scoped_const(
-                    self.func_scope,
+                    self.body_scope,
                     self.ctx.defs,
                     ScopeWalkKind::Access,
                     sym,
@@ -883,7 +947,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 } else if let Ok(en) =
                     self.ctx
                         .resolver
-                        .get_global_value(self.func_scope, self.ctx.defs, sym)
+                        .get_global_value(self.body_scope, self.ctx.defs, sym)
                 {
                     let parent_enum = self.ctx.defs.get_variant(en).owning_enum;
                     (
@@ -898,7 +962,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 }
             }
             uc_ast::ExprKind::LiteralExpr { lit } => {
-                let (lit, ty) = self.ast_to_middle_lit(lit, expr.span)?;
+                let (lit, ty) = self.ast_to_middle_lit(lit, passdown_expected_type, expr.span)?;
                 (ExprKind::Value(ValueExprKind::Lit(lit)), ExprTy::Ty(ty))
             }
         };
@@ -988,6 +1052,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
     fn ast_to_middle_lit(
         &self,
         lit: &uc_ast::Literal,
+        expected_type: Option<Ty>,
         span: Span,
     ) -> Result<(Literal, Ty), BodyError> {
         match lit {
@@ -1005,7 +1070,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         [name] => self
                             .ctx
                             .resolver
-                            .get_ty(self.func_scope, self.ctx.defs, name)
+                            .get_ty(self.body_scope, self.ctx.defs, name)
                             .map_err(|e| BodyError {
                                 kind: BodyErrorKind::SymNotFound { name: name.clone() },
                                 span,
@@ -1013,7 +1078,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         [package, name] => self
                             .ctx
                             .resolver
-                            .get_ty_in(Some(self.func_scope), self.ctx.defs, package, name)
+                            .get_ty_in(Some(self.body_scope), self.ctx.defs, package, name)
                             .map_err(|e| BodyError {
                                 kind: BodyErrorKind::SymNotFound { name: name.clone() },
                                 span,
@@ -1029,7 +1094,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     let ty = self
                         .ctx
                         .resolver
-                        .get_ty(self.func_scope, self.ctx.defs, a)
+                        .get_ty(self.body_scope, self.ctx.defs, a)
                         .map_err(|e| BodyError {
                             kind: BodyErrorKind::SymNotFound { name: a.clone() },
                             span,
@@ -1037,10 +1102,20 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     Ok((Literal::Object(ty), Ty::object_from(ty)))
                 }
             }
-            uc_ast::Literal::Number => Ok((Literal::Float, Ty::FLOAT)),
             uc_ast::Literal::Bool => Ok((Literal::Bool, Ty::BOOL)),
             uc_ast::Literal::Name => Ok((Literal::Name, Ty::NAME)),
             uc_ast::Literal::String(_) => Ok((Literal::String, Ty::STRING)),
+
+            uc_ast::Literal::Int => {
+                if matches!(expected_type, Some(ty) if ty.is_float()) {
+                    Ok((Literal::Float, Ty::FLOAT))
+                } else if matches!(expected_type, Some(ty) if ty.is_byte()) {
+                    Ok((Literal::Int, Ty::BYTE))
+                } else {
+                    Ok((Literal::Int, Ty::INT))
+                }
+            }
+            uc_ast::Literal::Float => Ok((Literal::Float, Ty::FLOAT)),
         }
     }
 
