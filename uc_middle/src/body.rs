@@ -164,6 +164,7 @@ pub enum ValueExprKind {
     /// x ? y : z
     TernaryOp(ExprId, ExprId, ExprId),
     /// `new (a, b) c (d)`
+    /// TODO: This could be a `native coerce object function`?
     NewExpr(Option<ExprId>, Option<ExprId>, ExprId, Option<ExprId>),
     /// string(myname), class<Actor>(obj), true if explicit
     CastExpr(Ty, ExprId, bool),

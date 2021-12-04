@@ -386,6 +386,39 @@ impl<'defs> LoweringContext<'defs> {
             )
         });
         self.special_items.dyn_array_iterator = Some(iterator_id);
+
+        // assert function
+        self.add_def(|this, func_id| {
+            let name = Identifier::from_str("Assert").unwrap();
+            this.resolver
+                .add_scoped_func(object_id, name.clone(), func_id)
+                .expect("conflict in assert?");
+            let bool_arg = this.add_def(|_, _| {
+                (
+                    DefKind::FuncArg(FuncArg {
+                        name: Identifier::from_str("condition").unwrap(),
+                        owner: func_id,
+                        flags: ArgFlags::empty(),
+                        ty: Ty::BOOL,
+                    }),
+                    None,
+                )
+            });
+            (
+                DefKind::Function(Function {
+                    name,
+                    owner: object_id,
+                    flags: FuncFlags::NATIVE | FuncFlags::STATIC,
+                    delegate_prop: None,
+                    sig: Some(FuncSig {
+                        ret_ty: None,
+                        args: Box::new([bool_arg]),
+                    }),
+                    contents: None,
+                }),
+                None,
+            )
+        });
     }
 
     fn fixup_extends<'hir>(&mut self, backrefs: &'hir HirBackrefs) {

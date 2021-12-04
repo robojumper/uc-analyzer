@@ -57,6 +57,8 @@ pub enum BodyErrorKind {
     MissingNonOptional,
     /// An out/by-ref argument was not a place
     ByRefArgNotPlace,
+    /// class argument to coerce function wasn't class
+    BadCoerceArg,
     /// TODO
     NotYetImplemented,
 }
@@ -424,7 +426,21 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
 
             if func_flags.contains(FuncFlags::COERCE) {
                 let ty = ret_ty.expect_ty("coerce function");
-                // TODO: Adjust ty here
+                let arg = arg_exprs[0].unwrap();
+                let expr = self.body.get_expr(arg);
+                match &expr.ty {
+                    ExprTy::Ty(t) if t.is_class() => {
+                        let new_ret = t.instanciate_class();
+                        assert!(self.ty_match(ty, new_ret).is_some());
+                        ret_ty = ExprTy::Ty(new_ret);
+                    }
+                    _ => {
+                        return Err(BodyError {
+                            kind: BodyErrorKind::BadCoerceArg,
+                            span: expr.span.unwrap(),
+                        })
+                    }
+                }
             }
 
             Ok((ret_ty, arg_exprs))
@@ -808,31 +824,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             uc_ast::ExprKind::SymExpr { sym } => {
                 // This could be 1. a constant in scope, 2. an enum value, 3. a local or arg 4. a class variable or function 5. a self 6. delegate function
                 // TODO: Order?
-                if let Ok(konst) = self.ctx.resolver.get_scoped_const(
-                    self.func_scope,
-                    self.ctx.defs,
-                    ScopeWalkKind::Access,
-                    sym,
-                ) {
-                    return Err(BodyError {
-                        kind: BodyErrorKind::NotYetImplemented,
-                        span: expr.span,
-                    });
-                    (
-                        ExprKind::Value(ValueExprKind::Const(konst)),
-                        ExprTy::Ty(self.konst_ty(konst)),
-                    )
-                } else if let Ok(en) =
-                    self.ctx
-                        .resolver
-                        .get_global_value(self.func_scope, self.ctx.defs, sym)
-                {
-                    let parent_enum = self.ctx.defs.get_variant(en).owning_enum;
-                    (
-                        ExprKind::Value(ValueExprKind::Lit(Literal::Byte)),
-                        ExprTy::Ty(Ty::enum_from(parent_enum)),
-                    )
-                } else if let Ok(var) = self.ctx.resolver.get_scoped_var(
+                if let Ok(var) = self.ctx.resolver.get_scoped_var(
                     self.func_scope,
                     self.ctx.defs,
                     ScopeWalkKind::Access,
@@ -874,6 +866,30 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         kind: BodyErrorKind::NotYetImplemented,
                         span: expr.span,
                     });
+                } else if let Ok(konst) = self.ctx.resolver.get_scoped_const(
+                    self.func_scope,
+                    self.ctx.defs,
+                    ScopeWalkKind::Access,
+                    sym,
+                ) {
+                    return Err(BodyError {
+                        kind: BodyErrorKind::NotYetImplemented,
+                        span: expr.span,
+                    });
+                    (
+                        ExprKind::Value(ValueExprKind::Const(konst)),
+                        ExprTy::Ty(self.konst_ty(konst)),
+                    )
+                } else if let Ok(en) =
+                    self.ctx
+                        .resolver
+                        .get_global_value(self.func_scope, self.ctx.defs, sym)
+                {
+                    let parent_enum = self.ctx.defs.get_variant(en).owning_enum;
+                    (
+                        ExprKind::Value(ValueExprKind::Lit(Literal::Byte)),
+                        ExprTy::Ty(Ty::enum_from(parent_enum)),
+                    )
                 } else {
                     return Err(BodyError {
                         kind: BodyErrorKind::SymNotFound { name: sym.clone() },
