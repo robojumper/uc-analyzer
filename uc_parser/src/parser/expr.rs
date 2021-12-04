@@ -402,11 +402,11 @@ fn prefix_binding_power(op: OpLike) -> Option<((), u8)> {
         _ => return None,
     };
     let res = match op {
-        Op::Bang => ((), 11),
-        Op::AddAdd => ((), 11),
-        Op::SubSub => ((), 11),
-        Op::Tilde => ((), 11),
-        Op::Sub => ((), 11),
+        Op::Bang => ((), 39),
+        Op::AddAdd => ((), 39),
+        Op::SubSub => ((), 39),
+        Op::Tilde => ((), 39),
+        Op::Sub => ((), 39),
         _ => return None,
     };
     Some(res)
@@ -420,8 +420,8 @@ fn postfix_binding_power(op: OpLike) -> Option<(u8, ())> {
         _ => return None,
     };
     let res = match op {
-        Op::AddAdd => (10, ()),
-        Op::SubSub => (10, ()),
+        Op::AddAdd => (38, ()),
+        Op::SubSub => (38, ()),
         _ => return None,
     };
     Some(res)
