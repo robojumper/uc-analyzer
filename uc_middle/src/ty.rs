@@ -65,17 +65,6 @@ pub struct Ty {
     subst: Option<DefId>,
 }
 
-impl Ty {
-    /// We don't expose any comparison impls because we want the type checker
-    /// to go through is_subtype / classify_conversion. This is a sanity check
-    /// that we don't have cycles in our subclassing relationship.
-    pub fn assert_literally_same(self, other: Self) {
-        assert_eq!(self.decorator, other.decorator);
-        assert_eq!(self.base_ctor, other.base_ctor);
-        assert_eq!(self.subst, other.subst);
-    }
-}
-
 #[derive(Debug)]
 pub enum ConversionClassification {
     Forbidden,
@@ -137,6 +126,7 @@ pub fn is_subtype(
     specific: Ty,
     object_id: DefId,
     subdef_check: &dyn Fn(DefId, DefId) -> Option<u16>,
+    sig_check: &dyn Fn(DefId, DefId) -> bool,
 ) -> Option<u16> {
     use BaseTyCtor::*;
 
@@ -185,10 +175,10 @@ pub fn is_subtype(
                 (Interface, Interface) => {
                     subdef_check(general.subst.unwrap(), specific.subst.unwrap())
                 }
-                // TODO: Are delegates duck typed?
                 (Delegate, None) => Some(0),
                 (Delegate, Delegate) => {
-                    if general.subst.unwrap() == specific.subst.unwrap() {
+                    let (g, s) = (general.subst.unwrap(), specific.subst.unwrap());
+                    if sig_check(g, s) {
                         Some(0)
                     } else {
                         Option::None
@@ -215,6 +205,7 @@ pub fn is_subtype(
             },
             object_id,
             subdef_check,
+            sig_check,
         ),
         (TyDecorator::StaticArray(i), TyDecorator::StaticArray(j)) => {
             if i == j {
@@ -229,6 +220,7 @@ pub fn is_subtype(
                     },
                     object_id,
                     subdef_check,
+                    sig_check,
                 )
             } else {
                 Option::None

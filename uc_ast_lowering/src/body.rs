@@ -4,8 +4,8 @@ use uc_def::{ArgFlags, FuncFlags, Op};
 use uc_files::Span;
 use uc_middle::{
     body::{
-        Block, BlockId, Body, DynArrayOpKind, Expr, ExprId, ExprKind, ExprTy, Literal,
-        LoopDesugaring, PlaceExprKind, Statement, StatementKind, StmtId, ValueExprKind,
+        Block, BlockId, Body, DynArrayOpKind, Expr, ExprId, ExprKind, ExprTy, FuncReceiver,
+        Literal, LoopDesugaring, PlaceExprKind, Statement, StatementKind, StmtId, ValueExprKind,
     },
     ty::{self, Ty},
     ClassKind, DefId, FuncSig, ScopeWalkKind,
@@ -108,6 +108,8 @@ pub enum BodyErrorKind {
     NoMatchingOps,
     // Before a default/static/const
     MissingClassLit,
+    // A delegate had some weird static thing going on
+    DubiousDelegateBinding,
     /// TODO
     NotYetImplemented(&'static str),
 }
@@ -615,13 +617,12 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     } else {
                         TypeExpectation::RequiredTy(arg.ty)
                     };
-                    let exp_id = self.lower_expr(arg_expr, arg_expr_ty, false)?;
-                    let expr = self.body.get_expr(exp_id);
-                    if arg
+                    let is_out = arg
                         .flags
-                        .contains(ArgFlags::OUT | ArgFlags::OUTONLY | ArgFlags::REF)
-                        && !matches!(expr.kind, ExprKind::Place(_))
-                    {
+                        .contains(ArgFlags::OUT | ArgFlags::OUTONLY | ArgFlags::REF);
+                    let exp_id = self.lower_expr(arg_expr, arg_expr_ty, is_out)?;
+                    let expr = self.body.get_expr(exp_id);
+                    if is_out && !matches!(expr.kind, ExprKind::Place(_)) {
                         return Err(BodyError {
                             kind: BodyErrorKind::ByRefArgNotPlace,
                             span,
@@ -849,7 +850,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         &mut self,
         expr: &'hir uc_ast::Expr,
         ty_expec: TypeExpectation,
-        assign: bool,
+        prefer_delegate_prop: bool,
     ) -> Result<ExprId, BodyError> {
         // If we coerce our type anyway, it'd be bad to eagerly expect something different
         let (lhs_ty_hint, passdown_ty_expec) = match ty_expec {
@@ -922,7 +923,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     Some(lhs) => {
                         if matches!(&lhs.kind, uc_ast::ExprKind::FieldExpr { rhs, .. } | uc_ast::ExprKind::SymExpr { sym: rhs } if rhs == "static")
                         {
-                            let receiver = match &lhs.kind {
+                            let receiver_class = match &lhs.kind {
                                 uc_ast::ExprKind::FieldExpr { lhs, .. } => match &lhs.kind {
                                     uc_ast::ExprKind::LiteralExpr { lit } => {
                                         match self.ast_to_middle_lit(
@@ -930,13 +931,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                             TypeExpectation::None,
                                             lhs.span,
                                         )? {
-                                            (x @ Literal::Class(_), ty) => {
-                                                self.body.add_expr(Expr {
-                                                    kind: ExprKind::Value(ValueExprKind::Lit(x)),
-                                                    ty: ExprTy::Ty(ty),
-                                                    span: Some(lhs.span),
-                                                })
-                                            }
+                                            (Literal::Class(did), ty) => did,
                                             _ => {
                                                 return Err(BodyError {
                                                     kind: BodyErrorKind::MissingClassLit,
@@ -952,26 +947,15 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                         })
                                     }
                                 },
-                                uc_ast::ExprKind::SymExpr { .. } => self.body.add_expr(Expr {
-                                    kind: ExprKind::Value(ValueExprKind::Lit(Literal::Class(
-                                        self.class_did,
-                                    ))),
-                                    ty: ExprTy::Ty(Ty::class_from(self.class_did)),
-                                    span: Some(lhs.span),
-                                }),
+                                uc_ast::ExprKind::SymExpr { .. } => self.class_did,
                                 _ => unreachable!(),
                             };
-
-                            let receiver_def = self.body.get_expr_ty(receiver);
 
                             let func = self
                                 .ctx
                                 .resolver
                                 .get_scoped_func(
-                                    receiver_def
-                                        .expect_ty("just created class")
-                                        .get_def()
-                                        .unwrap(),
+                                    receiver_class,
                                     self.ctx.defs,
                                     ScopeWalkKind::Access,
                                     name,
@@ -997,7 +981,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             (
                                 ExprKind::Value(ValueExprKind::FuncCall(
                                     func,
-                                    receiver,
+                                    FuncReceiver::Cdo(receiver_class),
                                     arg_exprs.into_boxed_slice(),
                                 )),
                                 ret_ty,
@@ -1047,7 +1031,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                 (
                                     ExprKind::Value(ValueExprKind::FuncCall(
                                         func,
-                                        receiver,
+                                        FuncReceiver::Expr(receiver),
                                         arg_exprs.into_boxed_slice(),
                                     )),
                                     ret_ty,
@@ -1093,22 +1077,16 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                                 | FuncFlags::ITERATOR
                                         ));
                                         let receiver = if def.flags.contains(FuncFlags::STATIC) {
-                                            self.body.add_expr(Expr {
-                                                kind: ExprKind::Value(ValueExprKind::Lit(
-                                                    Literal::Class(self.class_did),
-                                                )),
-                                                ty: ExprTy::Ty(self.class_ty),
-                                                span: None,
-                                            })
+                                            FuncReceiver::Cdo(self.class_did)
                                         } else {
-                                            self.body.add_expr(Expr {
+                                            FuncReceiver::Expr(self.body.add_expr(Expr {
                                                 ty: ExprTy::Ty(self.self_ty.ok_or(BodyError {
                                                     kind: BodyErrorKind::InvalidSelfAccess,
                                                     span: expr.span,
                                                 })?),
                                                 kind: ExprKind::Place(PlaceExprKind::SelfAccess),
                                                 span: None,
-                                            })
+                                            }))
                                         };
                                         let (ret_ty, arg_exprs) = self.lower_call_sig(
                                             def.sig.as_ref().unwrap(),
@@ -1264,10 +1242,45 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             ExprTy::Ty(arg.ty),
                         ),
                         uc_middle::DefKind::Local(local) => (
-                            ExprKind::Place(PlaceExprKind::Arg(def.id)),
+                            ExprKind::Place(PlaceExprKind::Local(def.id)),
                             ExprTy::Ty(local.ty),
                         ),
                         _ => panic!("unexpected def {:?} for sym {:?}", def, sym),
+                    }
+                } else if let Ok(func) = self.ctx.resolver.get_scoped_func(
+                    self.body_scope,
+                    self.ctx.defs,
+                    ScopeWalkKind::Access,
+                    sym,
+                ) {
+                    let func_def = self.ctx.defs.get_func(func);
+                    if prefer_delegate_prop {
+                        let delegate_prop = func_def.delegate_prop.unwrap();
+                        let self_place = self.body.add_expr(Expr {
+                            ty: ExprTy::Ty(self.self_ty.ok_or(BodyError {
+                                kind: BodyErrorKind::DubiousDelegateBinding,
+                                span: expr.span,
+                            })?),
+                            kind: ExprKind::Place(PlaceExprKind::SelfAccess),
+                            span: Some(expr.span),
+                        });
+                        (
+                            ExprKind::Place(PlaceExprKind::Field(self_place, delegate_prop)),
+                            ExprTy::Ty(Ty::delegate_from(func)),
+                        )
+                    } else {
+                        let bound_receiver = match self.self_ty {
+                            Some(s) => FuncReceiver::Expr(self.body.add_expr(Expr {
+                                ty: ExprTy::Ty(s),
+                                kind: ExprKind::Place(PlaceExprKind::SelfAccess),
+                                span: Some(expr.span),
+                            })),
+                            None => FuncReceiver::Cdo(self.class_did),
+                        };
+                        (
+                            ExprKind::Value(ValueExprKind::DelegateCreation(bound_receiver, func)),
+                            ExprTy::Ty(Ty::delegate_from(func)),
+                        )
                     }
                 } else if sym == "self" {
                     (
@@ -1390,10 +1403,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 // L is subtype of R
                 (None, Some(_)) => Some(right),
                 (Some(_), None) => Some(left),
-                (Some(_), Some(_)) => {
-                    l.assert_literally_same(r);
-                    Some(left)
-                }
+                (Some(_), Some(_)) => Some(left),
             }
         } else {
             Some(ExprTy::Void)
@@ -1533,6 +1543,52 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         }
     }
 
+    fn signature_match(&self, general: DefId, specific: DefId) -> bool {
+        if general == specific {
+            return true;
+        }
+        let general_func_sig = self.ctx.defs.get_func(general).sig.as_ref().unwrap();
+        let specific_func_sig = self.ctx.defs.get_func(specific).sig.as_ref().unwrap();
+
+        if general_func_sig.args.len() != specific_func_sig.args.len() {
+            return false;
+        }
+
+        // TODO: How about a byte comparison of `Ty`?
+        let cmp_tys = |ty1, ty2| {
+            if self.ty_match(ty1, ty2) == Some(0) {
+                assert!(self.ty_match(ty2, ty1) == Some(0));
+                true
+            } else {
+                false
+            }
+        };
+
+        match (general_func_sig.ret_ty, specific_func_sig.ret_ty) {
+            (None, None) => {}
+            (Some(ty1), Some(ty2)) => {
+                if !cmp_tys(ty1, ty2) {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+
+        for (&arg1, &arg2) in general_func_sig
+            .args
+            .iter()
+            .zip(specific_func_sig.args.iter())
+        {
+            let general_arg = self.ctx.defs.get_arg(arg1);
+            let specific_arg = self.ctx.defs.get_arg(arg2);
+            if !cmp_tys(general_arg.ty, specific_arg.ty) {
+                return false;
+            }
+        }
+
+        true
+    }
+
     /// Returns whether src is a subtype of dest
     fn ty_match(&self, dest: Ty, src: Ty) -> Option<u16> {
         ty::is_subtype(
@@ -1540,6 +1596,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             src,
             self.ctx.special_items.object_id.unwrap(),
             &|general, specific| self.inheritance_distance(general, specific),
+            &|general, specific| self.signature_match(general, specific),
         )
     }
 }
