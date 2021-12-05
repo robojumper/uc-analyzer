@@ -501,7 +501,7 @@ impl<'defs> LoweringContext<'defs> {
         }
     }
 
-    fn resolve_dim(&self, dim: &uc_ast::DimCount, scope: DefId) -> u16 {
+    fn resolve_dim(&self, dim: &uc_ast::DimCount, scope: DefId) -> Option<u16> {
         match dim {
             DimCount::Complex(n) => match &**n {
                 [single] => {
@@ -513,11 +513,11 @@ impl<'defs> LoweringContext<'defs> {
                     ) {
                         let def = self.defs.get_const(const_id);
                         match &def.val {
-                            ConstVal::Num(n) => *n as u16,
+                            ConstVal::Num(n) => Some(*n as u16),
                             ConstVal::Other => panic!("invalid const value"),
                         }
                     } else if let Ok(en_def) = self.resolver.get_ty(scope, self.defs, single) {
-                        self.defs.get_enum(en_def).variants.len() as u16
+                        Some(self.defs.get_enum(en_def).variants.len() as u16)
                     } else {
                         panic!("invalid const static array bound")
                     }
@@ -531,12 +531,12 @@ impl<'defs> LoweringContext<'defs> {
                         .resolver
                         .get_ty(scope, self.defs, en)
                         .unwrap_or_else(|e| panic!("failed to find enum {:?}: {:?}", en, e));
-                    self.defs.get_enum(en_def).variants.len() as u16
+                    Some(self.defs.get_enum(en_def).variants.len() as u16)
                 }
                 x => panic!("invalid static array length specification: {:?}", x),
             },
-            DimCount::Number(n) => *n as u16,
-            DimCount::None => panic!(),
+            DimCount::Number(n) => Some(*n as u16),
+            DimCount::None => None,
         }
     }
 
@@ -553,12 +553,17 @@ impl<'defs> LoweringContext<'defs> {
                     this.resolver
                         .add_scoped_var(func_id, arg.name.clone(), arg_id)
                         .expect("duplicate arg");
+                    let arg_ty = this.decode_ast_ty(&arg.ty, func_id).unwrap();
+                    let ty = match this.resolve_dim(&arg.count, func_id) {
+                        Some(c) => Ty::stat_array_from(arg_ty, c),
+                        _ => arg_ty,
+                    };
                     (
                         DefKind::FuncArg(FuncArg {
                             name: arg.name.clone(),
                             owner: func_id,
                             flags: arg.mods.flags,
-                            ty: this.decode_ast_ty(&arg.ty, func_id).unwrap(),
+                            ty,
                         }),
                         Some(arg.span),
                     )
@@ -580,9 +585,9 @@ impl<'defs> LoweringContext<'defs> {
                         this.resolver
                             .add_scoped_var(func_id, inst.name.clone(), local_id)
                             .expect("duplicate local");
-                        let ty = match &inst.count {
-                            DimCount::None => local_ty,
-                            x => Ty::stat_array_from(local_ty, this.resolve_dim(x, func_id)),
+                        let ty = match this.resolve_dim(&inst.count, func_id) {
+                            Some(c) => Ty::stat_array_from(local_ty, c),
+                            _ => local_ty,
                         };
                         (
                             DefKind::Local(Local {
@@ -603,10 +608,9 @@ impl<'defs> LoweringContext<'defs> {
     fn resolve_sigs<'hir>(&mut self, backrefs: &HirBackrefs<'hir>) {
         for var_ref in &backrefs.vars {
             let inner_ty = self.decode_ast_ty(&var_ref.1 .0.ty, *var_ref.0).unwrap();
-            let dim = &var_ref.1 .0.names[var_ref.1 .1].count;
-            let ty = match dim {
-                DimCount::None => inner_ty,
-                x => Ty::stat_array_from(inner_ty, self.resolve_dim(x, *var_ref.0)),
+            let ty = match self.resolve_dim(&var_ref.1 .0.names[var_ref.1 .1].count, *var_ref.0) {
+                Some(c) => Ty::stat_array_from(inner_ty, c),
+                _ => inner_ty,
             };
             self.defs.get_var_mut(*var_ref.0).ty = Some(ty);
         }

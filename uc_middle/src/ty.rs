@@ -141,6 +141,10 @@ pub fn is_subtype(
     use BaseTyCtor::*;
 
     match (general.decorator, specific.decorator) {
+        // Apparently none can be used in place of dynamic arrays?
+        (TyDecorator::DynArray, TyDecorator::None) if specific.base_ctor == BaseTyCtor::None => {
+            Some(0)
+        }
         (TyDecorator::None, TyDecorator::None) => {
             match (general.base_ctor, specific.base_ctor) {
                 (Placeholder, _) | (_, Placeholder) => {

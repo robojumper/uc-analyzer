@@ -448,9 +448,9 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 }
                 if let Some(arg_expr) = arg_expr {
                     let arg_expr_ty = if arg.flags.contains(ArgFlags::COERCE) {
-                        TypeExpectation::RequiredTy(arg.ty)
-                    } else {
                         TypeExpectation::CoerceToTy(arg.ty)
+                    } else {
+                        TypeExpectation::RequiredTy(arg.ty)
                     };
                     let exp_id = self.lower_expr(arg_expr, arg_expr_ty, false)?;
                     let expr = self.body.get_expr(exp_id);
