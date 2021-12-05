@@ -87,17 +87,6 @@ impl Parser<'_> {
                     let mut lhs = self.parse_base_expression_bp(0)?;
                     lhs.paren = true;
                     self.expect(sig!(RParen))?;
-                    if self.eat(sig!(LParen)) {
-                        let args = self.parse_arg_list()?;
-                        lhs = Expr {
-                            span: lhs_marker.complete(self),
-                            paren: false,
-                            kind: ExprKind::DelegateCallExpr {
-                                lhs: Box::new(lhs),
-                                args,
-                            },
-                        }
-                    }
                     lhs
                 }
                 Tk::Sig(sig) => {

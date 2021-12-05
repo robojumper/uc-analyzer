@@ -48,7 +48,6 @@ fn expr_no_effects(expr: &Expr) -> Option<&'static str> {
             name: _,
             args: _,
         } => None,
-        ExprKind::DelegateCallExpr { lhs: _, args: _ } => None,
         ExprKind::ClassMetaCastExpr { ty: _, expr: _ } => {
             Some("class meta cast expression has no side effect")
         }

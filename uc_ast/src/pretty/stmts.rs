@@ -162,21 +162,6 @@ impl<W: io::Write> PPrinter<W> {
                 }
                 self.w.write_all(b")")?;
             }
-            ExprKind::DelegateCallExpr { lhs, args } => {
-                self.w.write_all(b"(")?;
-                self.format_expr(lhs)?;
-                self.w.write_all(b")")?;
-                self.w.write_all(b"(")?;
-                for (idx, arg) in args.iter().enumerate() {
-                    if let Some(arg) = arg {
-                        self.format_expr(arg)?;
-                    }
-                    if idx != args.len() - 1 {
-                        self.w.write_all(b", ")?;
-                    }
-                }
-                self.w.write_all(b")")?;
-            }
             ExprKind::ClassMetaCastExpr { ty, expr } => {
                 self.format_ty(ty)?;
                 self.w.write_all(b"(")?;

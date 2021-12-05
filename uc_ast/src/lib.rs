@@ -256,10 +256,6 @@ pub enum ExprKind {
         name: Identifier,
         args: Vec<Option<Expr>>,
     },
-    DelegateCallExpr {
-        lhs: Box<Expr>,
-        args: Vec<Option<Expr>>,
-    },
     ClassMetaCastExpr {
         ty: Ty,
         expr: Box<Expr>,

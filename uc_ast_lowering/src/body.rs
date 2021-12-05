@@ -1341,12 +1341,6 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     }
                 }
             }
-            uc_ast::ExprKind::DelegateCallExpr { lhs, args } => {
-                return Err(BodyError {
-                    kind: BodyErrorKind::NotYetImplemented("delegate call"),
-                    span: expr.span,
-                })
-            }
             uc_ast::ExprKind::ClassMetaCastExpr { ty, expr } => {
                 let cast_ty = self.ctx.decode_ast_ty(ty, self.body_scope).unwrap();
                 (self.lower_cast(expr, cast_ty)?, ExprTy::Ty(cast_ty))

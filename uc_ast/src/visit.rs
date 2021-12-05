@@ -129,12 +129,6 @@ pub fn walk_expr<V: Visitor>(visit: &mut V, expr: &Expr) {
                 visit.visit_expr(arg);
             }
         }
-        ExprKind::DelegateCallExpr { lhs, args } => {
-            visit.visit_expr(lhs);
-            for arg in args.iter().flatten() {
-                visit.visit_expr(arg);
-            }
-        }
         ExprKind::ClassMetaCastExpr { ty: _, expr } => {
             visit.visit_expr(expr);
         }
