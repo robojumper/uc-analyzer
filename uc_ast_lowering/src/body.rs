@@ -50,50 +50,25 @@ enum TypeExpectation {
 #[derive(Debug)]
 pub enum BodyErrorKind {
     /// An expression evaluating to no type at all was found where a type was expected.
-    VoidType {
-        expected: Option<Ty>,
-    },
+    VoidType { expected: Option<Ty> },
     /// Indexing into not-an-array.
-    NonArrayType {
-        found: Ty,
-    },
+    NonArrayType { found: Ty },
     /// New-ing or iterating without class type
-    NonClassType {
-        found: Ty,
-    },
+    NonClassType { found: Ty },
     /// An incompatible type was found.
-    TyMismatch {
-        expected: Ty,
-        found: Ty,
-    },
+    TyMismatch { expected: Ty, found: Ty },
     /// A compatible type that requires an explicit cast was found.
-    MissingCast {
-        to: Ty,
-        from: Ty,
-    },
+    MissingCast { to: Ty, from: Ty },
     /// An unneeded cast was found
-    UnnecessaryCast {
-        to: Ty,
-        from: Ty,
-    },
+    UnnecessaryCast { to: Ty, from: Ty },
     /// An invalid cast was found
-    InvalidCast {
-        to: Ty,
-        from: Ty,
-    },
+    InvalidCast { to: Ty, from: Ty },
     /// Invalid number of arguments
-    ArgCountError {
-        expected: u32,
-        got: u32,
-    },
+    ArgCountError { expected: u32, got: u32 },
     /// Function not found
-    FuncNotFound {
-        name: Identifier,
-    },
+    FuncNotFound { name: Identifier },
     /// Freestanding symbol not found
-    SymNotFound {
-        name: Identifier,
-    },
+    SymNotFound { name: Identifier },
     /// Self not allowed
     InvalidSelfAccess,
     /// Non-optional arg missing
@@ -102,16 +77,18 @@ pub enum BodyErrorKind {
     ByRefArgNotPlace,
     /// class argument to coerce function wasn't class
     BadCoerceArg,
-    // Multiple matching ops
+    /// Multiple matching ops
     MultipleMatchingOps,
-    // No matching op
+    /// No matching op
     NoMatchingOps,
-    // Before a default/static/const
+    /// Before a default/static/const
     MissingClassLit,
-    // A delegate had some weird static thing going on
+    /// We're not sure about delegates
     DubiousDelegateBinding,
-    // Not a supported access context
+    /// Not a supported access context
     BadContext,
+    /// Accessing op as func?
+    AccessOpAsFunc,
     /// TODO
     NotYetImplemented(&'static str),
 }
@@ -430,6 +407,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         name: &Identifier,
         span: Span,
         allow_binding_to_static: bool,
+        allow_iterator: bool,
     ) -> Result<Option<(Receiver, DefId)>, BodyError> {
         if let Ok(func) = self.ctx.resolver.get_scoped_func(
             self.body_scope,
@@ -439,11 +417,9 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         ) {
             let def = self.ctx.defs.get_func(func);
             assert!(!def.flags.intersects(
-                FuncFlags::OPERATOR
-                    | FuncFlags::PREOPERATOR
-                    | FuncFlags::POSTOPERATOR
-                    | FuncFlags::ITERATOR
+                FuncFlags::OPERATOR | FuncFlags::PREOPERATOR | FuncFlags::POSTOPERATOR
             ));
+            assert!(allow_iterator || !def.flags.contains(FuncFlags::ITERATOR));
             let receiver = if def.flags.contains(FuncFlags::STATIC) {
                 Receiver::Cdo(self.class_did)
             } else {
@@ -520,11 +496,20 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 }
             }
             None => {
-                if let Some(_) = self.try_bare_var_access(name, source.span)? {}
-                return Err(BodyError {
-                    kind: BodyErrorKind::NotYetImplemented("bare iterator"),
-                    span: source.span,
-                });
+                if let Some((kind, ty)) = self.try_bare_var_access(name, source.span)? {
+                    let expr = self.body.add_expr(Expr {
+                        kind,
+                        ty,
+                        span: Some(source.span),
+                    });
+                    NativeIteratorKind::Array(expr)
+                } else if let Some((receiver, func)) =
+                    self.try_bare_func_access(name, source.span, false, true)?
+                {
+                    NativeIteratorKind::Func(receiver, func)
+                } else {
+                    panic!("unknown iterator")
+                }
             }
         };
 
@@ -1312,7 +1297,9 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                     }
                                 }
                             }
-                            None => match self.try_bare_func_access(name, expr.span, false)? {
+                            None => match self
+                                .try_bare_func_access(name, expr.span, false, false)?
+                            {
                                 Some((receiver, func)) => {
                                     let def = self.ctx.defs.get_func(func);
                                     let (ret_ty, arg_exprs) = self.lower_call_sig(
@@ -1443,7 +1430,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 if let Some(res) = self.try_bare_var_access(sym, expr.span)? {
                     res
                 } else if let Some((receiver, func)) =
-                    self.try_bare_func_access(sym, expr.span, true)?
+                    self.try_bare_func_access(sym, expr.span, true, false)?
                 {
                     let func_def = self.ctx.defs.get_func(func);
                     if prefer_delegate_prop {
