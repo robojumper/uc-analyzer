@@ -222,3 +222,9 @@ pub enum Receiver {
     Cdo(DefId),
     Expr(ExprId),
 }
+
+#[derive(Debug)]
+pub enum RecvKind {
+    Static,
+    Default,
+}
