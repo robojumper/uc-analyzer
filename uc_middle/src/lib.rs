@@ -233,6 +233,9 @@ impl Defs {
             DefKind::Var(v) => {
                 self.walk_scopes_inner(v.owner, kind, cb)?;
             }
+            DefKind::Const(c) => {
+                self.walk_scopes_inner(c.owner, kind, cb)?;
+            }
             x => panic!("not usable for scope walk {:?}", x),
         }
         ControlFlow::Continue(())

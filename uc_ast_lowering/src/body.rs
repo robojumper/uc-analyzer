@@ -8,7 +8,7 @@ use uc_middle::{
         Literal, LoopDesugaring, PlaceExprKind, Statement, StatementKind, StmtId, ValueExprKind,
     },
     ty::{self, Ty},
-    ClassKind, DefId, FuncSig, ScopeWalkKind,
+    ClassKind, ConstVal, DefId, FuncSig, ScopeWalkKind,
 };
 use uc_name::Identifier;
 
@@ -1298,13 +1298,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     ScopeWalkKind::Access,
                     sym,
                 ) {
-                    return Err(BodyError {
-                        kind: BodyErrorKind::NotYetImplemented("const ty resolution"),
-                        span: expr.span,
-                    });
+                    let const_ty = self.const_ty(konst, passdown_ty_expec)?;
                     (
                         ExprKind::Value(ValueExprKind::Const(konst)),
-                        ExprTy::Ty(self.konst_ty(konst)),
+                        ExprTy::Ty(const_ty),
                     )
                 } else if let Ok(en) =
                     self.ctx
@@ -1468,26 +1465,50 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             uc_ast::Literal::Name(_) => Ok((Literal::Name, Ty::NAME)),
             uc_ast::Literal::String(_) => Ok((Literal::String, Ty::STRING)),
 
-            uc_ast::Literal::Int(i) => {
-                let interp_ty = match expected_type {
-                    TypeExpectation::RequiredTy(t) | TypeExpectation::HintTy(t) => Some(t),
-                    _ => None,
-                };
-
-                if interp_ty.map(|t| t.is_float()).unwrap_or(false) {
-                    Ok((Literal::Float(*i as f32), Ty::FLOAT))
-                } else if interp_ty.map(|t| t.is_byte()).unwrap_or(false) {
-                    Ok((Literal::Byte(*i as u8), Ty::BYTE))
-                } else {
-                    Ok((Literal::Int(*i), Ty::INT))
-                }
-            }
+            uc_ast::Literal::Int(i) => Ok(self.adjust_int(*i, expected_type)),
             uc_ast::Literal::Float(f) => Ok((Literal::Float(*f), Ty::FLOAT)),
         }
     }
 
-    fn konst_ty(&self, konst: DefId) -> Ty {
-        todo!()
+    fn adjust_int(&self, i: i32, ty_expec: TypeExpectation) -> (Literal, Ty) {
+        let interp_ty = match ty_expec {
+            TypeExpectation::RequiredTy(t) | TypeExpectation::HintTy(t) => Some(t),
+            _ => None,
+        };
+
+        if interp_ty.map(|t| t.is_float()).unwrap_or(false) {
+            (Literal::Float(i as f32), Ty::FLOAT)
+        } else if interp_ty.map(|t| t.is_byte()).unwrap_or(false) {
+            (Literal::Byte(i as u8), Ty::BYTE)
+        } else {
+            (Literal::Int(i), Ty::INT)
+        }
+    }
+
+    fn const_ty(&self, konst: DefId, ty_expec: TypeExpectation) -> Result<Ty, BodyError> {
+        let val = self.ctx.defs.get_const(konst);
+        match &val.val {
+            ConstVal::Literal(l) => match l {
+                Literal::Bool(_) => Ok(Ty::FLOAT),
+                Literal::Int(i) => Ok(self.adjust_int(*i, ty_expec).1),
+                Literal::Float(f) => Ok(Ty::FLOAT),
+                Literal::Name => Ok(Ty::NAME),
+                Literal::String => Ok(Ty::STRING),
+                _ => unreachable!(),
+            },
+            ConstVal::Redirect(i) => {
+                let did = self
+                    .ctx
+                    .resolver
+                    .get_scoped_const(konst, self.ctx.defs, ScopeWalkKind::Access, i)
+                    .map_err(|_| BodyError {
+                        kind: BodyErrorKind::SymNotFound { name: i.clone() },
+                        span: self.ctx.defs.get_def(konst).span.unwrap(),
+                    })?;
+                // Exciting potential for a stack overflow here
+                self.const_ty(did, ty_expec)
+            }
+        }
     }
 
     // This is mostly cribbed from UCC without really understanding the implications.
