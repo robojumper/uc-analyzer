@@ -901,19 +901,36 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     } else {
                         ty.get_def().unwrap()
                     };
-                    let prop = self
-                        .ctx
-                        .resolver
-                        .get_scoped_var(scope, self.ctx.defs, ScopeWalkKind::Access, rhs)
-                        .map_err(|_| BodyError {
+                    if let Ok(prop) = self.ctx.resolver.get_scoped_var(
+                        scope,
+                        self.ctx.defs,
+                        ScopeWalkKind::Access,
+                        rhs,
+                    ) {
+                        let var = self.ctx.defs.get_var(prop);
+                        (
+                            ExprKind::Place(PlaceExprKind::Field(l, prop)),
+                            ExprTy::Ty(var.ty.unwrap()),
+                        )
+                    } else if let Ok(func) = self.ctx.resolver.get_scoped_func(
+                        scope,
+                        self.ctx.defs,
+                        ScopeWalkKind::Access,
+                        rhs,
+                    ) {
+                        (
+                            ExprKind::Value(ValueExprKind::DelegateCreation(
+                                FuncReceiver::Expr(l),
+                                func,
+                            )),
+                            ExprTy::Ty(Ty::delegate_from(func)),
+                        )
+                    } else {
+                        return Err(BodyError {
                             kind: BodyErrorKind::SymNotFound { name: rhs.clone() },
                             span: expr.span,
-                        })?;
-                    let var = self.ctx.defs.get_var(prop);
-                    (
-                        ExprKind::Place(PlaceExprKind::Field(l, prop)),
-                        ExprTy::Ty(var.ty.unwrap()),
-                    )
+                        });
+                    }
                 } else {
                     todo!("invalid field access: {:?}, {:?}", lhs, rhs)
                 }
