@@ -158,9 +158,9 @@ pub enum ValueExprKind {
     Const(DefId),
     /// Access to a function of a particular object,
     /// for delegate assignment or call
-    DelegateCreation(FuncReceiver, DefId),
+    DelegateCreation(Receiver, DefId),
     /// Function call, with function, receiver, and args
-    FuncCall(DefId, FuncReceiver, Box<[Option<ExprId>]>),
+    FuncCall(DefId, Receiver, Box<[Option<ExprId>]>),
     /// Delegate call, with delegate expr and args
     DelegateCall(ExprId, Box<[Option<ExprId>]>),
     /// See [`DynArrayOpKind`] for details
@@ -200,7 +200,7 @@ pub enum PlaceExprKind {
     Local(DefId),
     Arg(DefId),
     Index(ExprId, ExprId),
-    Field(ExprId, DefId),
+    Field(Receiver, DefId),
     DynArrayLen(ExprId),
 }
 
@@ -218,7 +218,7 @@ pub enum Literal {
 }
 
 #[derive(Debug)]
-pub enum FuncReceiver {
+pub enum Receiver {
     Cdo(DefId),
     Expr(ExprId),
 }
