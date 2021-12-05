@@ -117,11 +117,17 @@ pub enum BodyErrorKind {
 }
 
 #[derive(Debug)]
-pub enum AccessContext {
+enum AccessContext {
     Static(DefId),
     Const(DefId),
     Default(DefId),
     Expr(ExprId),
+}
+
+#[derive(Debug)]
+enum NativeIteratorKind {
+    Array(ExprId),
+    Func(Receiver, DefId),
 }
 
 impl<'hir> LoweringContext<'hir> {
@@ -377,17 +383,153 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         }))
     }
 
+    fn try_bare_var_access(
+        &mut self,
+        name: &Identifier,
+        span: Span,
+    ) -> Result<Option<(ExprKind, ExprTy)>, BodyError> {
+        if let Ok(var) = self.ctx.resolver.get_scoped_var(
+            self.body_scope,
+            self.ctx.defs,
+            ScopeWalkKind::Access,
+            name,
+        ) {
+            let def = self.ctx.defs.get_def(var);
+            match &def.kind {
+                uc_middle::DefKind::Var(var) => {
+                    let s = self.body.add_expr(Expr {
+                        ty: ExprTy::Ty(self.self_ty.ok_or(BodyError {
+                            kind: BodyErrorKind::InvalidSelfAccess,
+                            span,
+                        })?),
+                        kind: ExprKind::Place(PlaceExprKind::SelfAccess),
+                        span: None,
+                    });
+                    Ok(Some((
+                        ExprKind::Place(PlaceExprKind::Field(Receiver::Expr(s), def.id)),
+                        ExprTy::Ty(var.ty.unwrap()),
+                    )))
+                }
+                uc_middle::DefKind::FuncArg(arg) => Ok(Some((
+                    ExprKind::Place(PlaceExprKind::Arg(def.id)),
+                    ExprTy::Ty(arg.ty),
+                ))),
+                uc_middle::DefKind::Local(local) => Ok(Some((
+                    ExprKind::Place(PlaceExprKind::Local(def.id)),
+                    ExprTy::Ty(local.ty),
+                ))),
+                _ => panic!("unexpected def {:?} for sym {:?}", def, name),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn try_bare_func_access(
+        &mut self,
+        name: &Identifier,
+        span: Span,
+        allow_binding_to_static: bool,
+    ) -> Result<Option<(Receiver, DefId)>, BodyError> {
+        if let Ok(func) = self.ctx.resolver.get_scoped_func(
+            self.body_scope,
+            self.ctx.defs,
+            ScopeWalkKind::Access,
+            name,
+        ) {
+            let def = self.ctx.defs.get_func(func);
+            assert!(!def.flags.intersects(
+                FuncFlags::OPERATOR
+                    | FuncFlags::PREOPERATOR
+                    | FuncFlags::POSTOPERATOR
+                    | FuncFlags::ITERATOR
+            ));
+            let receiver = if def.flags.contains(FuncFlags::STATIC) {
+                Receiver::Cdo(self.class_did)
+            } else {
+                match (self.self_ty, allow_binding_to_static) {
+                    (None, false) => {
+                        return Err(BodyError {
+                            kind: BodyErrorKind::InvalidSelfAccess,
+                            span,
+                        })
+                    }
+                    (None, true) => Receiver::Cdo(self.class_did),
+                    (Some(d), _) => Receiver::Expr(self.body.add_expr(Expr {
+                        ty: ExprTy::Ty(self.class_ty),
+                        kind: ExprKind::Place(PlaceExprKind::SelfAccess),
+                        span: None,
+                    })),
+                }
+            };
+            Ok(Some((receiver, func)))
+        } else {
+            Ok(None)
+        }
+    }
+
     fn lower_foreach(
         &mut self,
-        source: &uc_ast::Expr,
+        source: &'hir uc_ast::Expr,
         run: &uc_ast::Block,
     ) -> Result<StatementKind, BodyError> {
         let (rhs, name, args) = match &source.kind {
             uc_ast::ExprKind::FuncCallExpr { lhs, name, args } => (lhs, name, args),
             _ => panic!("invalid syntax"),
         };
+        let func = match rhs {
+            Some(rhs) => {
+                let access_context = self.get_access_context(rhs)?;
+                match access_context {
+                    AccessContext::Static(c) => {
+                        let func = self
+                            .ctx
+                            .resolver
+                            .get_scoped_func(c, self.ctx.defs, ScopeWalkKind::Access, name)
+                            .map_err(|_| BodyError {
+                                kind: BodyErrorKind::FuncNotFound { name: name.clone() },
+                                span: source.span,
+                            })?;
+                        NativeIteratorKind::Func(Receiver::Cdo(c), func)
+                    }
+                    AccessContext::Const(_) => {
+                        return Err(BodyError {
+                            kind: BodyErrorKind::NotYetImplemented("cannot iterate over consts"),
+                            span: rhs.span,
+                        })
+                    }
+                    AccessContext::Default(c) => {
+                        let prop = self
+                            .ctx
+                            .resolver
+                            .get_scoped_var(c, self.ctx.defs, ScopeWalkKind::Access, name)
+                            .map_err(|_| BodyError {
+                                kind: BodyErrorKind::SymNotFound { name: name.clone() },
+                                span: source.span,
+                            })?;
+                        let ty = self.ctx.defs.get_var(prop).ty.unwrap();
+                        assert!(ty.is_dyn_array());
+                        let expr = self.body.add_expr(Expr {
+                            kind: ExprKind::Place(PlaceExprKind::Field(Receiver::Cdo(c), prop)),
+                            ty: ExprTy::Ty(ty),
+                            span: Some(source.span),
+                        });
+                        NativeIteratorKind::Array(expr)
+                    }
+                    AccessContext::Expr(expr) => NativeIteratorKind::Array(expr),
+                }
+            }
+            None => {
+                if let Some(_) = self.try_bare_var_access(name, source.span)? {}
+                return Err(BodyError {
+                    kind: BodyErrorKind::NotYetImplemented("bare iterator"),
+                    span: source.span,
+                });
+            }
+        };
+
         Err(BodyError {
-            kind: BodyErrorKind::NotYetImplemented("foreach"),
+            kind: BodyErrorKind::NotYetImplemented("iterator"),
             span: source.span,
         })
     }
@@ -1026,13 +1168,23 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             uc_ast::ExprKind::FieldExpr { lhs, rhs } => {
                 let access_context = self.get_access_context(lhs)?;
                 match access_context {
-                    AccessContext::Static(_) => {
-                        return Err(BodyError {
-                            kind: BodyErrorKind::NotYetImplemented(
-                                "static access context for field expr",
-                            ),
-                            span: expr.span,
-                        });
+                    AccessContext::Static(c) => {
+                        let func_def = self
+                            .ctx
+                            .resolver
+                            .get_scoped_func(c, self.ctx.defs, ScopeWalkKind::Access, rhs)
+                            .map_err(|_| BodyError {
+                                kind: BodyErrorKind::FuncNotFound { name: rhs.clone() },
+                                span: expr.span,
+                            })?;
+
+                        (
+                            ExprKind::Value(ValueExprKind::DelegateCreation(
+                                Receiver::Cdo(c),
+                                func_def,
+                            )),
+                            ExprTy::Ty(Ty::delegate_from(func_def)),
+                        )
                     }
                     AccessContext::Const(c) => {
                         let konst = self
@@ -1040,7 +1192,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             .resolver
                             .get_scoped_const(c, self.ctx.defs, ScopeWalkKind::Access, rhs)
                             .map_err(|_| BodyError {
-                                kind: BodyErrorKind::FuncNotFound { name: rhs.clone() },
+                                kind: BodyErrorKind::SymNotFound { name: rhs.clone() },
                                 span: expr.span,
                             })?;
 
@@ -1160,58 +1312,31 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                     }
                                 }
                             }
-                            None => {
-                                match self.ctx.resolver.get_scoped_func(
-                                    self.body_scope,
-                                    self.ctx.defs,
-                                    ScopeWalkKind::Access,
-                                    name,
-                                ) {
-                                    Ok(func) => {
-                                        let def = self.ctx.defs.get_func(func);
-                                        assert!(!def.flags.intersects(
-                                            FuncFlags::OPERATOR
-                                                | FuncFlags::PREOPERATOR
-                                                | FuncFlags::POSTOPERATOR
-                                                | FuncFlags::ITERATOR
-                                        ));
-                                        let receiver = if def.flags.contains(FuncFlags::STATIC) {
-                                            Receiver::Cdo(self.class_did)
-                                        } else {
-                                            Receiver::Expr(self.body.add_expr(Expr {
-                                                ty: ExprTy::Ty(self.self_ty.ok_or(BodyError {
-                                                    kind: BodyErrorKind::InvalidSelfAccess,
-                                                    span: expr.span,
-                                                })?),
-                                                kind: ExprKind::Place(PlaceExprKind::SelfAccess),
-                                                span: None,
-                                            }))
-                                        };
-                                        let (ret_ty, arg_exprs) = self.lower_call_sig(
-                                            def.sig.as_ref().unwrap(),
-                                            args,
-                                            expr.span,
-                                            def.flags,
-                                        )?;
-                                        (
-                                            ExprKind::Value(ValueExprKind::FuncCall(
-                                                func,
-                                                receiver,
-                                                arg_exprs.into_boxed_slice(),
-                                            )),
-                                            ret_ty,
-                                        )
-                                    }
-                                    Err(_) => {
-                                        return Err(BodyError {
-                                            kind: BodyErrorKind::FuncNotFound {
-                                                name: name.clone(),
-                                            },
-                                            span: expr.span,
-                                        })
-                                    }
+                            None => match self.try_bare_func_access(name, expr.span, false)? {
+                                Some((receiver, func)) => {
+                                    let def = self.ctx.defs.get_func(func);
+                                    let (ret_ty, arg_exprs) = self.lower_call_sig(
+                                        def.sig.as_ref().unwrap(),
+                                        args,
+                                        expr.span,
+                                        def.flags,
+                                    )?;
+                                    (
+                                        ExprKind::Value(ValueExprKind::FuncCall(
+                                            func,
+                                            receiver,
+                                            arg_exprs.into_boxed_slice(),
+                                        )),
+                                        ret_ty,
+                                    )
                                 }
-                            }
+                                None => {
+                                    return Err(BodyError {
+                                        kind: BodyErrorKind::FuncNotFound { name: name.clone() },
+                                        span: expr.span,
+                                    })
+                                }
+                            },
                         }
                     }
                 }
@@ -1321,73 +1446,21 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             uc_ast::ExprKind::SymExpr { sym } => {
                 // This could be 1. a constant in scope, 2. an enum value, 3. a local or arg 4. a class variable or function 5. a self 6. delegate function
                 // TODO: Order?
-                if let Ok(var) = self.ctx.resolver.get_scoped_var(
-                    self.body_scope,
-                    self.ctx.defs,
-                    ScopeWalkKind::Access,
-                    sym,
-                ) {
-                    let def = self.ctx.defs.get_def(var);
-                    match &def.kind {
-                        uc_middle::DefKind::Var(var) => {
-                            let s = self.body.add_expr(Expr {
-                                ty: ExprTy::Ty(self.self_ty.ok_or(BodyError {
-                                    kind: BodyErrorKind::InvalidSelfAccess,
-                                    span: expr.span,
-                                })?),
-                                kind: ExprKind::Place(PlaceExprKind::SelfAccess),
-                                span: None,
-                            });
-                            (
-                                ExprKind::Place(PlaceExprKind::Field(Receiver::Expr(s), def.id)),
-                                ExprTy::Ty(var.ty.unwrap()),
-                            )
-                        }
-                        uc_middle::DefKind::FuncArg(arg) => (
-                            ExprKind::Place(PlaceExprKind::Arg(def.id)),
-                            ExprTy::Ty(arg.ty),
-                        ),
-                        uc_middle::DefKind::Local(local) => (
-                            ExprKind::Place(PlaceExprKind::Local(def.id)),
-                            ExprTy::Ty(local.ty),
-                        ),
-                        _ => panic!("unexpected def {:?} for sym {:?}", def, sym),
-                    }
-                } else if let Ok(func) = self.ctx.resolver.get_scoped_func(
-                    self.body_scope,
-                    self.ctx.defs,
-                    ScopeWalkKind::Access,
-                    sym,
-                ) {
+                if let Some(res) = self.try_bare_var_access(sym, expr.span)? {
+                    res
+                } else if let Some((receiver, func)) =
+                    self.try_bare_func_access(sym, expr.span, true)?
+                {
                     let func_def = self.ctx.defs.get_func(func);
                     if prefer_delegate_prop {
                         let delegate_prop = func_def.delegate_prop.unwrap();
-                        let self_place = self.body.add_expr(Expr {
-                            ty: ExprTy::Ty(self.self_ty.ok_or(BodyError {
-                                kind: BodyErrorKind::DubiousDelegateBinding,
-                                span: expr.span,
-                            })?),
-                            kind: ExprKind::Place(PlaceExprKind::SelfAccess),
-                            span: Some(expr.span),
-                        });
                         (
-                            ExprKind::Place(PlaceExprKind::Field(
-                                Receiver::Expr(self_place),
-                                delegate_prop,
-                            )),
+                            ExprKind::Place(PlaceExprKind::Field(receiver, delegate_prop)),
                             ExprTy::Ty(Ty::delegate_from(func)),
                         )
                     } else {
-                        let bound_receiver = match self.self_ty {
-                            Some(s) => Receiver::Expr(self.body.add_expr(Expr {
-                                ty: ExprTy::Ty(s),
-                                kind: ExprKind::Place(PlaceExprKind::SelfAccess),
-                                span: Some(expr.span),
-                            })),
-                            None => Receiver::Cdo(self.class_did),
-                        };
                         (
-                            ExprKind::Value(ValueExprKind::DelegateCreation(bound_receiver, func)),
+                            ExprKind::Value(ValueExprKind::DelegateCreation(receiver, func)),
                             ExprTy::Ty(Ty::delegate_from(func)),
                         )
                     }
