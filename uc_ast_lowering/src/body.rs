@@ -1070,6 +1070,16 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                 ExprKind::Place(PlaceExprKind::Field(Receiver::Expr(l), prop)),
                                 ExprTy::Ty(var.ty.unwrap()),
                             )
+                        } else if let Ok(konst) = self.ctx.resolver.get_scoped_const(
+                            scope,
+                            self.ctx.defs,
+                            ScopeWalkKind::Access,
+                            rhs,
+                        ) {
+                            (
+                                ExprKind::Value(ValueExprKind::Const(konst)),
+                                ExprTy::Ty(self.const_ty(konst, ty_expec)?),
+                            )
                         } else if let Ok(func) = self.ctx.resolver.get_scoped_func(
                             scope,
                             self.ctx.defs,
