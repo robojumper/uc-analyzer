@@ -307,7 +307,7 @@ pub enum Literal {
     Float,
     Int,
     Bool,
-    Name,
+    Name(Identifier),
     String(Box<str>),
 }
 

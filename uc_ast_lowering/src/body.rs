@@ -4,8 +4,8 @@ use uc_def::{ArgFlags, FuncFlags, Op};
 use uc_files::Span;
 use uc_middle::{
     body::{
-        Block, BlockId, Body, Expr, ExprId, ExprKind, ExprTy, Literal, LoopDesugaring,
-        PlaceExprKind, Statement, StatementKind, StmtId, ValueExprKind,
+        Block, BlockId, Body, DynArrayOpKind, Expr, ExprId, ExprKind, ExprTy, Literal,
+        LoopDesugaring, PlaceExprKind, Statement, StatementKind, StmtId, ValueExprKind,
     },
     ty::{self, Ty},
     ClassKind, DefId, FuncSig, ScopeWalkKind,
@@ -106,8 +106,10 @@ pub enum BodyErrorKind {
     MultipleMatchingOps,
     // No matching op
     NoMatchingOps,
+    // Before a default/static/const
+    MissingClassLit,
     /// TODO
-    NotYetImplemented,
+    NotYetImplemented(&'static str),
 }
 
 impl<'hir> LoweringContext<'hir> {
@@ -242,7 +244,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             }
             uc_ast::StatementKind::ForeachStatement { source, run } => {
                 return Err(BodyError {
-                    kind: BodyErrorKind::NotYetImplemented,
+                    kind: BodyErrorKind::NotYetImplemented("foreach"),
                     span: stmt.span,
                 })
             }
@@ -342,7 +344,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             }
             uc_ast::StatementKind::Label { name } => {
                 return Err(BodyError {
-                    kind: BodyErrorKind::NotYetImplemented,
+                    kind: BodyErrorKind::NotYetImplemented("label"),
                     span: stmt.span,
                 })
             }
@@ -364,6 +366,167 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             kind,
             span: Some(stmt.span),
         }))
+    }
+
+    fn lower_dyn_array_call(
+        &mut self,
+        receiver: ExprId,
+        name: &Identifier,
+        args: &'hir [Option<uc_ast::Expr>],
+        span: Span,
+    ) -> Result<(ExprKind, ExprTy), BodyError> {
+        let receiver_ty = self.body.get_expr_ty(receiver).expect_ty("array expr");
+        let inner_ty = receiver_ty.drop_array();
+        if name == "Find" {
+            match args {
+                [Some(val)] => {
+                    let inner =
+                        self.lower_expr(val, TypeExpectation::RequiredTy(inner_ty), false)?;
+                    Ok((
+                        ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
+                            receiver,
+                            DynArrayOpKind::FindElem(inner),
+                        )),
+                        ExprTy::Ty(Ty::INT),
+                    ))
+                }
+                [Some(field), Some(val)] => {
+                    let field_id = match &field.kind {
+                        uc_ast::ExprKind::LiteralExpr {
+                            lit: uc_ast::Literal::Name(n),
+                        } => {
+                            assert!(inner_ty.is_struct());
+                            let struct_def = inner_ty.get_def().unwrap();
+                            self.ctx
+                                .resolver
+                                .get_scoped_var(struct_def, self.ctx.defs, ScopeWalkKind::Access, n)
+                                .map_err(|_| BodyError {
+                                    kind: BodyErrorKind::SymNotFound { name: n.clone() },
+                                    span: field.span,
+                                })?
+                        }
+                        _ => panic!("bad find call"),
+                    };
+                    let field_ty = self.ctx.defs.get_var(field_id).ty.unwrap();
+                    let inner =
+                        self.lower_expr(val, TypeExpectation::RequiredTy(field_ty), false)?;
+                    Ok((
+                        ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
+                            receiver,
+                            DynArrayOpKind::FindField(field_id, inner),
+                        )),
+                        ExprTy::Ty(Ty::INT),
+                    ))
+                }
+                _ => panic!("bad find call"),
+            }
+        } else if name == "Add" {
+            match args {
+                [Some(val)] => {
+                    let amt = self.lower_expr(val, TypeExpectation::RequiredTy(Ty::INT), false)?;
+                    Ok((
+                        ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
+                            receiver,
+                            DynArrayOpKind::Add(amt),
+                        )),
+                        ExprTy::Ty(Ty::INT),
+                    ))
+                }
+                _ => panic!("bad add call"),
+            }
+        } else if name == "AddItem" {
+            match args {
+                [Some(val)] => {
+                    let inner =
+                        self.lower_expr(val, TypeExpectation::RequiredTy(inner_ty), false)?;
+                    Ok((
+                        ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
+                            receiver,
+                            DynArrayOpKind::AddItem(inner),
+                        )),
+                        ExprTy::Ty(Ty::INT),
+                    ))
+                }
+                _ => panic!("bad additem call"),
+            }
+        } else if name == "Insert" {
+            match args {
+                [Some(at), Some(num)] => {
+                    let at = self.lower_expr(at, TypeExpectation::RequiredTy(Ty::INT), false)?;
+                    let num = self.lower_expr(num, TypeExpectation::RequiredTy(Ty::INT), false)?;
+                    Ok((
+                        ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
+                            receiver,
+                            DynArrayOpKind::Insert(at, num),
+                        )),
+                        ExprTy::Void,
+                    ))
+                }
+                _ => panic!("bad insert call"),
+            }
+        } else if name == "InsertItem" {
+            match args {
+                [Some(at), Some(item)] => {
+                    let at = self.lower_expr(at, TypeExpectation::RequiredTy(Ty::INT), false)?;
+                    let item =
+                        self.lower_expr(item, TypeExpectation::RequiredTy(inner_ty), false)?;
+                    Ok((
+                        ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
+                            receiver,
+                            DynArrayOpKind::InsertItem(at, item),
+                        )),
+                        ExprTy::Ty(Ty::INT),
+                    ))
+                }
+                _ => panic!("bad insertitem call"),
+            }
+        } else if name == "Remove" {
+            match args {
+                [Some(at), Some(num)] => {
+                    let at = self.lower_expr(at, TypeExpectation::RequiredTy(Ty::INT), false)?;
+                    let num = self.lower_expr(num, TypeExpectation::RequiredTy(Ty::INT), false)?;
+                    Ok((
+                        ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
+                            receiver,
+                            DynArrayOpKind::Remove(at, num),
+                        )),
+                        ExprTy::Void,
+                    ))
+                }
+                _ => panic!("bad remove call"),
+            }
+        } else if name == "RemoveItem" {
+            match args {
+                [Some(item)] => {
+                    let item =
+                        self.lower_expr(item, TypeExpectation::RequiredTy(inner_ty), false)?;
+                    Ok((
+                        ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
+                            receiver,
+                            DynArrayOpKind::RemoveItem(item),
+                        )),
+                        ExprTy::Ty(Ty::INT),
+                    ))
+                }
+                _ => panic!("bad removeitem call"),
+            }
+        } else if name == "Sort" {
+            Err(BodyError {
+                kind: BodyErrorKind::NotYetImplemented("dyn array Sort"),
+                span,
+            })
+        } else if name == "RandomizeOrder" {
+            assert!(args.is_empty());
+            Ok((
+                ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
+                    receiver,
+                    DynArrayOpKind::RandomizeOrder,
+                )),
+                ExprTy::Void,
+            ))
+        } else {
+            panic!("unknown array op {}", name)
+        }
     }
 
     fn lower_cast(
@@ -420,7 +583,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
     ) -> Result<(ExprTy, Vec<Option<ExprId>>), BodyError> {
         if func_flags.contains(FuncFlags::ITERATOR) {
             Err(BodyError {
-                kind: BodyErrorKind::NotYetImplemented,
+                kind: BodyErrorKind::NotYetImplemented("iterator call sig"),
                 span,
             })
         } else {
@@ -570,8 +733,14 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
     ) -> Result<(ExprKind, ExprTy), BodyError> {
         let mut l = self.lower_expr(lhs, lhs_ty_hint, false)?;
         let mut r = self.lower_expr(rhs, TypeExpectation::None, false)?;
-        let l_ty = self.body.get_expr_ty(l).expect_ty("binary operator lhs");
-        let r_ty = self.body.get_expr_ty(r).expect_ty("binary operator rhs");
+        let l_ty = self.body.get_expr_ty(l).ty_or(BodyError {
+            kind: BodyErrorKind::VoidType { expected: None },
+            span: lhs.span,
+        })?;
+        let r_ty = self.body.get_expr_ty(r).ty_or(BodyError {
+            kind: BodyErrorKind::VoidType { expected: None },
+            span: rhs.span,
+        })?;
 
         let mut candidate_ops = self.ctx.resolver.collect_scoped_ops(
             self.body_scope,
@@ -725,7 +894,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         ExprKind::Place(PlaceExprKind::DynArrayLen(l)),
                         ExprTy::Ty(Ty::INT),
                     )
-                } else if ty.is_object() || ty.is_struct() || ty.is_class() {
+                } else if ty.is_object() || ty.is_struct() || ty.is_class() || ty.is_interface() {
                     let scope = if ty.is_class() {
                         self.ctx.special_items.object_id.unwrap()
                     } else {
@@ -770,7 +939,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                             }
                                             _ => {
                                                 return Err(BodyError {
-                                                    kind: BodyErrorKind::NotYetImplemented,
+                                                    kind: BodyErrorKind::MissingClassLit,
                                                     span: expr.span,
                                                 })
                                             }
@@ -778,7 +947,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                     }
                                     _ => {
                                         return Err(BodyError {
-                                            kind: BodyErrorKind::NotYetImplemented,
+                                            kind: BodyErrorKind::MissingClassLit,
                                             span: expr.span,
                                         })
                                     }
@@ -846,10 +1015,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             }
 
                             if receiver_ty.is_dyn_array() {
-                                return Err(BodyError {
-                                    kind: BodyErrorKind::NotYetImplemented,
-                                    span: expr.span,
-                                });
+                                self.lower_dyn_array_call(receiver, name, args, expr.span)?
                             } else if receiver_ty.is_interface() || receiver_ty.is_object() {
                                 let func = self
                                     .ctx
@@ -975,7 +1141,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             }
             uc_ast::ExprKind::DelegateCallExpr { lhs, args } => {
                 return Err(BodyError {
-                    kind: BodyErrorKind::NotYetImplemented,
+                    kind: BodyErrorKind::NotYetImplemented("delegate call"),
                     span: expr.span,
                 })
             }
@@ -1060,7 +1226,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 let unification = self
                     .bidi_unify_tys(self.body.get_expr_ty(then), self.body.get_expr_ty(alt))
                     .ok_or(BodyError {
-                        kind: BodyErrorKind::NotYetImplemented,
+                        kind: BodyErrorKind::NotYetImplemented("ternary unification"),
                         span: expr.span,
                     })?;
                 (
@@ -1110,7 +1276,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     )
                 } else if sym == "super" {
                     return Err(BodyError {
-                        kind: BodyErrorKind::NotYetImplemented,
+                        kind: BodyErrorKind::NotYetImplemented("super call"),
                         span: expr.span,
                     });
                 } else if let Ok(konst) = self.ctx.resolver.get_scoped_const(
@@ -1120,7 +1286,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     sym,
                 ) {
                     return Err(BodyError {
-                        kind: BodyErrorKind::NotYetImplemented,
+                        kind: BodyErrorKind::NotYetImplemented("const ty resolution"),
                         span: expr.span,
                     });
                     (
@@ -1288,7 +1454,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 }
             }
             uc_ast::Literal::Bool => Ok((Literal::Bool, Ty::BOOL)),
-            uc_ast::Literal::Name => Ok((Literal::Name, Ty::NAME)),
+            uc_ast::Literal::Name(_) => Ok((Literal::Name, Ty::NAME)),
             uc_ast::Literal::String(_) => Ok((Literal::String, Ty::STRING)),
 
             uc_ast::Literal::Int => {

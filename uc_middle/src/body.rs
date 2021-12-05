@@ -163,6 +163,8 @@ pub enum ValueExprKind {
     FuncCall(DefId, ExprId, Box<[Option<ExprId>]>),
     /// Delegate call, with delegate expr and args
     DelegateCall(ExprId, Box<[Option<ExprId>]>),
+    /// See [`DynArrayOpKind`] for details
+    DynArrayIntrinsic(ExprId, DynArrayOpKind),
     /// Operators are conventionally static, so there's no receiver
     OpCall(DefId, ExprId, Option<ExprId>),
     /// x ? y : z
@@ -176,6 +178,20 @@ pub enum ValueExprKind {
     NewExpr(Option<ExprId>, Option<ExprId>, ExprId, Option<ExprId>),
     /// string(myname), class<Actor>(obj), true if explicit
     CastExpr(Ty, ExprId, bool),
+}
+
+#[derive(Debug)]
+pub enum DynArrayOpKind {
+    FindElem(ExprId),
+    FindField(DefId, ExprId),
+    Add(ExprId),
+    AddItem(ExprId),
+    Insert(ExprId, ExprId),
+    InsertItem(ExprId, ExprId),
+    Remove(ExprId, ExprId),
+    RemoveItem(ExprId),
+    Sort(ExprId),
+    RandomizeOrder,
 }
 
 #[derive(Debug)]

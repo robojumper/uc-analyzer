@@ -282,7 +282,7 @@ impl Parser<'_> {
                     span: lhs_marker.complete(self),
                     paren: false,
                     kind: ExprKind::LiteralExpr {
-                        lit: uc_ast::Literal::Name,
+                        lit: uc_ast::Literal::Name(self.lex.extract_name(&tok)),
                     },
                 },
                 Tk::Bool(_) => Expr {
