@@ -210,7 +210,6 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 let c = self.lower_expr(cond, TypeExpectation::RequiredTy(Ty::BOOL), false)?;
                 let r = self.lower_statement(retry)?;
                 let mut inner_stmts = self.lower_statements(&run.stmts)?;
-                inner_stmts.push(r);
                 let break_stmt = self.body.add_stmt(Statement {
                     kind: StatementKind::Break,
                     span: Some(cond.span),
@@ -232,6 +231,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
 
                 StatementKind::Loop(
                     Some(i),
+                    Some(r),
                     whole_block,
                     LoopDesugaring::For {
                         init: i,
@@ -268,7 +268,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     span: Some(stmt.span),
                 });
 
-                StatementKind::Loop(None, whole_block, LoopDesugaring::While { cond: c })
+                StatementKind::Loop(None, None, whole_block, LoopDesugaring::While { cond: c })
             }
             uc_ast::StatementKind::DoStatement { cond, run } => {
                 let c = self.lower_expr(cond, TypeExpectation::RequiredTy(Ty::BOOL), false)?;
@@ -292,7 +292,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     span: Some(stmt.span),
                 });
 
-                StatementKind::Loop(None, whole_block, LoopDesugaring::Do { cond: c })
+                StatementKind::Loop(None, None, whole_block, LoopDesugaring::Do { cond: c })
             }
             uc_ast::StatementKind::SwitchStatement { scrutinee, cases } => {
                 let scrut = self.lower_expr(scrutinee, TypeExpectation::None, false)?;
@@ -557,6 +557,122 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         Ok((
             ExprKind::Value(ValueExprKind::OpCall(best, r, None)),
             ExprTy::Ty(ret_ty),
+        ))
+    }
+
+    fn lower_bin_op(
+        &mut self,
+        span: Span,
+        lhs: &'hir uc_ast::Expr,
+        rhs: &'hir uc_ast::Expr,
+        op: Op,
+        lhs_ty_hint: TypeExpectation,
+    ) -> Result<(ExprKind, ExprTy), BodyError> {
+        let mut l = self.lower_expr(lhs, lhs_ty_hint, false)?;
+        let mut r = self.lower_expr(rhs, TypeExpectation::None, false)?;
+        let l_ty = self.body.get_expr_ty(l).expect_ty("binary operator lhs");
+        let r_ty = self.body.get_expr_ty(r).expect_ty("binary operator rhs");
+
+        let mut candidate_ops = self.ctx.resolver.collect_scoped_ops(
+            self.body_scope,
+            self.ctx.defs,
+            ScopeWalkKind::Access,
+            op,
+        );
+        candidate_ops.sort_unstable();
+        candidate_ops.dedup();
+
+        // Select a matching binary op
+        let mut best = candidate_ops
+            .iter()
+            .filter(|&op| {
+                self.ctx
+                    .defs
+                    .get_op(*op)
+                    .flags
+                    .contains(FuncFlags::OPERATOR)
+            })
+            .filter_map(|&op| {
+                let op_def = self.ctx.defs.get_op(op);
+                let l_arg = self.ctx.defs.get_arg(op_def.sig.as_ref().unwrap().args[0]);
+                let r_arg = self.ctx.defs.get_arg(op_def.sig.as_ref().unwrap().args[1]);
+                let l_cc =
+                    self.conversion_cost(l_arg.ty, l_ty, l_arg.flags.contains(ArgFlags::COERCE));
+                let r_cc =
+                    self.conversion_cost(r_arg.ty, r_ty, r_arg.flags.contains(ArgFlags::COERCE));
+                let cc = std::cmp::max(l_cc, r_cc);
+                match cc {
+                    TyConversionCost::Disallowed => None,
+                    _ => Some((cc, op)),
+                }
+            })
+            .collect::<Vec<_>>();
+        best.sort_unstable_by_key(|(p, _)| *p);
+        let best = match &*best {
+            [] => {
+                if op == Op::EqEq || op == Op::BangEq {
+                    if l_ty.is_struct() && r_ty.is_struct() && l_ty.get_def() == r_ty.get_def() {
+                        return Ok((
+                            ExprKind::Value(ValueExprKind::StructComparison(l, r, op == Op::EqEq)),
+                            ExprTy::Ty(Ty::BOOL),
+                        ));
+                    } else if (l_ty.is_delegate() || r_ty.is_delegate())
+                        && (self.ty_match(l_ty, r_ty).is_some()
+                            || self.ty_match(r_ty, l_ty).is_some())
+                    {
+                        return Ok((
+                            ExprKind::Value(ValueExprKind::DelegateComparison(
+                                l,
+                                r,
+                                op == Op::EqEq,
+                            )),
+                            ExprTy::Ty(Ty::BOOL),
+                        ));
+                    }
+                }
+                return Err(BodyError {
+                    kind: BodyErrorKind::NoMatchingOps,
+                    span,
+                });
+            }
+            [(_, def)] => *def,
+            [(p_a, def_a), (p_b, _), ..] => {
+                if p_a == p_b {
+                    return Err(BodyError {
+                        kind: BodyErrorKind::MultipleMatchingOps,
+                        span,
+                    });
+                } else {
+                    *def_a
+                }
+            }
+        };
+        let op_def = self.ctx.defs.get_op(best);
+        let l_arg = self.ctx.defs.get_arg(op_def.sig.as_ref().unwrap().args[0]);
+        let r_arg = self.ctx.defs.get_arg(op_def.sig.as_ref().unwrap().args[1]);
+
+        // Check again without a conversion to see if we need to insert a coercion
+        let l_cc = self.conversion_cost(l_arg.ty, l_ty, false);
+        let r_cc = self.conversion_cost(r_arg.ty, r_ty, false);
+
+        if l_cc == TyConversionCost::Disallowed {
+            l = self.body.add_expr(Expr {
+                ty: ExprTy::Ty(l_arg.ty),
+                kind: ExprKind::Value(ValueExprKind::CastExpr(l_arg.ty, l, false)),
+                span: self.body.get_expr(l).span,
+            });
+        }
+        if r_cc == TyConversionCost::Disallowed {
+            r = self.body.add_expr(Expr {
+                ty: ExprTy::Ty(r_arg.ty),
+                kind: ExprKind::Value(ValueExprKind::CastExpr(r_arg.ty, r, false)),
+                span: self.body.get_expr(r).span,
+            });
+        }
+
+        Ok((
+            ExprKind::Value(ValueExprKind::OpCall(best, l, Some(r))),
+            ExprTy::Ty(op_def.sig.as_ref().unwrap().ret_ty.unwrap()),
         ))
     }
 
@@ -935,99 +1051,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     .contains(FuncFlags::POSTOPERATOR)
             })?,
             uc_ast::ExprKind::BinOpExpr { lhs, op, rhs } => {
-                let mut l = self.lower_expr(lhs, lhs_ty_hint, false)?;
-                let mut r = self.lower_expr(rhs, TypeExpectation::None, false)?;
-                let l_ty = self.body.get_expr_ty(l).expect_ty("binary operator lhs");
-                let r_ty = self.body.get_expr_ty(r).expect_ty("binary operator rhs");
-
-                let mut candidate_ops = self.ctx.resolver.collect_scoped_ops(
-                    self.body_scope,
-                    self.ctx.defs,
-                    ScopeWalkKind::Access,
-                    *op,
-                );
-                candidate_ops.sort_unstable();
-                candidate_ops.dedup();
-
-                // Select a matching binary op
-                let mut best = candidate_ops
-                    .iter()
-                    .filter(|&op| {
-                        self.ctx
-                            .defs
-                            .get_op(*op)
-                            .flags
-                            .contains(FuncFlags::OPERATOR)
-                    })
-                    .filter_map(|&op| {
-                        let op_def = self.ctx.defs.get_op(op);
-                        let l_arg = self.ctx.defs.get_arg(op_def.sig.as_ref().unwrap().args[0]);
-                        let r_arg = self.ctx.defs.get_arg(op_def.sig.as_ref().unwrap().args[1]);
-                        let l_cc = self.conversion_cost(
-                            l_arg.ty,
-                            l_ty,
-                            l_arg.flags.contains(ArgFlags::COERCE),
-                        );
-                        let r_cc = self.conversion_cost(
-                            r_arg.ty,
-                            r_ty,
-                            r_arg.flags.contains(ArgFlags::COERCE),
-                        );
-                        let cc = std::cmp::max(l_cc, r_cc);
-                        match cc {
-                            TyConversionCost::Disallowed => None,
-                            _ => Some((cc, op)),
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                best.sort_unstable_by_key(|(p, _)| *p);
-                let best = match &*best {
-                    [] => {
-                        // TODO: Delegate comparison, struct comparison, ...
-                        return Err(BodyError {
-                            kind: BodyErrorKind::NoMatchingOps,
-                            span: expr.span,
-                        });
-                    }
-                    [(_, def)] => *def,
-                    [(p_a, def_a), (p_b, _), ..] => {
-                        if p_a == p_b {
-                            return Err(BodyError {
-                                kind: BodyErrorKind::MultipleMatchingOps,
-                                span: expr.span,
-                            });
-                        } else {
-                            *def_a
-                        }
-                    }
-                };
-                let op_def = self.ctx.defs.get_op(best);
-                let l_arg = self.ctx.defs.get_arg(op_def.sig.as_ref().unwrap().args[0]);
-                let r_arg = self.ctx.defs.get_arg(op_def.sig.as_ref().unwrap().args[1]);
-
-                // Check again without a conversion to see if we need to insert a coercion
-                let l_cc = self.conversion_cost(l_arg.ty, l_ty, false);
-                let r_cc = self.conversion_cost(r_arg.ty, r_ty, false);
-
-                if l_cc == TyConversionCost::Disallowed {
-                    l = self.body.add_expr(Expr {
-                        ty: ExprTy::Ty(l_arg.ty),
-                        kind: ExprKind::Value(ValueExprKind::CastExpr(l_arg.ty, l, false)),
-                        span: self.body.get_expr(l).span,
-                    });
-                }
-                if r_cc == TyConversionCost::Disallowed {
-                    r = self.body.add_expr(Expr {
-                        ty: ExprTy::Ty(r_arg.ty),
-                        kind: ExprKind::Value(ValueExprKind::CastExpr(r_arg.ty, r, false)),
-                        span: self.body.get_expr(r).span,
-                    });
-                }
-
-                (
-                    ExprKind::Value(ValueExprKind::OpCall(best, l, Some(r))),
-                    ExprTy::Ty(op_def.sig.as_ref().unwrap().ret_ty.unwrap()),
-                )
+                self.lower_bin_op(expr.span, lhs, rhs, *op, lhs_ty_hint)?
             }
             uc_ast::ExprKind::TernExpr { cond, then, alt } => {
                 let e = self.lower_expr(cond, TypeExpectation::RequiredTy(Ty::BOOL), false)?;

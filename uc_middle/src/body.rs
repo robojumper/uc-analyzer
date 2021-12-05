@@ -75,10 +75,14 @@ pub enum StatementKind {
     Expr(ExprId),
     /// If-else?
     If(ExprId, BlockId, Option<BlockId>),
-    /// An infinite loop. The loop-specific statements and expressions
-    /// that cause the loop to end are within the block and can be
-    /// identified by looking at the LoopDesugaring
-    Loop(Option<StmtId>, BlockId, LoopDesugaring),
+    /// An infinite loop. The loop-specific break condition is within
+    /// the block and can be identified by looking at the LoopDesugaring.
+    Loop(
+        /*init*/ Option<StmtId>,
+        /*retry*/ Option<StmtId>,
+        BlockId,
+        LoopDesugaring,
+    ),
     /// Switch, with the scrutinee expression, the case clauses,
     /// and the number of statements in that block to skip for every
     /// expression, or the default case
@@ -163,6 +167,10 @@ pub enum ValueExprKind {
     OpCall(DefId, ExprId, Option<ExprId>),
     /// x ? y : z
     TernaryOp(ExprId, ExprId, ExprId),
+    /// If false checks Ne, if true checks Eq
+    StructComparison(ExprId, ExprId, bool),
+    /// If false checks Ne, if true checks Eq
+    DelegateComparison(ExprId, ExprId, bool),
     /// `new (a, b) c (d)`
     /// TODO: This could be a `native coerce object function`?
     NewExpr(Option<ExprId>, Option<ExprId>, ExprId, Option<ExprId>),

@@ -367,6 +367,11 @@ impl Ty {
     }
 
     #[inline]
+    pub fn is_delegate(&self) -> bool {
+        self.is_undecorated() && matches!(self.base_ctor, BaseTyCtor::Delegate)
+    }
+
+    #[inline]
     pub fn is_interface(&self) -> bool {
         self.is_undecorated() && matches!(self.base_ctor, BaseTyCtor::Interface)
     }
