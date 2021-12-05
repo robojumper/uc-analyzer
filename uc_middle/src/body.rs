@@ -10,6 +10,7 @@ pub struct Body {
     blocks: Vec<Block>,
     statements: Vec<Statement>,
     exprs: Vec<Expr>,
+    iterator_count: u32,
 }
 
 impl Body {
@@ -35,6 +36,11 @@ impl Body {
         ExprId(NonZeroU32::new(id).unwrap())
     }
 
+    pub fn create_iterator(&mut self) -> IteratorId {
+        self.iterator_count += 1;
+        IteratorId(NonZeroU32::new(self.iterator_count).unwrap())
+    }
+
     pub fn get_expr(&self, expr: ExprId) -> &Expr {
         self.exprs.get(expr.0.get() as usize - 1).unwrap()
     }
@@ -56,6 +62,9 @@ pub struct ExprId(NonZeroU32);
 
 #[derive(Copy, Clone, Debug)]
 pub struct StmtId(NonZeroU32);
+
+#[derive(Copy, Clone, Debug)]
+pub struct IteratorId(NonZeroU32);
 
 #[derive(Debug)]
 pub struct Block {
@@ -163,6 +172,8 @@ pub enum ValueExprKind {
     FuncCall(DefId, Receiver, Box<[Option<ExprId>]>),
     /// See [`DynArrayOpKind`] for details
     DynArrayIntrinsic(ExprId, DynArrayOpKind),
+    /// HasNext / Next calls
+    ForeachIntrinsic(IteratorId, ForeachOpKind),
     /// Operators are conventionally static, so there's no receiver
     OpCall(DefId, ExprId, Option<ExprId>),
     /// x ? y : z
@@ -190,6 +201,13 @@ pub enum DynArrayOpKind {
     RemoveItem(ExprId),
     Sort(ExprId),
     RandomizeOrder,
+}
+
+#[derive(Debug)]
+pub enum ForeachOpKind {
+    Create(DefId, Box<[Option<ExprId>]>),
+    HasNext,
+    Next(Box<[Option<ExprId>]>),
 }
 
 #[derive(Debug)]

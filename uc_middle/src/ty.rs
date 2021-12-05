@@ -45,12 +45,6 @@ enum BaseTyCtor {
 enum TyDecorator {
     /// The referred-to type, unchanged.
     None,
-    /// The result of a native iterator call. The u16 is an index into
-    /// a side table linking back to the function definition, the type is
-    /// the specific iterable type in the function, if any.
-    /// For an iterator over an array<T>, the substitution is T.
-    /// For a native function iterator, this is the type of the second argument.
-    Iterator(u16),
     /// The `array<T>` type, with the referred-to type in place of the `T`.
     DynArray,
     /// The `T _[X]` type, with the referred-to type in place of the `T`
@@ -187,13 +181,6 @@ pub fn is_subtype(
                 _ => Option::None,
             }
         }
-        (TyDecorator::Iterator(k), TyDecorator::Iterator(l)) => {
-            if k == l {
-                Some(0)
-            } else {
-                Option::None
-            }
-        }
         (TyDecorator::DynArray, TyDecorator::DynArray) => is_subtype(
             Ty {
                 decorator: TyDecorator::None,
@@ -308,16 +295,6 @@ impl Ty {
     }
 
     #[inline]
-    pub fn iterator(subst: Self, iterator_idx: u16) -> Ty {
-        assert!(subst.is_undecorated());
-        Self {
-            subst: subst.subst,
-            decorator: TyDecorator::Iterator(iterator_idx),
-            base_ctor: subst.base_ctor,
-        }
-    }
-
-    #[inline]
     pub fn object_from(id: DefId) -> Ty {
         Ty::with_def(BaseTyCtor::Object, id)
     }
@@ -400,10 +377,5 @@ impl Ty {
     #[inline]
     pub fn is_stat_array(&self) -> bool {
         matches!(self.decorator, TyDecorator::StaticArray(_))
-    }
-
-    #[inline]
-    pub fn is_iterator(&self) -> bool {
-        matches!(self.decorator, TyDecorator::Iterator(_))
     }
 }

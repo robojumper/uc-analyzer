@@ -63,8 +63,6 @@ pub struct SpecialItems {
     pub interface_id: Option<DefId>,
     /// The DefId of the synthetically generated __DynArrayIterator iterator
     pub dyn_array_iterator: Option<DefId>,
-    /// Side table for native iterator functions
-    pub iterator_table: Vec<DefId>,
 }
 
 #[derive(Debug)]
@@ -336,8 +334,6 @@ impl<'defs> LoweringContext<'defs> {
 
         // For consistency, add the native iterator as a function
         let iterator_id = self.add_def(|this, func_id| {
-            let iterator_idx = this.special_items.iterator_table.len().try_into().unwrap();
-            this.special_items.iterator_table.push(func_id);
             let array_arg = this.add_def(|_, _| {
                 (
                     DefKind::FuncArg(FuncArg {
@@ -378,7 +374,7 @@ impl<'defs> LoweringContext<'defs> {
                     flags: FuncFlags::NATIVE | FuncFlags::ITERATOR | FuncFlags::STATIC,
                     delegate_prop: None,
                     sig: Some(FuncSig {
-                        ret_ty: Some(Ty::iterator(Ty::PLACEHOLDER, iterator_idx)),
+                        ret_ty: Some(Ty::PLACEHOLDER),
                         args: Box::new([array_arg, val_arg, idx_arg]),
                     }),
                     contents: None,
@@ -622,14 +618,12 @@ impl<'defs> LoweringContext<'defs> {
             // is determined by the class in the first argument
             if func_ref.mods.flags.contains(FuncFlags::ITERATOR) {
                 assert!(func_ref.mods.flags.contains(FuncFlags::NATIVE));
-                let iterator_idx = self.special_items.iterator_table.len().try_into().unwrap();
-                self.special_items.iterator_table.push(func_id);
                 if args.len() >= 2
                     && self.defs.get_arg(args[0]).ty.is_class()
                     && self.defs.get_arg(args[1]).ty.is_object()
                 {
                     self.defs.get_arg_mut(args[1]).ty = Ty::PLACEHOLDER;
-                    ret_ty = Some(Ty::iterator(Ty::PLACEHOLDER, iterator_idx));
+                    ret_ty = Some(Ty::PLACEHOLDER);
                 }
             }
             self.defs.get_func_mut(func_id).sig = Some(FuncSig { ret_ty, args });

@@ -4,8 +4,9 @@ use uc_def::{ArgFlags, FuncFlags, Op};
 use uc_files::Span;
 use uc_middle::{
     body::{
-        Block, BlockId, Body, DynArrayOpKind, Expr, ExprId, ExprKind, ExprTy, Literal,
-        LoopDesugaring, PlaceExprKind, Receiver, Statement, StatementKind, StmtId, ValueExprKind,
+        Block, BlockId, Body, DynArrayOpKind, Expr, ExprId, ExprKind, ExprTy, ForeachOpKind,
+        Literal, LoopDesugaring, PlaceExprKind, Receiver, Statement, StatementKind, StmtId,
+        ValueExprKind,
     },
     ty::{self, Ty},
     ClassKind, ConstVal, DefId, FuncSig, ScopeWalkKind,
@@ -431,7 +432,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         })
                     }
                     (None, true) => Receiver::Cdo(self.class_did),
-                    (Some(d), _) => Receiver::Expr(self.body.add_expr(Expr {
+                    (Some(_), _) => Receiver::Expr(self.body.add_expr(Expr {
                         ty: ExprTy::Ty(self.class_ty),
                         kind: ExprKind::Place(PlaceExprKind::SelfAccess),
                         span: None,
@@ -447,7 +448,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
     fn lower_foreach(
         &mut self,
         source: &'hir uc_ast::Expr,
-        run: &uc_ast::Block,
+        run: &'hir uc_ast::Block,
     ) -> Result<StatementKind, BodyError> {
         let (rhs, name, args) = match &source.kind {
             uc_ast::ExprKind::FuncCallExpr { lhs, name, args } => (lhs, name, args),
@@ -492,7 +493,49 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         });
                         NativeIteratorKind::Array(expr)
                     }
-                    AccessContext::Expr(expr) => NativeIteratorKind::Array(expr),
+                    AccessContext::Expr(expr) => {
+                        let expr_ty = self.body.get_expr_ty(expr).expect_ty("foreach iterator");
+                        if expr_ty.is_dyn_array() {
+                            NativeIteratorKind::Array(expr)
+                        } else if expr_ty.is_object() || expr_ty.is_struct() {
+                            let obj_def = expr_ty.get_def().unwrap();
+                            if let Ok(v) = self.ctx.resolver.get_scoped_var(
+                                obj_def,
+                                self.ctx.defs,
+                                ScopeWalkKind::Access,
+                                name,
+                            ) {
+                                let ty = self.ctx.defs.get_var(v).ty.unwrap();
+                                assert!(ty.is_dyn_array());
+                                let expr = self.body.add_expr(Expr {
+                                    kind: ExprKind::Place(PlaceExprKind::Field(
+                                        Receiver::Expr(expr),
+                                        v,
+                                    )),
+                                    ty: ExprTy::Ty(ty),
+                                    span: Some(source.span),
+                                });
+                                NativeIteratorKind::Array(expr)
+                            } else if let Ok(v) = self.ctx.resolver.get_scoped_func(
+                                obj_def,
+                                self.ctx.defs,
+                                ScopeWalkKind::Access,
+                                name,
+                            ) {
+                                assert!(self
+                                    .ctx
+                                    .defs
+                                    .get_func(v)
+                                    .flags
+                                    .contains(FuncFlags::ITERATOR));
+                                NativeIteratorKind::Func(Receiver::Expr(expr), v)
+                            } else {
+                                todo!()
+                            }
+                        } else {
+                            todo!()
+                        }
+                    }
                 }
             }
             None => {
@@ -512,11 +555,122 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 }
             }
         };
+        let iterator_alloc = self.body.create_iterator();
+        let (init, get) = match func {
+            NativeIteratorKind::Array(array_arg) => {
+                let arg_ty = self.body.get_expr_ty(array_arg).expect_ty("foreach array");
+                if !arg_ty.is_dyn_array() {
+                    return Err(BodyError {
+                        kind: BodyErrorKind::NotYetImplemented("array iterator over non-array?"),
+                        span: source.span,
+                    });
+                }
+                let inner_ty = arg_ty.drop_array();
+                let native_iterator_func = self.ctx.special_items.dyn_array_iterator.unwrap();
+                let init = ValueExprKind::ForeachIntrinsic(
+                    iterator_alloc,
+                    ForeachOpKind::Create(native_iterator_func, Box::new([Some(array_arg)])),
+                );
+                let get_call = match &**args {
+                    [Some(elem)] => {
+                        let elem =
+                            self.lower_expr(elem, TypeExpectation::RequiredTy(inner_ty), false)?;
+                        ValueExprKind::ForeachIntrinsic(
+                            iterator_alloc,
+                            ForeachOpKind::Next(Box::new([Some(elem), None])),
+                        )
+                    }
+                    [Some(elem), Some(idx)] => {
+                        let elem =
+                            self.lower_expr(elem, TypeExpectation::RequiredTy(inner_ty), false)?;
+                        let idx =
+                            self.lower_expr(idx, TypeExpectation::RequiredTy(Ty::INT), false)?;
+                        ValueExprKind::ForeachIntrinsic(
+                            iterator_alloc,
+                            ForeachOpKind::Next(Box::new([Some(elem), Some(idx)])),
+                        )
+                    }
+                    _ => {
+                        return Err(BodyError {
+                            kind: BodyErrorKind::ArgCountError {
+                                expected: args.len() as u32,
+                                got: args.len() as u32,
+                            },
+                            span: source.span,
+                        })
+                    }
+                };
+                (init, get_call)
+            }
+            NativeIteratorKind::Func(_, _) => {
+                return Err(BodyError {
+                    kind: BodyErrorKind::NotYetImplemented("native iterator"),
+                    span: source.span,
+                })
+            }
+        };
+        let init_expr = self.body.add_expr(Expr {
+            kind: ExprKind::Value(init),
+            ty: ExprTy::Void,
+            span: Some(source.span),
+        });
+        let init_stmt = self.body.add_stmt(Statement {
+            kind: StatementKind::Expr(init_expr),
+            span: Some(source.span),
+        });
+        let get_expr = self.body.add_expr(Expr {
+            kind: ExprKind::Value(get),
+            ty: ExprTy::Void,
+            span: Some(source.span),
+        });
+        let get_stmt = self.body.add_stmt(Statement {
+            kind: StatementKind::Expr(get_expr),
+            span: Some(source.span),
+        });
+        let get_block = self.body.add_block(Block {
+            stmts: Box::new([get_stmt]),
+            span: Some(source.span),
+        });
 
-        Err(BodyError {
-            kind: BodyErrorKind::NotYetImplemented("iterator"),
-            span: source.span,
-        })
+        let check_expr = self.body.add_expr(Expr {
+            kind: ExprKind::Value(ValueExprKind::ForeachIntrinsic(
+                iterator_alloc,
+                ForeachOpKind::HasNext,
+            )),
+            ty: ExprTy::Ty(Ty::BOOL),
+            span: Some(source.span),
+        });
+        let break_stmt = self.body.add_stmt(Statement {
+            kind: StatementKind::Break,
+            span: Some(source.span),
+        });
+        let break_block = self.body.add_block(Block {
+            stmts: Box::new([break_stmt]),
+            span: Some(source.span),
+        });
+
+        let if_stmt = self.body.add_stmt(Statement {
+            kind: StatementKind::If(check_expr, get_block, Some(break_block)),
+            span: Some(source.span),
+        });
+
+        let mut run_stmts = self.lower_statements(&run.stmts)?;
+        run_stmts.insert(0, if_stmt);
+
+        let full_run_block = self.body.add_block(Block {
+            stmts: run_stmts.into_boxed_slice(),
+            span: Some(source.span),
+        });
+        Ok(StatementKind::Loop(
+            Some(init_stmt),
+            None,
+            full_run_block,
+            LoopDesugaring::Foreach {
+                init: init_stmt,
+                cond: check_expr,
+                next: get_stmt,
+            },
+        ))
     }
 
     fn get_access_context(&mut self, lhs: &'hir uc_ast::Expr) -> Result<AccessContext, BodyError> {
@@ -1593,7 +1747,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             .ctx
                             .resolver
                             .get_ty(self.body_scope, self.ctx.defs, name)
-                            .map_err(|e| BodyError {
+                            .map_err(|_| BodyError {
                                 kind: BodyErrorKind::SymNotFound { name: name.clone() },
                                 span,
                             })?,
@@ -1601,7 +1755,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             .ctx
                             .resolver
                             .get_ty_in(Some(self.body_scope), self.ctx.defs, package, name)
-                            .map_err(|e| BodyError {
+                            .map_err(|_| BodyError {
                                 kind: BodyErrorKind::SymNotFound { name: name.clone() },
                                 span,
                             })?,
@@ -1617,7 +1771,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         .ctx
                         .resolver
                         .get_ty(self.body_scope, self.ctx.defs, a)
-                        .map_err(|e| BodyError {
+                        .map_err(|_| BodyError {
                             kind: BodyErrorKind::SymNotFound { name: a.clone() },
                             span,
                         })?;
@@ -1654,7 +1808,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             ConstVal::Literal(l) => match l {
                 Literal::Bool(_) => Ok(Ty::FLOAT),
                 Literal::Int(i) => Ok(self.adjust_int(*i, ty_expec).1),
-                Literal::Float(f) => Ok(Ty::FLOAT),
+                Literal::Float(_) => Ok(Ty::FLOAT),
                 Literal::Name => Ok(Ty::NAME),
                 Literal::String => Ok(Ty::STRING),
                 _ => unreachable!(),
