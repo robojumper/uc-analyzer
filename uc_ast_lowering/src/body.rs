@@ -1311,9 +1311,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         .resolver
                         .get_global_value(self.body_scope, self.ctx.defs, sym)
                 {
-                    let parent_enum = self.ctx.defs.get_variant(en).owning_enum;
+                    let var = self.ctx.defs.get_variant(en);
+                    let parent_enum = var.owning_enum;
                     (
-                        ExprKind::Value(ValueExprKind::Lit(Literal::Byte)),
+                        ExprKind::Value(ValueExprKind::Lit(Literal::Byte(var.idx))),
                         ExprTy::Ty(Ty::enum_from(parent_enum)),
                     )
                 } else {
@@ -1463,25 +1464,25 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     Ok((Literal::Object(ty), Ty::object_from(ty)))
                 }
             }
-            uc_ast::Literal::Bool => Ok((Literal::Bool, Ty::BOOL)),
+            uc_ast::Literal::Bool(b) => Ok((Literal::Bool(*b), Ty::BOOL)),
             uc_ast::Literal::Name(_) => Ok((Literal::Name, Ty::NAME)),
             uc_ast::Literal::String(_) => Ok((Literal::String, Ty::STRING)),
 
-            uc_ast::Literal::Int => {
+            uc_ast::Literal::Int(i) => {
                 let interp_ty = match expected_type {
                     TypeExpectation::RequiredTy(t) | TypeExpectation::HintTy(t) => Some(t),
                     _ => None,
                 };
 
                 if interp_ty.map(|t| t.is_float()).unwrap_or(false) {
-                    Ok((Literal::Float, Ty::FLOAT))
+                    Ok((Literal::Float(*i as f32), Ty::FLOAT))
                 } else if interp_ty.map(|t| t.is_byte()).unwrap_or(false) {
-                    Ok((Literal::Int, Ty::BYTE))
+                    Ok((Literal::Byte(*i as u8), Ty::BYTE))
                 } else {
-                    Ok((Literal::Int, Ty::INT))
+                    Ok((Literal::Int(*i), Ty::INT))
                 }
             }
-            uc_ast::Literal::Float => Ok((Literal::Float, Ty::FLOAT)),
+            uc_ast::Literal::Float(f) => Ok((Literal::Float(*f), Ty::FLOAT)),
         }
     }
 

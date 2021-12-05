@@ -207,12 +207,12 @@ pub enum PlaceExprKind {
 #[derive(Debug)]
 pub enum Literal {
     None,
-    Bool,
-    Int,
-    Float,
+    Bool(bool),
+    Int(i32),
+    Float(f32),
     Name,
     String,
-    Byte,
+    Byte(u8),
     Object(DefId),
     Class(DefId),
 }

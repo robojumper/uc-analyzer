@@ -2,7 +2,7 @@
 
 use std::{num::NonZeroU32, ops::ControlFlow};
 
-use body::Body;
+use body::{Body, Literal};
 use ty::Ty;
 use uc_def::{ArgFlags, ClassFlags, FuncFlags, Op, StructFlags, VarFlags};
 use uc_files::Span;
@@ -475,8 +475,8 @@ pub struct Const {
 
 #[derive(Debug)]
 pub enum ConstVal {
-    Num(i32),
-    Other,
+    Literal(Literal),
+    Redirect(Identifier),
 }
 
 #[derive(Debug)]

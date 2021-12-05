@@ -1,6 +1,6 @@
 use uc_ast::{
     ClassDef, ClassHeader, ConstDef, ConstVal, DimCount, EnumDef, FuncArg, FuncBody, FuncDef,
-    FuncName, FuncSig, LocalDef, StateDef, Statement, StructDef, Ty, VarDef, VarInstance,
+    FuncName, FuncSig, Literal, LocalDef, StateDef, Statement, StructDef, Ty, VarDef, VarInstance,
 };
 use uc_def::{ArgFlags, ClassFlags, Op};
 
@@ -103,21 +103,25 @@ impl Parser<'_> {
     fn parse_const_val(&mut self) -> Result<ConstVal, ParseError> {
         let tok = self.next_any()?;
         match tok.kind {
-            Tk::Name => Ok(ConstVal::Name),
-            Tk::String => Ok(ConstVal::String),
-            Tk::Number(NumberSyntax::Int | NumberSyntax::Hex) => {
-                Ok(ConstVal::Int(self.extract_integer(&tok)?))
+            Tk::Name => Ok(ConstVal::Literal(Literal::Name(
+                self.lex.extract_name(&tok),
+            ))),
+            Tk::String => Ok(ConstVal::Literal(Literal::String(
+                self.lex.extract_string(&tok),
+            ))),
+            Tk::Number(NumberSyntax::Int(i) | NumberSyntax::Hex(i)) => {
+                Ok(ConstVal::Literal(Literal::Int(i)))
             }
-            Tk::Number(NumberSyntax::Float) => Ok(ConstVal::Float),
-            Tk::Bool(_) => Ok(ConstVal::Bool),
-            Tk::Sym(_) => Ok(ConstVal::ValueReference),
+            Tk::Number(NumberSyntax::Float(f)) => Ok(ConstVal::Literal(Literal::Float(f))),
+            Tk::Bool(b) => Ok(ConstVal::Literal(Literal::Bool(b))),
+            Tk::Sym(_) => Ok(ConstVal::ValueReference(self.sym_to_ident(&tok))),
             sig!(Sub) => {
                 let next = self.next_any()?;
                 match next.kind {
-                    Tk::Number(NumberSyntax::Int | NumberSyntax::Hex) => {
-                        Ok(ConstVal::Int(-self.extract_integer(&next)?))
+                    Tk::Number(NumberSyntax::Int(i) | NumberSyntax::Hex(i)) => {
+                        Ok(ConstVal::Literal(Literal::Int(i.wrapping_neg())))
                     }
-                    Tk::Number(NumberSyntax::Float) => Ok(ConstVal::Float),
+                    Tk::Number(NumberSyntax::Float(f)) => Ok(ConstVal::Literal(Literal::Float(f))),
                     _ => Err(self.fmt_err("expected number after -", Some(tok))),
                 }
             }
@@ -426,7 +430,7 @@ impl Parser<'_> {
                 let locals = self.parse_locals()?;
                 // FIXME: Revert this and handle the one case with a patch?
                 let mut consts = vec![];
-                while self.peek_any()?.kind == kw!(Const) {
+                while matches!(self.peek_any()?.kind, kw!(Const)) {
                     consts.push(self.parse_const()?);
                 }
                 let statements = self.parse_statements();
@@ -579,7 +583,7 @@ impl Parser<'_> {
         if directive_name.as_ref().eq_ignore_ascii_case("error") {
             return Err(self.fmt_err("error directive", None)); // FIXME
         } else if directive_name.as_ref().eq_ignore_ascii_case("linenumber") {
-            self.expect(Tk::Number(NumberSyntax::Int))?;
+            self.expect_nonnegative_integer()?;
         } else {
             return Err(self.fmt_err("unknown directive", None)); // FIXME
         }

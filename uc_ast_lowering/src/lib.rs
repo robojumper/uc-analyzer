@@ -24,8 +24,9 @@ use uc_ast::{DimCount, Hir};
 use uc_def::{ArgFlags, ClassFlags, FuncFlags, StructFlags, VarFlags};
 use uc_files::Span;
 use uc_middle::{
-    ty::Ty, Class, ClassKind, Const, ConstVal, DefId, DefKind, Defs, Enum, EnumVariant, FuncArg,
-    FuncContents, FuncSig, Function, Local, Operator, Package, ScopeWalkKind, State, Struct, Var,
+    body::Literal, ty::Ty, Class, ClassKind, Const, ConstVal, DefId, DefKind, Defs, Enum,
+    EnumVariant, FuncArg, FuncContents, FuncSig, Function, Local, Operator, Package, ScopeWalkKind,
+    State, Struct, Var,
 };
 use uc_name::Identifier;
 
@@ -513,8 +514,8 @@ impl<'defs> LoweringContext<'defs> {
                     ) {
                         let def = self.defs.get_const(const_id);
                         match &def.val {
-                            ConstVal::Num(n) => Some(*n as u16),
-                            ConstVal::Other => panic!("invalid const value"),
+                            ConstVal::Literal(Literal::Int(n)) => Some(*n as u16),
+                            _ => panic!("invalid const value"),
                         }
                     } else if let Ok(en_def) = self.resolver.get_ty(scope, self.defs, single) {
                         Some(self.defs.get_enum(en_def).variants.len() as u16)
@@ -763,8 +764,16 @@ impl<'defs> LoweringContext<'defs> {
                 .unwrap();
             consts.insert(const_id, const_def);
             let val = match &const_def.val {
-                uc_ast::ConstVal::Int(i) => ConstVal::Num(*i),
-                _ => ConstVal::Other,
+                uc_ast::ConstVal::Literal(l) => match l {
+                    uc_ast::Literal::None => ConstVal::Literal(Literal::None),
+                    uc_ast::Literal::Float(f) => ConstVal::Literal(Literal::Float(*f)),
+                    uc_ast::Literal::Int(i) => ConstVal::Literal(Literal::Int(*i)),
+                    uc_ast::Literal::Bool(b) => ConstVal::Literal(Literal::Bool(*b)),
+                    uc_ast::Literal::Name(_) => ConstVal::Literal(Literal::Name),
+                    uc_ast::Literal::String(_) => ConstVal::Literal(Literal::String),
+                    _ => unreachable!(),
+                },
+                uc_ast::ConstVal::ValueReference(l) => ConstVal::Redirect(l.clone()),
             };
             (
                 DefKind::Const(Const {

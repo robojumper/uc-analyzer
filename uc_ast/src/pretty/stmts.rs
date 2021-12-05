@@ -259,9 +259,9 @@ impl<W: io::Write> PPrinter<W> {
                 self.w.write_all(b.as_ref().as_bytes())?;
                 self.w.write_all(b"'")?;
             }
-            Literal::Float => self.w.write_all(b"`Float`")?,
-            Literal::Int => self.w.write_all(b"`Int`")?,
-            Literal::Bool => self.w.write_all(b"`Bool`")?,
+            Literal::Float(f) => self.w.write_all(format!("{}", f).as_bytes())?,
+            Literal::Int(i) => self.w.write_all(format!("{}", i).as_bytes())?,
+            Literal::Bool(b) => self.w.write_all(if *b { b"true" } else { b"false" })?,
             Literal::Name(n) => {
                 self.w.write_all(b"'")?;
                 self.w.write_all(n.as_ref().as_bytes())?;

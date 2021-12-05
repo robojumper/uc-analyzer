@@ -135,15 +135,10 @@ impl Parser<'_> {
                                     paren: false,
                                     kind: ExprKind::LiteralExpr {
                                         lit: match syn {
-                                            NumberSyntax::Int | NumberSyntax::Hex => {
-                                                uc_ast::Literal::Int
+                                            NumberSyntax::Int(i) | NumberSyntax::Hex(i) => {
+                                                uc_ast::Literal::Int(i)
                                             }
-                                            NumberSyntax::Float => uc_ast::Literal::Float,
-                                            NumberSyntax::Wild => {
-                                                return Err(
-                                                    self.fmt_err("bad number syntax", Some(tok))
-                                                )
-                                            }
+                                            NumberSyntax::Float(f) => uc_ast::Literal::Float(f),
                                         },
                                     },
                                 }
@@ -263,11 +258,8 @@ impl Parser<'_> {
                     paren: false,
                     kind: ExprKind::LiteralExpr {
                         lit: match syn {
-                            NumberSyntax::Int | NumberSyntax::Hex => uc_ast::Literal::Int,
-                            NumberSyntax::Float => uc_ast::Literal::Float,
-                            NumberSyntax::Wild => {
-                                return Err(self.fmt_err("bad number syntax", Some(tok)))
-                            }
+                            NumberSyntax::Int(i) | NumberSyntax::Hex(i) => uc_ast::Literal::Int(i),
+                            NumberSyntax::Float(f) => uc_ast::Literal::Float(f),
                         },
                     },
                 },
@@ -285,11 +277,11 @@ impl Parser<'_> {
                         lit: uc_ast::Literal::Name(self.lex.extract_name(&tok)),
                     },
                 },
-                Tk::Bool(_) => Expr {
+                Tk::Bool(b) => Expr {
                     span: lhs_marker.complete(self),
                     paren: false,
                     kind: ExprKind::LiteralExpr {
-                        lit: uc_ast::Literal::Bool,
+                        lit: uc_ast::Literal::Bool(b),
                     },
                 },
                 _ => return Err(self.fmt_err("Unknown start of expression", Some(tok))),

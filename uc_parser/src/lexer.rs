@@ -13,12 +13,14 @@ pub struct Token {
     pub kind: TokenKind,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum TokenKind {
     /// A block or EOL comment
     Comment,
     /// An unknown start of a token
     Error(u8),
+    /// An unknown start of a token
+    BadNumber,
     /// A token that hit EOF or an invalid character before being terminated
     Incomplete(IncompleteReason),
     /// The statement and item delimiter `;`
@@ -43,7 +45,7 @@ pub enum TokenKind {
     Bool(bool),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NumberLiteral {
     Int(i32),
     Float(f32),
@@ -68,12 +70,11 @@ pub enum Symbol {
     Identifier,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum NumberSyntax {
-    Int,
-    Float,
-    Hex,
-    Wild,
+    Int(i32),
+    Float(f32),
+    Hex(i32),
 }
 
 #[derive(Clone, Debug)]
@@ -332,7 +333,7 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn extract_ident(&self, token: &Token) -> Identifier {
-        assert_eq!(token.kind, TokenKind::Sym(Symbol::Identifier));
+        assert!(matches!(token.kind, TokenKind::Sym(Symbol::Identifier)));
         let text = self
             .source
             .lookup_str(token.span)
@@ -341,7 +342,7 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn extract_string(&self, token: &Token) -> Box<str> {
-        assert_eq!(token.kind, TokenKind::String);
+        assert!(matches!(token.kind, TokenKind::String));
         let bytes = self.source.lookup_bytes(token.span);
         let string = String::from_utf8_lossy(&bytes[1..bytes.len() - 1]);
         string.into_owned().into_boxed_str()
@@ -352,29 +353,6 @@ impl<'a> Lexer<'a> {
         let bytes = self.source.lookup_bytes(token.span);
         let str = str::from_utf8(&bytes[1..bytes.len() - 1]).unwrap();
         Identifier::from_str(str).unwrap()
-    }
-
-    pub fn extract_number(&self, token: &Token) -> Result<NumberLiteral, String> {
-        let text = self.source.lookup_str(token.span).expect("valid num token");
-        match token.kind {
-            TokenKind::Number(NumberSyntax::Int) => Ok(NumberLiteral::Int(
-                text.parse::<i32>().map_err(|e| e.to_string())?,
-            )),
-            TokenKind::Number(NumberSyntax::Hex) => {
-                if text.len() < 3 || (&text[0..2] != "0x" && &text[0..2] != "0X") {
-                    return Err("invalid hex number".to_owned());
-                }
-                Ok(NumberLiteral::Int(
-                    // Most important cast right here
-                    u32::from_str_radix(&text[2..], 16).map_err(|e| e.to_string())? as i32,
-                ))
-            }
-            TokenKind::Number(NumberSyntax::Float) => Ok(NumberLiteral::Float(
-                text.parse::<f32>().map_err(|e| e.to_string())?,
-            )),
-            TokenKind::Number(NumberSyntax::Wild) => Err("unrecognized number format".to_owned()),
-            _ => panic!("not a number: {:?}", token),
-        }
     }
 
     fn parse_eol_comment(&mut self, first: BytePos) -> Token {
@@ -468,14 +446,39 @@ impl<'a> Lexer<'a> {
             start: first,
             end: self.bytes.pos(),
         };
+        let bytes = self.source.lookup_str(span).unwrap();
         let num_kind = match (float, hex) {
-            (true, true) => NumberSyntax::Wild,
-            (true, false) => NumberSyntax::Float,
-            (false, true) => NumberSyntax::Hex,
-            (false, false) => NumberSyntax::Int,
+            (true, true) => TokenKind::BadNumber,
+            (true, false) => {
+                let bytes = if let Some(s) = bytes.strip_suffix('f') {
+                    s
+                } else if let Some(s) = bytes.strip_suffix('F') {
+                    s
+                } else {
+                    bytes
+                };
+                match f32::from_str(bytes) {
+                    Ok(f) => TokenKind::Number(NumberSyntax::Float(f)),
+                    Err(_) => TokenKind::BadNumber,
+                }
+            }
+            (false, true) => {
+                if bytes.len() > 2 && (&bytes[0..2] == "0x" || &bytes[0..2] == "0X") {
+                    match u32::from_str_radix(&bytes[2..], 16) {
+                        Ok(i) => TokenKind::Number(NumberSyntax::Int(i as i32)),
+                        Err(_) => TokenKind::BadNumber,
+                    }
+                } else {
+                    TokenKind::BadNumber
+                }
+            }
+            (false, false) => match i32::from_str(bytes) {
+                Ok(i) => TokenKind::Number(NumberSyntax::Int(i)),
+                Err(_) => TokenKind::BadNumber,
+            },
         };
         Token {
-            kind: TokenKind::Number(num_kind),
+            kind: num_kind,
             span,
         }
     }

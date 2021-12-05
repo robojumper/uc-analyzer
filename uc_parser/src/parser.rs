@@ -12,7 +12,7 @@ use uc_files::{BytePos, Span};
 use uc_name::Identifier;
 
 use crate::{
-    lexer::{Lexer, NumberLiteral, Symbol, Token, TokenKind as Tk},
+    lexer::{Lexer, NumberSyntax, Symbol, Token, TokenKind as Tk},
     parser::item::TopLevelItem,
 };
 
@@ -149,28 +149,14 @@ impl<'a> Parser<'a> {
 
     fn expect_nonnegative_integer(&mut self) -> Result<i32, ParseError> {
         let tok = self.next_any()?;
-        let num = self.extract_integer(&tok)?;
+        let num = match tok.kind {
+            Tk::Number(NumberSyntax::Int(i) | NumberSyntax::Hex(i)) => i,
+            _ => return Err(self.fmt_err("expected number", Some(tok))),
+        };
         if num < 0 {
             Err(self.fmt_err("integer is negative", Some(tok)))
         } else {
             Ok(num)
-        }
-    }
-
-    fn extract_integer(&self, tok: &Token) -> Result<i32, ParseError> {
-        if let Tk::Number(_) = tok.kind {
-            let num = self
-                .lex
-                .extract_number(tok)
-                .map_err(|_| self.fmt_err("Malformed integer", Some(tok.clone())))?;
-            match num {
-                NumberLiteral::Int(i) => Ok(i),
-                NumberLiteral::Float(_) => {
-                    Err(self.fmt_err("expected int but got float", Some(tok.clone())))
-                }
-            }
-        } else {
-            Err(self.fmt_err("Expected number", Some(tok.clone())))
         }
     }
 
@@ -201,7 +187,7 @@ impl<'a> Parser<'a> {
 
     fn recover_to_semi(&mut self) {
         while let Some(Token { kind, .. }) = self.next() {
-            if kind == Tk::Semi {
+            if matches!(kind, Tk::Semi) {
                 break;
             }
         }

@@ -80,13 +80,8 @@ pub struct ConstDef {
 
 #[derive(Debug)]
 pub enum ConstVal {
-    Bool,
-    Int(i32),
-    String,
-    Name,
-    Float,
-    /// Enum value? Other const?
-    ValueReference,
+    Literal(Literal),
+    ValueReference(Identifier),
 }
 
 #[derive(Debug)]
@@ -304,9 +299,9 @@ pub enum ExprKind {
 pub enum Literal {
     None,
     ObjReference(Identifier, Identifier),
-    Float,
-    Int,
-    Bool,
+    Float(f32),
+    Int(i32),
+    Bool(bool),
     Name(Identifier),
     String(Box<str>),
 }
