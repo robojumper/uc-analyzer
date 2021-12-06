@@ -496,7 +496,7 @@ pub struct Operator {
     pub owning_class: DefId,
     pub flags: FuncFlags,
 
-    pub sig: Option<FuncSig>,
+    pub sig: FuncSig,
     pub contents: Option<FuncContents>,
 }
 
@@ -507,7 +507,7 @@ pub struct Function {
     pub flags: FuncFlags,
     pub delegate_prop: Option<DefId>,
 
-    pub sig: Option<FuncSig>,
+    pub sig: FuncSig,
     pub contents: Option<FuncContents>,
 }
 

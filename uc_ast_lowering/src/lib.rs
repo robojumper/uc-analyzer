@@ -373,10 +373,10 @@ impl<'defs> LoweringContext<'defs> {
                     owner: object_id,
                     flags: FuncFlags::NATIVE | FuncFlags::ITERATOR | FuncFlags::STATIC,
                     delegate_prop: None,
-                    sig: Some(FuncSig {
+                    sig: FuncSig {
                         ret_ty: Some(Ty::PLACEHOLDER),
                         args: Box::new([array_arg, val_arg, idx_arg]),
-                    }),
+                    },
                     contents: None,
                 }),
                 None,
@@ -407,10 +407,10 @@ impl<'defs> LoweringContext<'defs> {
                     owner: object_id,
                     flags: FuncFlags::NATIVE | FuncFlags::STATIC,
                     delegate_prop: None,
-                    sig: Some(FuncSig {
+                    sig: FuncSig {
                         ret_ty: None,
                         args: Box::new([bool_arg]),
-                    }),
+                    },
                     contents: None,
                 }),
                 None,
@@ -626,7 +626,7 @@ impl<'defs> LoweringContext<'defs> {
                     ret_ty = Some(Ty::PLACEHOLDER);
                 }
             }
-            self.defs.get_func_mut(func_id).sig = Some(FuncSig { ret_ty, args });
+            self.defs.get_func_mut(func_id).sig = FuncSig { ret_ty, args };
 
             if let Some(body) = &func_ref.body {
                 let locals = self.resolve_locals(func_id, body);
@@ -639,7 +639,7 @@ impl<'defs> LoweringContext<'defs> {
 
         for (&op_id, &op_ref) in &backrefs.ops {
             let (ret_ty, args) = self.resolve_sig(op_id, &op_ref.sig);
-            self.defs.get_op_mut(op_id).sig = Some(FuncSig { ret_ty, args });
+            self.defs.get_op_mut(op_id).sig = FuncSig { ret_ty, args };
 
             if let Some(body) = &op_ref.body {
                 let locals = self.resolve_locals(op_id, body);
@@ -829,7 +829,10 @@ impl<'defs> LoweringContext<'defs> {
                         op,
                         owning_class: owner_id,
                         flags: func_def.mods.flags,
-                        sig: None,
+                        sig: FuncSig {
+                            ret_ty: None,
+                            args: Box::new([]),
+                        },
                         contents: None,
                     }),
                     Some(func_def.span),
@@ -878,7 +881,10 @@ impl<'defs> LoweringContext<'defs> {
                         owner: owner_id,
                         flags: func_def.mods.flags,
                         delegate_prop: var_id,
-                        sig: None,
+                        sig: FuncSig {
+                            ret_ty: None,
+                            args: Box::new([]),
+                        },
                         contents: None,
                     }),
                     Some(func_def.span),

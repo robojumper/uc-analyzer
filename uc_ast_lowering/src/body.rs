@@ -96,9 +96,9 @@ pub enum BodyErrorKind {
 
 #[derive(Debug)]
 enum AccessContext {
-    Static(DefId),
-    Const(DefId),
-    Default(DefId),
+    Static(Receiver),
+    Const(Receiver),
+    Default(Receiver),
     Expr(ExprId),
 }
 
@@ -119,7 +119,7 @@ impl<'hir> LoweringContext<'hir> {
         let (self_ty, ret_ty) = match &self.defs.get_def(body_scope).kind {
             uc_middle::DefKind::Operator(o) => {
                 assert!(o.flags.contains(FuncFlags::STATIC));
-                (None, o.sig.as_ref().unwrap().ret_ty)
+                (None, o.sig.ret_ty)
             }
             uc_middle::DefKind::Function(f) => {
                 let self_ty = if f.flags.contains(FuncFlags::STATIC) {
@@ -127,7 +127,7 @@ impl<'hir> LoweringContext<'hir> {
                 } else {
                     Some(class_ty)
                 };
-                (self_ty, f.sig.as_ref().unwrap().ret_ty)
+                (self_ty, f.sig.ret_ty)
             }
             uc_middle::DefKind::State(_) => todo!(),
             _ => unreachable!(),
@@ -361,6 +361,14 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         }))
     }
 
+    fn get_receiver_scope(&self, r: Receiver) -> DefId {
+        match r {
+            Receiver::Cdo(c) => c,
+            Receiver::SelfClass => self.class_did,
+            Receiver::Expr(_) => todo!(),
+        }
+    }
+
     fn try_bare_var_access(
         &mut self,
         name: &Identifier,
@@ -422,7 +430,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             ));
             assert!(allow_iterator || !def.flags.contains(FuncFlags::ITERATOR));
             let receiver = if def.flags.contains(FuncFlags::STATIC) {
-                Receiver::Cdo(self.class_did)
+                Receiver::SelfClass
             } else {
                 match (self.self_ty, allow_binding_to_static) {
                     (None, false) => {
@@ -431,7 +439,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             span,
                         })
                     }
-                    (None, true) => Receiver::Cdo(self.class_did),
+                    (None, true) => Receiver::SelfClass,
                     (Some(_), _) => Receiver::Expr(self.body.add_expr(Expr {
                         ty: ExprTy::Ty(self.class_ty),
                         kind: ExprKind::Place(PlaceExprKind::SelfAccess),
@@ -450,36 +458,46 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         source: &'hir uc_ast::Expr,
         run: &'hir uc_ast::Block,
     ) -> Result<StatementKind, BodyError> {
-        let (rhs, name, args) = match &source.kind {
+        let (lhs, name, args) = match &source.kind {
             uc_ast::ExprKind::FuncCallExpr { lhs, name, args } => (lhs, name, args),
             _ => panic!("invalid syntax"),
         };
-        let func = match rhs {
-            Some(rhs) => {
-                let access_context = self.get_access_context(rhs)?;
+        let func = match lhs {
+            Some(lhs) => {
+                let access_context = self.get_access_context(lhs)?;
                 match access_context {
                     AccessContext::Static(c) => {
                         let func = self
                             .ctx
                             .resolver
-                            .get_scoped_func(c, self.ctx.defs, ScopeWalkKind::Access, name)
+                            .get_scoped_func(
+                                self.get_receiver_scope(c),
+                                self.ctx.defs,
+                                ScopeWalkKind::Access,
+                                name,
+                            )
                             .map_err(|_| BodyError {
                                 kind: BodyErrorKind::FuncNotFound { name: name.clone() },
                                 span: source.span,
                             })?;
-                        NativeIteratorKind::Func(Receiver::Cdo(c), func)
+                        NativeIteratorKind::Func(c, func)
                     }
                     AccessContext::Const(_) => {
                         return Err(BodyError {
                             kind: BodyErrorKind::NotYetImplemented("cannot iterate over consts"),
-                            span: rhs.span,
+                            span: lhs.span,
                         })
                     }
                     AccessContext::Default(c) => {
                         let prop = self
                             .ctx
                             .resolver
-                            .get_scoped_var(c, self.ctx.defs, ScopeWalkKind::Access, name)
+                            .get_scoped_var(
+                                self.get_receiver_scope(c),
+                                self.ctx.defs,
+                                ScopeWalkKind::Access,
+                                name,
+                            )
                             .map_err(|_| BodyError {
                                 kind: BodyErrorKind::SymNotFound { name: name.clone() },
                                 span: source.span,
@@ -487,7 +505,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         let ty = self.ctx.defs.get_var(prop).ty.unwrap();
                         assert!(ty.is_dyn_array());
                         let expr = self.body.add_expr(Expr {
-                            kind: ExprKind::Place(PlaceExprKind::Field(Receiver::Cdo(c), prop)),
+                            kind: ExprKind::Place(PlaceExprKind::Field(c, prop)),
                             ty: ExprTy::Ty(ty),
                             span: Some(source.span),
                         });
@@ -602,11 +620,14 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 };
                 (init, get_call)
             }
-            NativeIteratorKind::Func(_, _) => {
+            NativeIteratorKind::Func(receiver, func_id) => {
+                let func = self.ctx.defs.get_func(func_id);
+                assert!(func.flags.contains(FuncFlags::ITERATOR));
+
                 return Err(BodyError {
                     kind: BodyErrorKind::NotYetImplemented("native iterator"),
                     span: source.span,
-                })
+                });
             }
         };
         let init_expr = self.body.add_expr(Expr {
@@ -674,7 +695,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
     }
 
     fn get_access_context(&mut self, lhs: &'hir uc_ast::Expr) -> Result<AccessContext, BodyError> {
-        let context_ctor: Option<fn(DefId) -> AccessContext> = match &lhs.kind {
+        let context_ctor: Option<fn(Receiver) -> AccessContext> = match &lhs.kind {
             uc_ast::ExprKind::FieldExpr { rhs, .. } | uc_ast::ExprKind::SymExpr { sym: rhs } => {
                 if rhs == "static" {
                     Some(AccessContext::Static)
@@ -694,7 +715,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 uc_ast::ExprKind::FieldExpr { lhs, .. } => match &lhs.kind {
                     uc_ast::ExprKind::LiteralExpr { lit } => {
                         match self.ast_to_middle_lit(lit, TypeExpectation::None, lhs.span)? {
-                            (Literal::Class(did), _) => Ok(c(did)),
+                            (Literal::Class(did), _) => Ok(c(Receiver::Cdo(did))),
                             _ => Err(BodyError {
                                 kind: BodyErrorKind::MissingClassLit,
                                 span: lhs.span,
@@ -706,7 +727,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         span: lhs.span,
                     }),
                 },
-                uc_ast::ExprKind::SymExpr { .. } => Ok(c(self.class_did)),
+                uc_ast::ExprKind::SymExpr { .. } => Ok(c(Receiver::SelfClass)),
                 _ => unreachable!(),
             },
             None => Ok(AccessContext::Expr(self.lower_expr(
@@ -1031,7 +1052,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             .filter(|&op| filter(*op))
             .filter_map(|&op| {
                 let op_def = self.ctx.defs.get_op(op);
-                let arg = op_def.sig.as_ref().unwrap().args[0];
+                let arg = op_def.sig.args[0];
                 let arg_def = self.ctx.defs.get_arg(arg);
                 self.ty_match(arg_def.ty, r_ty).map(|p| (p, op))
             })
@@ -1056,15 +1077,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 }
             }
         };
-        let ret_ty = self
-            .ctx
-            .defs
-            .get_op(best)
-            .sig
-            .as_ref()
-            .unwrap()
-            .ret_ty
-            .unwrap();
+        let ret_ty = self.ctx.defs.get_op(best).sig.ret_ty.unwrap();
         Ok((
             ExprKind::Value(ValueExprKind::OpCall(best, r, None)),
             ExprTy::Ty(ret_ty),
@@ -1111,8 +1124,8 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             })
             .filter_map(|&op| {
                 let op_def = self.ctx.defs.get_op(op);
-                let l_arg = self.ctx.defs.get_arg(op_def.sig.as_ref().unwrap().args[0]);
-                let r_arg = self.ctx.defs.get_arg(op_def.sig.as_ref().unwrap().args[1]);
+                let l_arg = self.ctx.defs.get_arg(op_def.sig.args[0]);
+                let r_arg = self.ctx.defs.get_arg(op_def.sig.args[1]);
                 let l_cc =
                     self.conversion_cost(l_arg.ty, l_ty, l_arg.flags.contains(ArgFlags::COERCE));
                 let r_cc =
@@ -1165,8 +1178,8 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             }
         };
         let op_def = self.ctx.defs.get_op(best);
-        let l_arg = self.ctx.defs.get_arg(op_def.sig.as_ref().unwrap().args[0]);
-        let r_arg = self.ctx.defs.get_arg(op_def.sig.as_ref().unwrap().args[1]);
+        let l_arg = self.ctx.defs.get_arg(op_def.sig.args[0]);
+        let r_arg = self.ctx.defs.get_arg(op_def.sig.args[1]);
 
         // Check again without a conversion to see if we need to insert a coercion
         let l_cc = self.conversion_cost(l_arg.ty, l_ty, false);
@@ -1189,7 +1202,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
 
         Ok((
             ExprKind::Value(ValueExprKind::OpCall(best, l, Some(r))),
-            ExprTy::Ty(op_def.sig.as_ref().unwrap().ret_ty.unwrap()),
+            ExprTy::Ty(op_def.sig.ret_ty.unwrap()),
         ))
     }
 
@@ -1211,7 +1224,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             {
                 return self.lower_dyn_array_call(e, name, args, span);
             }
-            AccessContext::Static(d) => (Ty::class_from(d), Receiver::Cdo(d)),
+            AccessContext::Static(d) => (Ty::class_from(self.get_receiver_scope(d)), d),
             AccessContext::Expr(e) => {
                 let expr_ty = self.body.get_expr_ty(e).ty_or(BodyError {
                     kind: BodyErrorKind::VoidType { expected: None },
@@ -1256,8 +1269,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 | FuncFlags::ITERATOR
         ));
 
-        let (ret_ty, arg_exprs) =
-            self.lower_call_sig(def.sig.as_ref().unwrap(), args, span, def.flags)?;
+        let (ret_ty, arg_exprs) = self.lower_call_sig(&def.sig, args, span, def.flags)?;
         Ok((
             ExprKind::Value(ValueExprKind::FuncCall(
                 func,
@@ -1311,17 +1323,19 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         let func_def = self
                             .ctx
                             .resolver
-                            .get_scoped_func(c, self.ctx.defs, ScopeWalkKind::Access, rhs)
+                            .get_scoped_func(
+                                self.get_receiver_scope(c),
+                                self.ctx.defs,
+                                ScopeWalkKind::Access,
+                                rhs,
+                            )
                             .map_err(|_| BodyError {
                                 kind: BodyErrorKind::FuncNotFound { name: rhs.clone() },
                                 span: expr.span,
                             })?;
 
                         (
-                            ExprKind::Value(ValueExprKind::DelegateCreation(
-                                Receiver::Cdo(c),
-                                func_def,
-                            )),
+                            ExprKind::Value(ValueExprKind::DelegateCreation(c, func_def)),
                             ExprTy::Ty(Ty::delegate_from(func_def)),
                         )
                     }
@@ -1329,7 +1343,12 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         let konst = self
                             .ctx
                             .resolver
-                            .get_scoped_const(c, self.ctx.defs, ScopeWalkKind::Access, rhs)
+                            .get_scoped_const(
+                                self.get_receiver_scope(c),
+                                self.ctx.defs,
+                                ScopeWalkKind::Access,
+                                rhs,
+                            )
                             .map_err(|_| BodyError {
                                 kind: BodyErrorKind::SymNotFound { name: rhs.clone() },
                                 span: expr.span,
@@ -1343,7 +1362,12 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         let prop = self
                             .ctx
                             .resolver
-                            .get_scoped_var(c, self.ctx.defs, ScopeWalkKind::Access, rhs)
+                            .get_scoped_var(
+                                self.get_receiver_scope(c),
+                                self.ctx.defs,
+                                ScopeWalkKind::Access,
+                                rhs,
+                            )
                             .map_err(|_| BodyError {
                                 kind: BodyErrorKind::FuncNotFound { name: rhs.clone() },
                                 span: expr.span,
@@ -1352,7 +1376,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         let prop_ty = self.ctx.defs.get_var(prop);
 
                         (
-                            ExprKind::Place(PlaceExprKind::Field(Receiver::Cdo(c), prop)),
+                            ExprKind::Place(PlaceExprKind::Field(c, prop)),
                             ExprTy::Ty(prop_ty.ty.unwrap()),
                         )
                     }
@@ -1456,12 +1480,8 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             {
                                 Some((receiver, func)) => {
                                     let def = self.ctx.defs.get_func(func);
-                                    let (ret_ty, arg_exprs) = self.lower_call_sig(
-                                        def.sig.as_ref().unwrap(),
-                                        args,
-                                        expr.span,
-                                        def.flags,
-                                    )?;
+                                    let (ret_ty, arg_exprs) =
+                                        self.lower_call_sig(&def.sig, args, expr.span, def.flags)?;
                                     (
                                         ExprKind::Value(ValueExprKind::FuncCall(
                                             func,
@@ -1886,8 +1906,8 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         if general == specific {
             return true;
         }
-        let general_func_sig = self.ctx.defs.get_func(general).sig.as_ref().unwrap();
-        let specific_func_sig = self.ctx.defs.get_func(specific).sig.as_ref().unwrap();
+        let general_func_sig = &self.ctx.defs.get_func(general).sig;
+        let specific_func_sig = &self.ctx.defs.get_func(specific).sig;
 
         if general_func_sig.args.len() != specific_func_sig.args.len() {
             return false;
