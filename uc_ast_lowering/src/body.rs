@@ -33,17 +33,17 @@ pub struct BodyError {
 
 #[derive(Clone, Copy, Debug)]
 enum TypeExpectation {
-    /// lower_expr will check that the expression type
-    /// is explicitly convertible to `Ty`, but not affect
-    /// type inference in the expression itself, and emit
-    /// a cast if necessary.
+    /// Doesn't affect type inference, applies otherwise
+    /// explicit coercion if necessary.
     CoerceToTy(Ty),
-    /// lower_expr will affect inner type inference, check
-    /// for an implicit conversion and apply it if necessary.
+    /// Affects type inference, applies implicit coercion
+    /// if necessary.
     RequiredTy(Ty),
-    /// lower_expr will not affect inner type inference
-    /// except for nudging the leftmost expression towards
-    /// a different literal kind.
+    /// Doesn't affect type inference, expression must be a place.
+    /// If bool is set, must allow mutating.
+    PlaceTy(Option<Ty>, bool),
+    /// Doesn't affect type inference, only interprets leftmost
+    /// expression (if literal) as different type.
     HintTy(Ty),
     None,
 }
@@ -90,6 +90,8 @@ pub enum BodyErrorKind {
     BadContext,
     /// Accessing op as func?
     AccessOpAsFunc,
+    /// 5 = 7;
+    LhsNotPlace,
     /// TODO
     NotYetImplemented(&'static str),
 }
@@ -193,7 +195,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 then,
                 or_else,
             } => {
-                let e = self.lower_expr(cond, TypeExpectation::RequiredTy(Ty::BOOL), false)?;
+                let e = self.lower_expr(cond, TypeExpectation::RequiredTy(Ty::BOOL))?;
                 let then = self.lower_block(then)?;
                 let or_else = or_else.as_ref().map(|b| self.lower_block(b)).transpose()?;
                 StatementKind::If(e, then, or_else)
@@ -205,7 +207,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 run,
             } => {
                 let i = self.lower_statement(init)?;
-                let c = self.lower_expr(cond, TypeExpectation::RequiredTy(Ty::BOOL), false)?;
+                let c = self.lower_expr(cond, TypeExpectation::RequiredTy(Ty::BOOL))?;
                 let r = self.lower_statement(retry)?;
                 let mut inner_stmts = self.lower_statements(&run.stmts)?;
                 let break_stmt = self.body.add_stmt(Statement {
@@ -242,7 +244,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 self.lower_foreach(source, run)?
             }
             uc_ast::StatementKind::WhileStatement { cond, run } => {
-                let c = self.lower_expr(cond, TypeExpectation::RequiredTy(Ty::BOOL), false)?;
+                let c = self.lower_expr(cond, TypeExpectation::RequiredTy(Ty::BOOL))?;
                 let mut inner_stmts = self.lower_statements(&run.stmts)?;
                 let break_stmt = self.body.add_stmt(Statement {
                     kind: StatementKind::Break,
@@ -266,7 +268,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 StatementKind::Loop(None, None, whole_block, LoopDesugaring::While { cond: c })
             }
             uc_ast::StatementKind::DoStatement { cond, run } => {
-                let c = self.lower_expr(cond, TypeExpectation::RequiredTy(Ty::BOOL), false)?;
+                let c = self.lower_expr(cond, TypeExpectation::RequiredTy(Ty::BOOL))?;
                 let mut inner_stmts = self.lower_statements(&run.stmts)?;
                 let break_stmt = self.body.add_stmt(Statement {
                     kind: StatementKind::Break,
@@ -290,7 +292,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 StatementKind::Loop(None, None, whole_block, LoopDesugaring::Do { cond: c })
             }
             uc_ast::StatementKind::SwitchStatement { scrutinee, cases } => {
-                let scrut = self.lower_expr(scrutinee, TypeExpectation::None, false)?;
+                let scrut = self.lower_expr(scrutinee, TypeExpectation::None)?;
                 let scrut_ty = self.body.get_expr_ty(scrut).ty_or(BodyError {
                     kind: BodyErrorKind::VoidType { expected: None },
                     span: scrutinee.span,
@@ -301,8 +303,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 for c in cases {
                     match &c.case {
                         uc_ast::Case::Case(c) => {
-                            let expr =
-                                self.lower_expr(c, TypeExpectation::RequiredTy(scrut_ty), false)?;
+                            let expr = self.lower_expr(c, TypeExpectation::RequiredTy(scrut_ty))?;
                             clauses.push((expr, stmts.len().try_into().unwrap()))
                         }
                         uc_ast::Case::Default => {
@@ -331,7 +332,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 };
                 let e = expr
                     .as_ref()
-                    .map(|e| self.lower_expr(e, ret_ty, false))
+                    .map(|e| self.lower_expr(e, ret_ty))
                     .transpose()?;
                 StatementKind::Return(e)
             }
@@ -342,17 +343,17 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 })
             }
             uc_ast::StatementKind::Assignment { lhs, rhs } => {
-                let l = self.lower_expr(lhs, TypeExpectation::None, true)?;
+                let l = self.lower_expr(lhs, TypeExpectation::PlaceTy(None, true))?;
                 let l_ty = self.body.get_expr(l).ty.ty_or(BodyError {
                     kind: BodyErrorKind::VoidType { expected: None },
                     span: lhs.span,
                 })?;
                 assert!(!l_ty.is_stat_array());
-                let r = self.lower_expr(rhs, TypeExpectation::RequiredTy(l_ty), false)?;
+                let r = self.lower_expr(rhs, TypeExpectation::RequiredTy(l_ty))?;
                 StatementKind::Assign(l, r)
             }
             uc_ast::StatementKind::Expr { expr } => {
-                StatementKind::Expr(self.lower_expr(expr, TypeExpectation::None, false)?)
+                StatementKind::Expr(self.lower_expr(expr, TypeExpectation::None)?)
             }
         };
         Ok(self.body.add_stmt(Statement {
@@ -592,7 +593,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 let get_call = match &**args {
                     [Some(elem)] => {
                         let elem =
-                            self.lower_expr(elem, TypeExpectation::RequiredTy(inner_ty), false)?;
+                            self.lower_expr(elem, TypeExpectation::PlaceTy(Some(inner_ty), true))?;
                         ValueExprKind::ForeachIntrinsic(
                             iterator_alloc,
                             ForeachOpKind::Next(Box::new([Some(elem), None])),
@@ -600,9 +601,9 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     }
                     [Some(elem), Some(idx)] => {
                         let elem =
-                            self.lower_expr(elem, TypeExpectation::RequiredTy(inner_ty), false)?;
+                            self.lower_expr(elem, TypeExpectation::PlaceTy(Some(inner_ty), true))?;
                         let idx =
-                            self.lower_expr(idx, TypeExpectation::RequiredTy(Ty::INT), false)?;
+                            self.lower_expr(idx, TypeExpectation::PlaceTy(Some(Ty::INT), true))?;
                         ValueExprKind::ForeachIntrinsic(
                             iterator_alloc,
                             ForeachOpKind::Next(Box::new([Some(elem), Some(idx)])),
@@ -730,11 +731,9 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 uc_ast::ExprKind::SymExpr { .. } => Ok(c(Receiver::SelfClass)),
                 _ => unreachable!(),
             },
-            None => Ok(AccessContext::Expr(self.lower_expr(
-                lhs,
-                TypeExpectation::None,
-                false,
-            )?)),
+            None => Ok(AccessContext::Expr(
+                self.lower_expr(lhs, TypeExpectation::None)?,
+            )),
         }
     }
 
@@ -750,8 +749,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         if name == "Find" {
             match args {
                 [Some(val)] => {
-                    let inner =
-                        self.lower_expr(val, TypeExpectation::RequiredTy(inner_ty), false)?;
+                    let inner = self.lower_expr(val, TypeExpectation::RequiredTy(inner_ty))?;
                     Ok((
                         ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
                             receiver,
@@ -778,8 +776,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         _ => panic!("bad find call"),
                     };
                     let field_ty = self.ctx.defs.get_var(field_id).ty.unwrap();
-                    let inner =
-                        self.lower_expr(val, TypeExpectation::RequiredTy(field_ty), false)?;
+                    let inner = self.lower_expr(val, TypeExpectation::RequiredTy(field_ty))?;
                     Ok((
                         ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
                             receiver,
@@ -793,7 +790,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         } else if name == "Add" {
             match args {
                 [Some(val)] => {
-                    let amt = self.lower_expr(val, TypeExpectation::RequiredTy(Ty::INT), false)?;
+                    let amt = self.lower_expr(val, TypeExpectation::RequiredTy(Ty::INT))?;
                     Ok((
                         ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
                             receiver,
@@ -807,8 +804,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         } else if name == "AddItem" {
             match args {
                 [Some(val)] => {
-                    let inner =
-                        self.lower_expr(val, TypeExpectation::RequiredTy(inner_ty), false)?;
+                    let inner = self.lower_expr(val, TypeExpectation::RequiredTy(inner_ty))?;
                     Ok((
                         ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
                             receiver,
@@ -822,8 +818,8 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         } else if name == "Insert" {
             match args {
                 [Some(at), Some(num)] => {
-                    let at = self.lower_expr(at, TypeExpectation::RequiredTy(Ty::INT), false)?;
-                    let num = self.lower_expr(num, TypeExpectation::RequiredTy(Ty::INT), false)?;
+                    let at = self.lower_expr(at, TypeExpectation::RequiredTy(Ty::INT))?;
+                    let num = self.lower_expr(num, TypeExpectation::RequiredTy(Ty::INT))?;
                     Ok((
                         ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
                             receiver,
@@ -837,9 +833,8 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         } else if name == "InsertItem" {
             match args {
                 [Some(at), Some(item)] => {
-                    let at = self.lower_expr(at, TypeExpectation::RequiredTy(Ty::INT), false)?;
-                    let item =
-                        self.lower_expr(item, TypeExpectation::RequiredTy(inner_ty), false)?;
+                    let at = self.lower_expr(at, TypeExpectation::RequiredTy(Ty::INT))?;
+                    let item = self.lower_expr(item, TypeExpectation::RequiredTy(inner_ty))?;
                     Ok((
                         ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
                             receiver,
@@ -853,8 +848,8 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         } else if name == "Remove" {
             match args {
                 [Some(at), Some(num)] => {
-                    let at = self.lower_expr(at, TypeExpectation::RequiredTy(Ty::INT), false)?;
-                    let num = self.lower_expr(num, TypeExpectation::RequiredTy(Ty::INT), false)?;
+                    let at = self.lower_expr(at, TypeExpectation::RequiredTy(Ty::INT))?;
+                    let num = self.lower_expr(num, TypeExpectation::RequiredTy(Ty::INT))?;
                     Ok((
                         ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
                             receiver,
@@ -868,8 +863,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         } else if name == "RemoveItem" {
             match args {
                 [Some(item)] => {
-                    let item =
-                        self.lower_expr(item, TypeExpectation::RequiredTy(inner_ty), false)?;
+                    let item = self.lower_expr(item, TypeExpectation::RequiredTy(inner_ty))?;
                     Ok((
                         ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
                             receiver,
@@ -904,7 +898,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         inner_expr: &'hir uc_ast::Expr,
         to_type: Ty,
     ) -> Result<ExprKind, BodyError> {
-        let expr = self.lower_expr(inner_expr, TypeExpectation::None, false)?;
+        let expr = self.lower_expr(inner_expr, TypeExpectation::None)?;
         let expr_ty = self.body.get_expr_ty(expr).ty_or(BodyError {
             kind: BodyErrorKind::VoidType { expected: None },
             span: inner_expr.span,
@@ -983,19 +977,17 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     let arg_expr_ty = if arg.flags.contains(ArgFlags::COERCE) {
                         TypeExpectation::CoerceToTy(arg.ty)
                     } else {
-                        TypeExpectation::RequiredTy(arg.ty)
+                        let is_out = arg
+                            .flags
+                            .contains(ArgFlags::OUT | ArgFlags::OUTONLY | ArgFlags::REF);
+                        let is_const = arg.flags.contains(ArgFlags::CONST);
+                        if is_out {
+                            TypeExpectation::PlaceTy(Some(arg.ty), !is_const)
+                        } else {
+                            TypeExpectation::RequiredTy(arg.ty)
+                        }
                     };
-                    let is_out = arg
-                        .flags
-                        .contains(ArgFlags::OUT | ArgFlags::OUTONLY | ArgFlags::REF);
-                    let exp_id = self.lower_expr(arg_expr, arg_expr_ty, is_out)?;
-                    let expr = self.body.get_expr(exp_id);
-                    if is_out && !matches!(expr.kind, ExprKind::Place(_)) {
-                        return Err(BodyError {
-                            kind: BodyErrorKind::ByRefArgNotPlace,
-                            span,
-                        });
-                    }
+                    let exp_id = self.lower_expr(arg_expr, arg_expr_ty)?;
                     arg_exprs.push(Some(exp_id));
                 } else {
                     arg_exprs.push(None);
@@ -1036,7 +1028,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         op: Op,
         filter: F,
     ) -> Result<(ExprKind, ExprTy), BodyError> {
-        let r = self.lower_expr(rhs, TypeExpectation::None, false)?;
+        let r = self.lower_expr(rhs, TypeExpectation::None)?;
         let r_ty = self.body.get_expr_ty(r).expect_ty("unary operator");
         let mut candidate_ops = self.ctx.resolver.collect_scoped_ops(
             self.body_scope,
@@ -1092,8 +1084,8 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         op: Op,
         lhs_ty_hint: TypeExpectation,
     ) -> Result<(ExprKind, ExprTy), BodyError> {
-        let mut l = self.lower_expr(lhs, lhs_ty_hint, false)?;
-        let mut r = self.lower_expr(rhs, TypeExpectation::None, false)?;
+        let mut l = self.lower_expr(lhs, lhs_ty_hint)?;
+        let mut r = self.lower_expr(rhs, TypeExpectation::None)?;
         let l_ty = self.body.get_expr_ty(l).ty_or(BodyError {
             kind: BodyErrorKind::VoidType { expected: None },
             span: lhs.span,
@@ -1284,7 +1276,6 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         &mut self,
         expr: &'hir uc_ast::Expr,
         ty_expec: TypeExpectation,
-        prefer_delegate_prop: bool,
     ) -> Result<ExprId, BodyError> {
         // If we coerce our type anyway, it'd be bad to eagerly expect something different
         let (lhs_ty_hint, passdown_ty_expec) = match ty_expec {
@@ -1292,14 +1283,15 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 (TypeExpectation::HintTy(t), TypeExpectation::RequiredTy(t))
             }
             TypeExpectation::HintTy(t) => (TypeExpectation::HintTy(t), TypeExpectation::None),
+            TypeExpectation::PlaceTy(_, _) => (TypeExpectation::None, TypeExpectation::None),
             TypeExpectation::CoerceToTy(_) | TypeExpectation::None => {
                 (TypeExpectation::None, TypeExpectation::None)
             }
         };
         let (kind, ty) = match &expr.kind {
             uc_ast::ExprKind::IndexExpr { base, idx } => {
-                let idx = self.lower_expr(idx, TypeExpectation::RequiredTy(Ty::INT), false)?;
-                let base_id = self.lower_expr(base, TypeExpectation::None, false)?;
+                let idx = self.lower_expr(idx, TypeExpectation::RequiredTy(Ty::INT))?;
+                let base_id = self.lower_expr(base, TypeExpectation::None)?;
                 let arr_ty = self.body.get_expr_ty(base_id).ty_or(BodyError {
                     kind: BodyErrorKind::VoidType { expected: None },
                     span: base.span,
@@ -1428,13 +1420,26 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                 ScopeWalkKind::Access,
                                 rhs,
                             ) {
-                                (
-                                    ExprKind::Value(ValueExprKind::DelegateCreation(
-                                        Receiver::Expr(l),
-                                        func,
-                                    )),
-                                    ExprTy::Ty(Ty::delegate_from(func)),
-                                )
+                                if matches!(ty_expec, TypeExpectation::PlaceTy(_, _)) {
+                                    let func_def = self.ctx.defs.get_func(func);
+                                    let delegate_prop = func_def.delegate_prop.unwrap();
+                                    let var = self.ctx.defs.get_var(delegate_prop);
+                                    (
+                                        ExprKind::Place(PlaceExprKind::Field(
+                                            Receiver::Expr(l),
+                                            delegate_prop,
+                                        )),
+                                        ExprTy::Ty(var.ty.unwrap()),
+                                    )
+                                } else {
+                                    (
+                                        ExprKind::Value(ValueExprKind::DelegateCreation(
+                                            Receiver::Expr(l),
+                                            func,
+                                        )),
+                                        ExprTy::Ty(Ty::delegate_from(func)),
+                                    )
+                                }
                             } else {
                                 return Err(BodyError {
                                     kind: BodyErrorKind::SymNotFound { name: rhs.clone() },
@@ -1513,19 +1518,17 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     [outer] => (
                         outer
                             .as_ref()
-                            .map(|o| self.lower_expr(o, TypeExpectation::None, false))
+                            .map(|o| self.lower_expr(o, TypeExpectation::None))
                             .transpose()?,
                         None,
                     ),
                     [outer, name] => (
                         outer
                             .as_ref()
-                            .map(|o| self.lower_expr(o, TypeExpectation::None, false))
+                            .map(|o| self.lower_expr(o, TypeExpectation::None))
                             .transpose()?,
                         name.as_ref()
-                            .map(|n| {
-                                self.lower_expr(n, TypeExpectation::RequiredTy(Ty::STRING), false)
-                            })
+                            .map(|n| self.lower_expr(n, TypeExpectation::RequiredTy(Ty::STRING)))
                             .transpose()?,
                     ),
                     x => {
@@ -1538,7 +1541,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         })
                     }
                 };
-                let cls_expr = self.lower_expr(cls, TypeExpectation::None, false)?;
+                let cls_expr = self.lower_expr(cls, TypeExpectation::None)?;
                 let cls_ty = self.body.get_expr_ty(cls_expr).ty_or(BodyError {
                     kind: BodyErrorKind::VoidType { expected: None },
                     span: cls.span,
@@ -1553,7 +1556,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 };
                 let arch = arch
                     .as_ref()
-                    .map(|a| self.lower_expr(a, TypeExpectation::RequiredTy(inst_ty), false))
+                    .map(|a| self.lower_expr(a, TypeExpectation::RequiredTy(inst_ty)))
                     .transpose()?;
 
                 (
@@ -1584,9 +1587,9 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 self.lower_bin_op(expr.span, lhs, rhs, *op, lhs_ty_hint)?
             }
             uc_ast::ExprKind::TernExpr { cond, then, alt } => {
-                let e = self.lower_expr(cond, TypeExpectation::RequiredTy(Ty::BOOL), false)?;
-                let then = self.lower_expr(then, passdown_ty_expec, false)?;
-                let alt = self.lower_expr(alt, passdown_ty_expec, false)?;
+                let e = self.lower_expr(cond, TypeExpectation::RequiredTy(Ty::BOOL))?;
+                let then = self.lower_expr(then, passdown_ty_expec)?;
+                let alt = self.lower_expr(alt, passdown_ty_expec)?;
                 let unification = self
                     .bidi_unify_tys(self.body.get_expr_ty(then), self.body.get_expr_ty(alt))
                     .ok_or(BodyError {
@@ -1607,7 +1610,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     self.try_bare_func_access(sym, expr.span, true, false)?
                 {
                     let func_def = self.ctx.defs.get_func(func);
-                    if prefer_delegate_prop {
+                    if matches!(ty_expec, TypeExpectation::PlaceTy(_, _)) {
                         let delegate_prop = func_def.delegate_prop.unwrap();
                         (
                             ExprKind::Place(PlaceExprKind::Field(receiver, delegate_prop)),
@@ -1664,8 +1667,56 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             }
         };
 
-        if let TypeExpectation::RequiredTy(expected_ty) | TypeExpectation::CoerceToTy(expected_ty) =
-            ty_expec
+        if let TypeExpectation::PlaceTy(expected_ty, mutable) = ty_expec {
+            if !matches!(kind, ExprKind::Place(_)) {
+                return Err(BodyError {
+                    kind: BodyErrorKind::ByRefArgNotPlace,
+                    span: expr.span,
+                });
+            }
+
+            match expected_ty {
+                None => Ok(self.body.add_expr(Expr {
+                    ty,
+                    kind,
+                    span: Some(expr.span),
+                })),
+                Some(expected_ty) => {
+                    let got_non_void = ty.ty_or(BodyError {
+                        kind: BodyErrorKind::VoidType {
+                            expected: Some(expected_ty),
+                        },
+                        span: expr.span,
+                    })?;
+
+                    let ty_match = self.ty_match(expected_ty, got_non_void);
+
+                    match (ty_match, mutable) {
+                        (Some(0), _) | (Some(_), false) => {
+                            // Exact match -- mutability doesn't matter.
+                            // Inexact match -- only for const out
+                            Ok(self.body.add_expr(Expr {
+                                ty,
+                                kind,
+                                span: Some(expr.span),
+                            }))
+                        }
+                        (Some(_), true) | (None, _) => {
+                            // Generalization but mutable -- error
+                            // Ty mismatch -- error
+                            Err(BodyError {
+                                kind: BodyErrorKind::TyMismatch {
+                                    expected: expected_ty,
+                                    found: got_non_void,
+                                },
+                                span: expr.span,
+                            })
+                        }
+                    }
+                }
+            }
+        } else if let TypeExpectation::RequiredTy(expected_ty)
+        | TypeExpectation::CoerceToTy(expected_ty) = ty_expec
         {
             let got_non_void = ty.ty_or(BodyError {
                 kind: BodyErrorKind::VoidType {

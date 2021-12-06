@@ -165,7 +165,9 @@ pub fn is_subtype(
                         Option::None
                     }
                 }
+                (Class, None) => Some(0),
                 (Class, Class) => subdef_check(general.subst.unwrap(), specific.subst.unwrap()),
+                (Interface, None) => Some(0),
                 (Interface, Interface) => {
                     subdef_check(general.subst.unwrap(), specific.subst.unwrap())
                 }
