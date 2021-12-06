@@ -205,7 +205,7 @@ pub enum DynArrayOpKind {
 
 #[derive(Debug)]
 pub enum ForeachOpKind {
-    Create(DefId, Box<[Option<ExprId>]>),
+    Create(Receiver, DefId, Box<[Option<ExprId>]>),
     HasNext,
     Next(Box<[Option<ExprId>]>),
 }

@@ -340,7 +340,7 @@ impl<'defs> LoweringContext<'defs> {
                         name: Identifier::from_str("array_value").unwrap(),
                         owner: func_id,
                         flags: ArgFlags::OUT | ArgFlags::CONST,
-                        ty: Ty::dyn_array_from(Ty::PLACEHOLDER),
+                        ty: Ty::dyn_array_from(Ty::NONE), // Doesn't matter
                     }),
                     None,
                 )
@@ -350,8 +350,8 @@ impl<'defs> LoweringContext<'defs> {
                     DefKind::FuncArg(FuncArg {
                         name: Identifier::from_str("element").unwrap(),
                         owner: func_id,
-                        flags: ArgFlags::OUTONLY,
-                        ty: Ty::PLACEHOLDER,
+                        flags: ArgFlags::empty(),
+                        ty: Ty::NONE, // Doesn't matter
                     }),
                     None,
                 )
@@ -361,7 +361,7 @@ impl<'defs> LoweringContext<'defs> {
                     DefKind::FuncArg(FuncArg {
                         name: Identifier::from_str("idx").unwrap(),
                         owner: func_id,
-                        flags: ArgFlags::OUTONLY | ArgFlags::OPTIONAL,
+                        flags: ArgFlags::OPTIONAL,
                         ty: Ty::INT,
                     }),
                     None,
@@ -374,7 +374,7 @@ impl<'defs> LoweringContext<'defs> {
                     flags: FuncFlags::NATIVE | FuncFlags::ITERATOR | FuncFlags::STATIC,
                     delegate_prop: None,
                     sig: FuncSig {
-                        ret_ty: Some(Ty::PLACEHOLDER),
+                        ret_ty: None,
                         args: Box::new([array_arg, val_arg, idx_arg]),
                     },
                     contents: None,
@@ -614,18 +614,6 @@ impl<'defs> LoweringContext<'defs> {
 
         for (&func_id, &func_ref) in &backrefs.funcs {
             let (mut ret_ty, args) = self.resolve_sig(func_id, &func_ref.sig);
-            // Special treatment for native iterators, where the second out object type
-            // is determined by the class in the first argument
-            if func_ref.mods.flags.contains(FuncFlags::ITERATOR) {
-                assert!(func_ref.mods.flags.contains(FuncFlags::NATIVE));
-                if args.len() >= 2
-                    && self.defs.get_arg(args[0]).ty.is_class()
-                    && self.defs.get_arg(args[1]).ty.is_object()
-                {
-                    self.defs.get_arg_mut(args[1]).ty = Ty::PLACEHOLDER;
-                    ret_ty = Some(Ty::PLACEHOLDER);
-                }
-            }
             self.defs.get_func_mut(func_id).sig = FuncSig { ret_ty, args };
 
             if let Some(body) = &func_ref.body {

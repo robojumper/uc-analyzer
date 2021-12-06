@@ -9,9 +9,6 @@ use crate::DefId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BaseTyCtor {
-    /// Placeholder type, only valid for native iterator function
-    /// arguments where the types aren't known in advance.
-    Placeholder,
     /// The type of the `None`-literal, trivially convertible to
     /// object-like types and delegates.
     None,
@@ -114,7 +111,7 @@ pub fn classify_conversion(from: Ty, to: Ty) -> ConversionClassification {
     }
 }
 
-/// Whether specific is a subtype of general
+/// Whether specific is a subtype of general.
 pub fn is_subtype(
     general: Ty,
     specific: Ty,
@@ -131,9 +128,6 @@ pub fn is_subtype(
         }
         (TyDecorator::None, TyDecorator::None) => {
             match (general.base_ctor, specific.base_ctor) {
-                (Placeholder, _) | (_, Placeholder) => {
-                    panic!("attempting to relate placeholder type")
-                }
                 (None, None) => Some(0),
                 (Int, Int) => Some(0),
                 (Float, Float) => Some(0),
@@ -222,7 +216,6 @@ pub fn is_subtype(
 const _: () = assert!(std::mem::size_of::<Ty>() == std::mem::size_of::<Option<Ty>>());
 
 impl Ty {
-    pub const PLACEHOLDER: Ty = Ty::simple(BaseTyCtor::Placeholder);
     pub const NONE: Ty = Ty::simple(BaseTyCtor::None);
     pub const INT: Ty = Ty::simple(BaseTyCtor::Int);
     pub const FLOAT: Ty = Ty::simple(BaseTyCtor::Float);

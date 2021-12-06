@@ -588,7 +588,11 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 let native_iterator_func = self.ctx.special_items.dyn_array_iterator.unwrap();
                 let init = ValueExprKind::ForeachIntrinsic(
                     iterator_alloc,
-                    ForeachOpKind::Create(native_iterator_func, Box::new([Some(array_arg)])),
+                    ForeachOpKind::Create(
+                        Receiver::Cdo(self.ctx.special_items.object_id.unwrap()),
+                        native_iterator_func,
+                        Box::new([Some(array_arg)]),
+                    ),
                 );
                 let get_call = match &**args {
                     [Some(elem)] => {
@@ -625,10 +629,85 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 let func = self.ctx.defs.get_func(func_id);
                 assert!(func.flags.contains(FuncFlags::ITERATOR));
 
-                return Err(BodyError {
-                    kind: BodyErrorKind::NotYetImplemented("native iterator"),
-                    span: source.span,
-                });
+                let mut target_args = func
+                    .sig
+                    .args
+                    .iter()
+                    .map(|&a| {
+                        let arg = self.ctx.defs.get_arg(a);
+                        let optional = arg.flags.contains(ArgFlags::OPTIONAL);
+                        let ty = if arg.flags.contains(ArgFlags::OUT) {
+                            TypeExpectation::PlaceTy(Some(arg.ty), true)
+                        } else {
+                            TypeExpectation::RequiredTy(arg.ty)
+                        };
+                        (ty, optional)
+                    })
+                    .collect::<Box<_>>();
+
+                let min_required = target_args
+                    .iter()
+                    .position(|(_, opt)| *opt)
+                    .unwrap_or_else(|| target_args.len());
+                if args.len() < min_required {
+                    return Err(BodyError {
+                        kind: BodyErrorKind::ArgCountError {
+                            expected: target_args.len() as u32,
+                            got: args.len() as u32,
+                        },
+                        span: source.span,
+                    });
+                }
+
+                let first_arg_expr = if matches!(target_args.get(0..2), Some(&[(TypeExpectation::RequiredTy(c_ty), false), (TypeExpectation::PlaceTy(Some(obj_ty), _), false)]) if c_ty.is_class() && obj_ty.is_object())
+                {
+                    // First arg is a class, second arg is object. Get specific class type...
+                    let expr = self.lower_expr(args[0].as_ref().unwrap(), target_args[0].0)?;
+                    let class_ty = self.body.get_expr_ty(expr).expect_ty("iterator class arg");
+                    // And set our second arg to be of a more specific object type
+                    let obj_ty = class_ty.instanciate_class();
+                    target_args[1].0 = TypeExpectation::PlaceTy(Some(obj_ty), false);
+                    Some(expr)
+                } else {
+                    None
+                };
+
+                let mut call_args = vec![];
+                let mut get_args = vec![];
+
+                let mut rest_args = target_args
+                    .iter()
+                    .zip(args.iter().chain(std::iter::repeat(&None)));
+                if let Some(e) = first_arg_expr {
+                    call_args.push(Some(e));
+                    rest_args.next();
+                }
+                for ((ty_ex, opt), ast_expr) in rest_args {
+                    let expr = match ast_expr {
+                        Some(e) => Some(self.lower_expr(e, *ty_ex)?),
+                        None => {
+                            assert!(*opt);
+                            None
+                        }
+                    };
+                    match ty_ex {
+                        TypeExpectation::RequiredTy(_) => call_args.push(expr),
+                        TypeExpectation::PlaceTy(_, _) => get_args.push(expr),
+                        _ => unreachable!(),
+                    }
+                }
+
+                let init = ValueExprKind::ForeachIntrinsic(
+                    iterator_alloc,
+                    ForeachOpKind::Create(receiver, func_id, call_args.into_boxed_slice()),
+                );
+
+                let get = ValueExprKind::ForeachIntrinsic(
+                    iterator_alloc,
+                    ForeachOpKind::Next(get_args.into_boxed_slice()),
+                );
+
+                (init, get)
             }
         };
         let init_expr = self.body.add_expr(Expr {
@@ -977,9 +1056,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     let arg_expr_ty = if arg.flags.contains(ArgFlags::COERCE) {
                         TypeExpectation::CoerceToTy(arg.ty)
                     } else {
-                        let is_out = arg
-                            .flags
-                            .contains(ArgFlags::OUT | ArgFlags::OUTONLY | ArgFlags::REF);
+                        let is_out = arg.flags.contains(ArgFlags::OUT | ArgFlags::REF);
                         let is_const = arg.flags.contains(ArgFlags::CONST);
                         if is_out {
                             TypeExpectation::PlaceTy(Some(arg.ty), !is_const)
