@@ -101,6 +101,9 @@ enum AccessContext {
     Static(Receiver),
     Const(Receiver),
     Default(Receiver),
+    Zelf(DefId),
+    Super(DefId),
+    Global(DefId),
     Expr(ExprId),
 }
 
@@ -364,7 +367,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
 
     fn get_receiver_scope(&self, r: Receiver) -> DefId {
         match r {
-            Receiver::Cdo(c) => c,
+            Receiver::Cdo(d) => d,
+            Receiver::Super(d) => d,
+            Receiver::Global(d) => d,
+            Receiver::Zelf(d) => d,
             Receiver::SelfClass => self.class_did,
             Receiver::Expr(_) => todo!(),
         }
@@ -554,6 +560,12 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         } else {
                             todo!()
                         }
+                    }
+                    _ => {
+                        return Err(BodyError {
+                            kind: BodyErrorKind::BadContext,
+                            span: source.span,
+                        })
                     }
                 }
             }
@@ -775,6 +787,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
     }
 
     fn get_access_context(&mut self, lhs: &'hir uc_ast::Expr) -> Result<AccessContext, BodyError> {
+        // First, check the classful contexts
         let context_ctor: Option<fn(Receiver) -> AccessContext> = match &lhs.kind {
             uc_ast::ExprKind::FieldExpr { rhs, .. } | uc_ast::ExprKind::SymExpr { sym: rhs } => {
                 if rhs == "static" {
@@ -810,9 +823,59 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 uc_ast::ExprKind::SymExpr { .. } => Ok(c(Receiver::SelfClass)),
                 _ => unreachable!(),
             },
-            None => Ok(AccessContext::Expr(
-                self.lower_expr(lhs, TypeExpectation::None)?,
-            )),
+            None => {
+                // global.
+                // super.
+                // super(class).
+
+                match &lhs.kind {
+                    uc_ast::ExprKind::SymExpr { sym } if sym == "global" => {
+                        // Global only in non-static functions
+                        Ok(AccessContext::Global(
+                            self.self_ty.unwrap().get_def().unwrap(),
+                        ))
+                    }
+                    uc_ast::ExprKind::SymExpr { sym } if sym == "super" => {
+                        let super_class = match self
+                            .ctx
+                            .defs
+                            .get_class(self.class_did)
+                            .kind
+                            .as_ref()
+                            .unwrap()
+                        {
+                            ClassKind::Class { extends, .. } => extends.unwrap(),
+                            ClassKind::Interface { .. } => unreachable!(),
+                        };
+                        Ok(AccessContext::Super(super_class))
+                    }
+                    uc_ast::ExprKind::SymExpr { sym } if sym == "self" => Ok(AccessContext::Zelf(
+                        self.self_ty.unwrap().get_def().unwrap(),
+                    )),
+                    uc_ast::ExprKind::FuncCallExpr {
+                        lhs: None,
+                        name: rhs,
+                        args,
+                    } if rhs == "super" => {
+                        let super_name = match &**args {
+                            [Some(e)] => match &e.kind {
+                                uc_ast::ExprKind::SymExpr { sym } => sym,
+                                _ => todo!(),
+                            },
+                            _ => todo!(),
+                        };
+                        let super_did = self
+                            .ctx
+                            .resolver
+                            .get_ty(self.class_did, self.ctx.defs, super_name)
+                            .expect("bad super class");
+                        Ok(AccessContext::Super(super_did))
+                    }
+                    _ => Ok(AccessContext::Expr(
+                        self.lower_expr(lhs, TypeExpectation::None)?,
+                    )),
+                }
+            }
         }
     }
 
@@ -1294,6 +1357,9 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 return self.lower_dyn_array_call(e, name, args, span);
             }
             AccessContext::Static(d) => (Ty::class_from(self.get_receiver_scope(d)), d),
+            AccessContext::Global(d) => (Ty::object_from(d), Receiver::Global(d)),
+            AccessContext::Super(d) => (Ty::object_from(d), Receiver::Super(d)),
+            AccessContext::Zelf(d) => (Ty::object_from(d), Receiver::Zelf(d)),
             AccessContext::Expr(e) => {
                 let expr_ty = self.body.get_expr_ty(e).ty_or(BodyError {
                     kind: BodyErrorKind::VoidType { expected: None },
@@ -1309,10 +1375,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     Receiver::Expr(e),
                 )
             }
-            _ => {
+            AccessContext::Const(_) | AccessContext::Default(_) => {
                 return Err(BodyError {
                     kind: BodyErrorKind::BadContext,
-                    span,
+                    span: lhs.span,
                 })
             }
         };
@@ -1347,6 +1413,87 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             )),
             ret_ty,
         ))
+    }
+
+    fn lower_free_func_call(
+        &mut self,
+        name: &Identifier,
+        args: &'hir [Option<uc_ast::Expr>],
+        span: Span,
+    ) -> Result<(ExprKind, ExprTy), BodyError> {
+        if name == "nameof" {
+            let target_name = match args {
+                [Some(expr)] => {
+                    // TODO: We're abandonding this code here!
+                    let expr = self.lower_expr(expr, TypeExpectation::None)?;
+                    match &self.body.get_expr(expr).kind {
+                        ExprKind::Value(ValueExprKind::DelegateCreation(_, d)) => {
+                            &self.ctx.defs.get_func(*d).name
+                        }
+                        ExprKind::Place(PlaceExprKind::Field(_, d)) => {
+                            &self.ctx.defs.get_var(*d).name
+                        }
+                        _ => {
+                            return Err(BodyError {
+                                kind: BodyErrorKind::NotYetImplemented("bad nameof target"),
+                                span,
+                            })
+                        }
+                    }
+                }
+                _ => {
+                    return Err(BodyError {
+                        kind: BodyErrorKind::NotYetImplemented("weird nameof"),
+                        span,
+                    })
+                }
+            };
+            return Ok((
+                ExprKind::Value(ValueExprKind::Lit(Literal::Name)),
+                ExprTy::Ty(Ty::NAME),
+            ));
+        }
+
+        let cast_to_type = if args.len() == 1 {
+            self.ctx.decode_simple_ty(name, self.body_scope)
+        } else {
+            None
+        };
+        // A freestanding function call could be a cast. Check if name is a type
+        match cast_to_type {
+            Some(cast_ty) => {
+                // We have a cast. Forget everything about expected types...
+                match args {
+                    [Some(arg)] => Ok((self.lower_cast(arg, cast_ty)?, ExprTy::Ty(cast_ty))),
+                    x => Err(BodyError {
+                        kind: BodyErrorKind::ArgCountError {
+                            expected: 1,
+                            got: x.len() as u32,
+                        },
+                        span,
+                    }),
+                }
+            }
+            None => match self.try_bare_func_access(name, span, false, false)? {
+                Some((receiver, func)) => {
+                    let def = self.ctx.defs.get_func(func);
+                    let (ret_ty, arg_exprs) =
+                        self.lower_call_sig(&def.sig, args, span, def.flags)?;
+                    Ok((
+                        ExprKind::Value(ValueExprKind::FuncCall(
+                            func,
+                            receiver,
+                            arg_exprs.into_boxed_slice(),
+                        )),
+                        ret_ty,
+                    ))
+                }
+                None => Err(BodyError {
+                    kind: BodyErrorKind::FuncNotFound { name: name.clone() },
+                    span,
+                }),
+            },
+        }
     }
 
     fn lower_expr(
@@ -1449,6 +1596,23 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             ExprTy::Ty(prop_ty.ty.unwrap()),
                         )
                     }
+                    AccessContext::Zelf(c) => {
+                        let prop = self
+                            .ctx
+                            .resolver
+                            .get_scoped_var(c, self.ctx.defs, ScopeWalkKind::Access, rhs)
+                            .map_err(|_| BodyError {
+                                kind: BodyErrorKind::FuncNotFound { name: rhs.clone() },
+                                span: expr.span,
+                            })?;
+
+                        let prop_ty = self.ctx.defs.get_var(prop);
+
+                        (
+                            ExprKind::Place(PlaceExprKind::Field(Receiver::Zelf(c), prop)),
+                            ExprTy::Ty(prop_ty.ty.unwrap()),
+                        )
+                    }
                     AccessContext::Expr(l) => {
                         let ty = self.body.get_expr_ty(l).ty_or(BodyError {
                             kind: BodyErrorKind::VoidType { expected: None },
@@ -1527,63 +1691,18 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             todo!("invalid field access: {:?}, {:?}", lhs, rhs)
                         }
                     }
-                }
-            }
-            uc_ast::ExprKind::FuncCallExpr { lhs, name, args } => {
-                match lhs {
-                    Some(lhs) => self.lower_lhsful_func_call(lhs, name, args, expr.span)?,
-                    None => {
-                        let cast_to_type = if args.len() == 1 {
-                            self.ctx.decode_simple_ty(name, self.body_scope)
-                        } else {
-                            None
-                        };
-                        // A freestanding function call could be a cast. Check if name is a type
-                        match cast_to_type {
-                            Some(cast_ty) => {
-                                // We have a cast. Forget everything about expected types...
-                                match &**args {
-                                    [Some(arg)] => {
-                                        (self.lower_cast(arg, cast_ty)?, ExprTy::Ty(cast_ty))
-                                    }
-                                    x => {
-                                        return Err(BodyError {
-                                            kind: BodyErrorKind::ArgCountError {
-                                                expected: 1,
-                                                got: x.len() as u32,
-                                            },
-                                            span: expr.span,
-                                        })
-                                    }
-                                }
-                            }
-                            None => match self
-                                .try_bare_func_access(name, expr.span, false, false)?
-                            {
-                                Some((receiver, func)) => {
-                                    let def = self.ctx.defs.get_func(func);
-                                    let (ret_ty, arg_exprs) =
-                                        self.lower_call_sig(&def.sig, args, expr.span, def.flags)?;
-                                    (
-                                        ExprKind::Value(ValueExprKind::FuncCall(
-                                            func,
-                                            receiver,
-                                            arg_exprs.into_boxed_slice(),
-                                        )),
-                                        ret_ty,
-                                    )
-                                }
-                                None => {
-                                    return Err(BodyError {
-                                        kind: BodyErrorKind::FuncNotFound { name: name.clone() },
-                                        span: expr.span,
-                                    })
-                                }
-                            },
-                        }
+                    _ => {
+                        return Err(BodyError {
+                            kind: BodyErrorKind::BadContext,
+                            span: lhs.span,
+                        })
                     }
                 }
             }
+            uc_ast::ExprKind::FuncCallExpr { lhs, name, args } => match lhs {
+                Some(lhs) => self.lower_lhsful_func_call(lhs, name, args, expr.span)?,
+                None => self.lower_free_func_call(name, args, expr.span)?,
+            },
             uc_ast::ExprKind::ClassMetaCastExpr { ty, expr } => {
                 let cast_ty = self.ctx.decode_ast_ty(ty, self.body_scope).unwrap();
                 (self.lower_cast(expr, cast_ty)?, ExprTy::Ty(cast_ty))

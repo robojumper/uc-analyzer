@@ -236,6 +236,9 @@ pub enum Literal {
 #[derive(Copy, Clone, Debug)]
 pub enum Receiver {
     Cdo(DefId),
+    Super(DefId),
+    Global(DefId),
+    Zelf(DefId),
     SelfClass,
     Expr(ExprId),
 }
