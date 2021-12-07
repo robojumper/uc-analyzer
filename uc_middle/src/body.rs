@@ -170,6 +170,8 @@ pub enum ValueExprKind {
     DelegateCreation(Receiver, DefId),
     /// Function call, with function, receiver, and args
     FuncCall(DefId, Receiver, Box<[Option<ExprId>]>),
+    /// Delegate call, with delegate var, receiver, and args
+    DelegateCall(DefId, Receiver, Box<[Option<ExprId>]>),
     /// See [`DynArrayOpKind`] for details
     DynArrayIntrinsic(ExprId, DynArrayOpKind),
     /// HasNext / Next calls

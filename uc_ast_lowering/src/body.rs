@@ -1383,36 +1383,66 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             }
         };
 
-        let func = self
-            .ctx
-            .resolver
-            .get_scoped_func(
-                receiver_ty.get_def().unwrap(),
-                self.ctx.defs,
-                ScopeWalkKind::Access,
-                name,
-            )
-            .map_err(|_| BodyError {
-                kind: BodyErrorKind::FuncNotFound { name: name.clone() },
-                span: lhs.span,
-            })?;
-        let def = self.ctx.defs.get_func(func);
-        assert!(!def.flags.intersects(
-            FuncFlags::OPERATOR
-                | FuncFlags::PREOPERATOR
-                | FuncFlags::POSTOPERATOR
-                | FuncFlags::ITERATOR
-        ));
+        if let Ok(func) = self.ctx.resolver.get_scoped_func(
+            receiver_ty.get_def().unwrap(),
+            self.ctx.defs,
+            ScopeWalkKind::Access,
+            name,
+        ) {
+            let def = self.ctx.defs.get_func(func);
+            assert!(!def.flags.intersects(
+                FuncFlags::OPERATOR
+                    | FuncFlags::PREOPERATOR
+                    | FuncFlags::POSTOPERATOR
+                    | FuncFlags::ITERATOR
+            ));
 
-        let (ret_ty, arg_exprs) = self.lower_call_sig(&def.sig, args, span, def.flags)?;
-        Ok((
-            ExprKind::Value(ValueExprKind::FuncCall(
-                func,
-                receiver,
-                arg_exprs.into_boxed_slice(),
-            )),
-            ret_ty,
-        ))
+            let (ret_ty, arg_exprs) = self.lower_call_sig(&def.sig, args, span, def.flags)?;
+            Ok((
+                ExprKind::Value(ValueExprKind::FuncCall(
+                    func,
+                    receiver,
+                    arg_exprs.into_boxed_slice(),
+                )),
+                ret_ty,
+            ))
+        } else if let Ok(var) = self.ctx.resolver.get_scoped_var(
+            receiver_ty.get_def().unwrap(),
+            self.ctx.defs,
+            ScopeWalkKind::Access,
+            name,
+        ) {
+            let var_ty = self.ctx.defs.get_var(var).ty.unwrap();
+            if !var_ty.is_delegate() {
+                return Err(BodyError {
+                    kind: BodyErrorKind::NotYetImplemented("call through var that's not delegate?"),
+                    span,
+                });
+            }
+            
+            let def = self.ctx.defs.get_func(var_ty.get_def().unwrap());
+            assert!(!def.flags.intersects(
+                FuncFlags::OPERATOR
+                    | FuncFlags::PREOPERATOR
+                    | FuncFlags::POSTOPERATOR
+                    | FuncFlags::ITERATOR
+            ));
+
+            let (ret_ty, arg_exprs) = self.lower_call_sig(&def.sig, args, span, def.flags)?;
+            Ok((
+                ExprKind::Value(ValueExprKind::DelegateCall(
+                    var,
+                    receiver,
+                    arg_exprs.into_boxed_slice(),
+                )),
+                ret_ty,
+            ))
+        } else {
+            Err(BodyError {
+                kind: BodyErrorKind::FuncNotFound { name: name.clone() },
+                span,
+            })
+        }
     }
 
     fn lower_free_func_call(
