@@ -1157,17 +1157,14 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         // TODO: Check if allowed in self
         match ctx {
             ast::Context::Global => {
-                let func = self
+                let (func, _) = self
                     .ctx
-                    .resolver
-                    .get_scoped_item(
+                    .resolve_func(
                         self.self_ty.unwrap().get_def().unwrap(),
-                        self.ctx.defs,
-                        ScopeWalkKind::Access,
                         name,
-                        |d| matches!(self.ctx.defs.get_def(d).kind, DefKind::Function(_)),
+                        ScopeWalkKind::Access,
                     )
-                    .map_err(|_| BodyError {
+                    .ok_or_else(|| BodyError {
                         kind: BodyErrorKind::FuncNotFound { name: name.clone() },
                         span,
                     })?;
@@ -1182,17 +1179,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             .resolver
                             .get_ty(self.body_scope, self.ctx.defs, super_name)
                             .unwrap();
-                        let func = self
+                        let (func, _) = self
                             .ctx
-                            .resolver
-                            .get_scoped_item(
-                                s_class,
-                                self.ctx.defs,
-                                ScopeWalkKind::Access,
-                                name,
-                                |d| matches!(self.ctx.defs.get_def(d).kind, DefKind::Function(_)),
-                            )
-                            .map_err(|_| BodyError {
+                            .resolve_func(s_class, name, ScopeWalkKind::Access)
+                            .ok_or_else(|| BodyError {
                                 kind: BodyErrorKind::FuncNotFound { name: name.clone() },
                                 span,
                             })?;
@@ -1204,17 +1194,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                 ClassKind::Class { extends, .. } => extends.unwrap(),
                                 ClassKind::Interface { .. } => unreachable!(),
                             };
-                        let func = self
+                        let (func, _) = self
                             .ctx
-                            .resolver
-                            .get_scoped_item(
-                                super_class,
-                                self.ctx.defs,
-                                ScopeWalkKind::Access,
-                                name,
-                                |d| matches!(self.ctx.defs.get_def(d).kind, DefKind::Function(_)),
-                            )
-                            .map_err(|_| BodyError {
+                            .resolve_func(super_class, name, ScopeWalkKind::Access)
+                            .ok_or_else(|| BodyError {
                                 kind: BodyErrorKind::FuncNotFound { name: name.clone() },
                                 span,
                             })?;
@@ -1222,13 +1205,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     }
                 };
 
-                let func = self
+                let (func, _) = self
                     .ctx
-                    .resolver
-                    .get_scoped_item(def_id, self.ctx.defs, ScopeWalkKind::Access, name, |d| {
-                        matches!(self.ctx.defs.get_def(d).kind, DefKind::Function(_))
-                    })
-                    .map_err(|_| BodyError {
+                    .resolve_func(def_id, name, ScopeWalkKind::Access)
+                    .ok_or_else(|| BodyError {
                         kind: BodyErrorKind::FuncNotFound { name: name.clone() },
                         span,
                     })?;
@@ -1257,13 +1237,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     }
                 };
 
-                let func = self
+                let (func, _) = self
                     .ctx
-                    .resolver
-                    .get_scoped_item(def_id, self.ctx.defs, ScopeWalkKind::Access, name, |d| {
-                        matches!(self.ctx.defs.get_def(d).kind, DefKind::Function(_))
-                    })
-                    .map_err(|_| BodyError {
+                    .resolve_func(def_id, name, ScopeWalkKind::Access)
+                    .ok_or_else(|| BodyError {
                         kind: BodyErrorKind::FuncNotFound { name: name.clone() },
                         span,
                     })?;
