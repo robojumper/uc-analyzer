@@ -1,6 +1,6 @@
 use std::vec;
 
-use uc_ast::{Block, Case, CaseClause, Statement, StatementKind};
+use uc_ast::{Block, Case, CaseClause, Expr, ExprKind, Statement, StatementKind};
 use uc_files::Span;
 
 use crate::{
@@ -190,12 +190,32 @@ impl Parser<'_> {
                 }
                 kw!(Foreach) => {
                     let foreach_m = self.marker();
-                    let kw_span = self.next().unwrap().span;
-                    let source = self.parse_base_expression()?;
+                    let foreach_tok = self.next().unwrap();
+                    let kw_span = foreach_tok.span;
+                    let fake_call = self.parse_base_expression()?;
+                    // Pull apart the function call expr. This makes it easier to work with later.
+                    let (ctx, name, args) = match fake_call {
+                        Expr {
+                            kind: ExprKind::FuncCallExpr { lhs, name, args },
+                            span,
+                            paren,
+                        } => (lhs, name, args),
+                        _ => {
+                            return Err(self.fmt_err(
+                                "expected function call after foreach",
+                                Some(foreach_tok),
+                            ))
+                        }
+                    };
                     let run = self.parse_block_or_stmt(("foreach", kw_span))?;
 
                     Ok(Some(Statement {
-                        kind: StatementKind::ForeachStatement { source, run },
+                        kind: StatementKind::ForeachStatement {
+                            ctx,
+                            name,
+                            args,
+                            run,
+                        },
                         span: foreach_m.complete(self),
                     }))
                 }

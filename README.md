@@ -64,3 +64,4 @@ implementation. The different behavior is documented.
 * Operating on returned arrays directly (e.g. `GetSomeArray()[0]` causes VM issues)
 * Never assigned out variable
 * Dead assignment
+* Access to const through member variable syntax

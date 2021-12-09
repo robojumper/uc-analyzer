@@ -4,7 +4,7 @@
 
 use std::str::FromStr;
 
-use uc_ast::{Expr, ExprKind, Ty};
+use uc_ast::{Context, Expr, ExprKind, Ty};
 use uc_def::Op;
 use uc_name::Identifier;
 
@@ -76,6 +76,52 @@ impl Parser<'_> {
             }
         }
         Ok(args)
+    }
+
+    fn continue_context(
+        &mut self,
+        i: Identifier,
+        lhs: Option<Expr>,
+    ) -> Result<(Context, Identifier), ParseError> {
+        Ok(if &i == "static" {
+            self.expect(sig!(Dot))?;
+            let nm = self.expect_ident()?;
+            (Context::Static(lhs), nm)
+        } else if &i == "const" {
+            self.expect(sig!(Dot))?;
+            let nm = self.expect_ident()?;
+            (Context::Const(lhs), nm)
+        } else if &i == "default" {
+            self.expect(sig!(Dot))?;
+            let nm = self.expect_ident()?;
+            (Context::Default(lhs), nm)
+        } else if &i == "global" {
+            if lhs.is_some() {
+                todo!("error")
+            }
+            self.expect(sig!(Dot))?;
+            let nm = self.expect_ident()?;
+            (Context::Global, nm)
+        } else if &i == "super" {
+            if lhs.is_some() {
+                todo!("error")
+            }
+            let s_class = if self.eat(sig!(LParen)) {
+                let s_class = self.expect_ident()?;
+                self.expect(sig!(RParen))?;
+                Some(s_class)
+            } else {
+                None
+            };
+            self.expect(sig!(Dot))?;
+            let nm = self.expect_ident()?;
+            (Context::Super(s_class), nm)
+        } else {
+            match lhs {
+                Some(e) => (Context::Expr(e), i),
+                None => (Context::Bare, i),
+            }
+        })
     }
 
     fn parse_base_expression_bp(&mut self, min_bp: u8) -> Result<Expr, ParseError> {
@@ -221,23 +267,28 @@ impl Parser<'_> {
                     },
                 },
                 Tk::Sym(_) => {
+                    let ident = self.sym_to_ident(&tok);
+                    let (ctx, name) = self.continue_context(ident, None)?;
+
                     if self.eat(sig!(LParen)) {
                         let args = self.parse_arg_list()?;
                         Expr {
                             span: lhs_marker.complete(self),
                             paren: false,
                             kind: ExprKind::FuncCallExpr {
-                                lhs: None,
-                                name: self.sym_to_ident(&tok),
+                                lhs: Box::new(ctx),
+                                name,
                                 args,
                             },
                         }
                     } else {
+                        let span = lhs_marker.complete(self);
                         Expr {
-                            span: lhs_marker.complete(self),
+                            span,
                             paren: false,
-                            kind: ExprKind::SymExpr {
-                                sym: self.sym_to_ident(&tok),
+                            kind: ExprKind::FieldExpr {
+                                lhs: Box::new(ctx),
+                                rhs: name,
                             },
                         }
                     }
@@ -333,15 +384,24 @@ impl Parser<'_> {
                         },
                     }
                 } else if let OpLike::Dot = op {
-                    let rhs = self.expect_ident()?;
+                    let rhs_tok = self.next_any()?;
+                    let bridge = if let Tk::Sym(_) = rhs_tok.kind {
+                        self.sym_to_ident(&rhs_tok)
+                    } else {
+                        return Err(
+                            self.fmt_err("Unexpected token, expected identifier", Some(rhs_tok))
+                        );
+                    };
+
+                    let (ctx, name) = self.continue_context(bridge, Some(lhs))?;
                     if self.eat(sig!(LParen)) {
                         let args = self.parse_arg_list()?;
                         Expr {
                             span: lhs_marker.complete(self),
                             paren: false,
                             kind: ExprKind::FuncCallExpr {
-                                lhs: Some(Box::new(lhs)),
-                                name: rhs,
+                                lhs: Box::new(ctx),
+                                name,
                                 args,
                             },
                         }
@@ -350,8 +410,8 @@ impl Parser<'_> {
                             span: lhs_marker.complete(self),
                             paren: false,
                             kind: ExprKind::FieldExpr {
-                                lhs: Box::new(lhs),
-                                rhs,
+                                lhs: Box::new(ctx),
+                                rhs: name,
                             },
                         }
                     }

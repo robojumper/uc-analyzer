@@ -640,10 +640,10 @@ impl Parser<'_> {
                         continue;
                     }
                     Tk::Comment => unreachable!("filtered out in next"),
-                    _ => panic!(
-                        "Unknown start of item: {:?}, buffered errs: {:?}",
-                        tok, self.errs
-                    ),
+                    _ => {
+                        return Err(self
+                            .fmt_err("unexpected start of item", Some(self.peek_any().unwrap())))
+                    }
                 },
                 None => Ok(None),
             };

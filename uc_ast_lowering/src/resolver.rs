@@ -28,12 +28,10 @@ pub struct ResolverContext {
     pub global_ty_defs: HashMap<Identifier, Vec<DefId>>,
     /// Name -> Enum variants
     pub global_values: HashMap<Identifier, Vec<DefId>>,
-    /// Class/Struct -> Name -> Var
-    pub scoped_vars: HashMap<DefId, HashMap<Identifier, DefId>>,
-    /// Class/Struct -> Name -> Const
-    pub scoped_consts: HashMap<DefId, HashMap<Identifier, DefId>>,
-    /// Class -> Name -> Func
-    pub scoped_funcs: HashMap<DefId, HashMap<Identifier, DefId>>,
+    /// Name -> Enum variants
+    pub enum_values: HashMap<DefId, HashMap<Identifier, DefId>>,
+    /// Class/Struct -> Name -> Var/Const/Func
+    pub scoped_items: HashMap<DefId, HashMap<Identifier, DefId>>,
     /// Class -> Op -> Func
     pub scoped_ops: HashMap<DefId, HashMap<Op, Vec<DefId>>>,
 }
@@ -68,11 +66,21 @@ impl ResolverContext {
         Ok(())
     }
 
-    pub fn add_global_value(&mut self, name: Identifier, value: DefId) -> Result<()> {
-        match self.global_values.entry(name) {
+    pub fn add_enum_value(&mut self, name: Identifier, owner: DefId, value: DefId) -> Result<()> {
+        match self.global_values.entry(name.clone()) {
             Entry::Occupied(mut e) => e.get_mut().push(value),
             Entry::Vacant(e) => {
                 e.insert(vec![value]);
+            }
+        }
+        let variants = self
+            .enum_values
+            .entry(owner)
+            .or_insert_with(HashMap::default);
+        match variants.entry(name) {
+            Entry::Occupied(_) => return Err(ResolutionError::ExistsInExactScope),
+            Entry::Vacant(e) => {
+                e.insert(value);
             }
         }
         Ok(())
@@ -105,6 +113,13 @@ impl ResolverContext {
                 }
             }
             None => Err(ResolutionError::NotFound),
+        }
+    }
+
+    pub fn get_enum_value(&self, enum_id: DefId, name: &Identifier) -> Result<DefId> {
+        match self.enum_values.get(&enum_id) {
+            Some(vals) => vals.get(name).copied().ok_or(ResolutionError::NotFound),
+            None => Err(ResolutionError::NotFound), // Enum has no variants?
         }
     }
 
@@ -150,58 +165,18 @@ impl ResolverContext {
         self.get_ty(class, defs, second)
     }
 
-    pub fn add_scoped_var(&mut self, scope: DefId, name: Identifier, var: DefId) -> Result<()> {
+    pub fn add_scoped_item(&mut self, scope: DefId, name: Identifier, item: DefId) -> Result<()> {
         let vars = self
-            .scoped_vars
+            .scoped_items
             .entry(scope)
             .or_insert_with(HashMap::default);
         match vars.entry(name) {
             Entry::Occupied(_) => return Err(ResolutionError::ExistsInExactScope),
             Entry::Vacant(e) => {
-                e.insert(var);
+                e.insert(item);
             }
         }
         Ok(())
-    }
-
-    pub fn add_scoped_const(
-        &mut self,
-        scope: DefId,
-        name: Identifier,
-        const_id: DefId,
-    ) -> Result<()> {
-        let consts = self
-            .scoped_consts
-            .entry(scope)
-            .or_insert_with(HashMap::default);
-        match consts.entry(name) {
-            Entry::Occupied(_) => return Err(ResolutionError::ExistsInExactScope),
-            Entry::Vacant(e) => {
-                e.insert(const_id);
-            }
-        }
-        Ok(())
-    }
-
-    pub fn get_scoped_const(
-        &self,
-        scope: DefId,
-        defs: &Defs,
-        kind: ScopeWalkKind,
-        const_name: &Identifier,
-    ) -> Result<DefId> {
-        match defs.walk_scopes(scope, kind, |def_id| {
-            match self.scoped_consts.get(&def_id) {
-                Some(consts) => match consts.get(const_name) {
-                    Some(&d) => ControlFlow::Break(d),
-                    None => ControlFlow::Continue(()),
-                },
-                None => ControlFlow::Continue(()),
-            }
-        }) {
-            Some(d) => Ok(d),
-            None => Err(ResolutionError::NotFound),
-        }
     }
 
     pub fn add_scoped_ty(&mut self, name: Identifier, ty: DefId) {
@@ -211,20 +186,6 @@ impl ResolverContext {
                 e.insert(vec![ty]);
             }
         }
-    }
-
-    pub fn add_scoped_func(&mut self, scope: DefId, name: Identifier, func: DefId) -> Result<()> {
-        let funcs = self
-            .scoped_funcs
-            .entry(scope)
-            .or_insert_with(HashMap::default);
-        match funcs.entry(name) {
-            Entry::Occupied(_) => return Err(ResolutionError::ExistsInExactScope),
-            Entry::Vacant(e) => {
-                e.insert(func);
-            }
-        }
-        Ok(())
     }
 
     pub fn add_scoped_op(&mut self, scope: DefId, name: Op, op: DefId) -> Result<()> {
@@ -241,35 +202,18 @@ impl ResolverContext {
         Ok(())
     }
 
-    pub fn get_scoped_func(
+    pub fn get_scoped_item<F: Fn(DefId) -> bool>(
         &self,
         scope: DefId,
         defs: &Defs,
         kind: ScopeWalkKind,
-        func_name: &Identifier,
+        name: &Identifier,
+        pred: F,
     ) -> Result<DefId> {
-        match defs.walk_scopes(scope, kind, |def_id| match self.scoped_funcs.get(&def_id) {
-            Some(funcs) => match funcs.get(func_name) {
-                Some(&f) => ControlFlow::Break(f),
-                None => ControlFlow::Continue(()),
-            },
-            None => ControlFlow::Continue(()),
-        }) {
-            Some(d) => Ok(d),
-            None => Err(ResolutionError::NotFound),
-        }
-    }
-
-    pub fn get_scoped_var(
-        &self,
-        scope: DefId,
-        defs: &Defs,
-        kind: ScopeWalkKind,
-        var_name: &Identifier,
-    ) -> Result<DefId> {
-        match defs.walk_scopes(scope, kind, |def_id| match self.scoped_vars.get(&def_id) {
-            Some(vars) => match vars.get(var_name) {
-                Some(&d) => ControlFlow::Break(d),
+        match defs.walk_scopes(scope, kind, |def_id| match self.scoped_items.get(&def_id) {
+            Some(items) => match items.get(name) {
+                Some(&d) if pred(d) => ControlFlow::Break(d),
+                Some(_) => ControlFlow::Continue(()),
                 None => ControlFlow::Continue(()),
             },
             None => ControlFlow::Continue(()),

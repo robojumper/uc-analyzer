@@ -270,6 +270,14 @@ impl Ty {
     }
 
     #[inline]
+    pub fn get_array_count(&self) -> u16 {
+        match self.decorator {
+            TyDecorator::StaticArray(u) => u,
+            _ => panic!("not a static array"),
+        }
+    }
+
+    #[inline]
     pub fn dyn_array_from(inner: Self) -> Ty {
         assert!(inner.is_undecorated());
         Self {

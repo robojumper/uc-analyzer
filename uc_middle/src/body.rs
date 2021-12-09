@@ -163,15 +163,13 @@ pub enum ExprKind {
 pub enum ValueExprKind {
     /// A literal of any kind
     Lit(Literal),
-    /// Access to a class' constant
-    Const(DefId),
     /// Access to a function of a particular object,
     /// for delegate assignment or call
     DelegateCreation(Receiver, DefId),
     /// Function call, with function, receiver, and args
-    FuncCall(DefId, Receiver, Box<[Option<ExprId>]>),
+    FuncCall(Receiver, DefId, Box<[Option<ExprId>]>),
     /// Delegate call, with delegate var, receiver, and args
-    DelegateCall(DefId, Receiver, Box<[Option<ExprId>]>),
+    DelegateCall(Receiver, DefId, Box<[Option<ExprId>]>),
     /// See [`DynArrayOpKind`] for details
     DynArrayIntrinsic(ExprId, DynArrayOpKind),
     /// HasNext / Next calls
@@ -214,6 +212,7 @@ pub enum ForeachOpKind {
 
 #[derive(Debug)]
 pub enum PlaceExprKind {
+    /// The access to `self` in a non-static function
     SelfAccess,
     Local(DefId),
     Arg(DefId),
@@ -222,7 +221,7 @@ pub enum PlaceExprKind {
     DynArrayLen(ExprId),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Literal {
     None,
     Bool(bool),
@@ -237,11 +236,12 @@ pub enum Literal {
 
 #[derive(Copy, Clone, Debug)]
 pub enum Receiver {
-    Cdo(DefId),
     Super(DefId),
-    Global(DefId),
-    Zelf(DefId),
-    SelfClass,
+    Global,
+    Static(ExprId),
+    /// In non-static functions, equivalent to `self.Class.static.`
+    /// In static-functions, explicitly self.
+    StaticSelf,
     Expr(ExprId),
 }
 

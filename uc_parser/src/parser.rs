@@ -132,7 +132,7 @@ impl<'a> Parser<'a> {
         if tok.kind == kind {
             Ok(tok)
         } else {
-            let mut err = self.fmt_err("Unexpected token", Some(tok));
+            let mut err = self.fmt_err_expected("Unexpected token", Some(tok), kind);
             err.err.expected_token = Some(kind);
             Err(err)
         }
@@ -167,6 +167,22 @@ impl<'a> Parser<'a> {
                 bad_token: token,
                 ctx_token: None,
                 expected_token: None,
+            }),
+        }
+    }
+
+    fn fmt_err_expected(
+        &self,
+        msg: &'static str,
+        token: Option<Token>,
+        expected_token: Tk,
+    ) -> ParseError {
+        ParseError {
+            err: Box::new(ParseErrorInner {
+                error_message: msg,
+                bad_token: token,
+                ctx_token: None,
+                expected_token: Some(expected_token),
             }),
         }
     }

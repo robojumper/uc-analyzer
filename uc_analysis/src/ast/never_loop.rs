@@ -46,7 +46,7 @@ impl Visitor for NeverLoopVisitor {
         | StatementKind::WhileStatement { run, cond, .. } = &stmt.kind
         {
             (run, cond.span)
-        } else if let StatementKind::ForeachStatement { run, source } = &stmt.kind {
+        } else if let StatementKind::ForeachStatement { run, args, .. } = &stmt.kind {
             if let &[.., ref stmt] = &*run.stmts {
                 // Special case: a foreach loop with a class argument where the last statement
                 // always breaks is likely a "discovery loop" like
@@ -56,31 +56,27 @@ impl Visitor for NeverLoopVisitor {
                 //     break;
                 // }
 
-                if let ExprKind::FuncCallExpr { args, .. } = &source.kind {
-                    if args.iter().flatten().any(|e| {
-                        matches!(
-                            e,
-                            Expr {
-                                kind: ExprKind::LiteralExpr {
-                                    lit: Literal::ObjReference(_, _)
-                                },
-                                ..
-                            }
-                        )
-                    }) {
-                        let mut checker = BreakContinueContext {
-                            break_levels: 0,
-                            continue_levels: 0,
-                        };
-                        if let NeverLoopResult::AlwaysBreak = checker.check_statement(stmt) {
-                            return;
+                if args.iter().flatten().any(|e| {
+                    matches!(
+                        e,
+                        Expr {
+                            kind: ExprKind::LiteralExpr {
+                                lit: Literal::ObjReference(_, _)
+                            },
+                            ..
                         }
+                    )
+                }) {
+                    let mut checker = BreakContinueContext {
+                        break_levels: 0,
+                        continue_levels: 0,
+                    };
+                    if let NeverLoopResult::AlwaysBreak = checker.check_statement(stmt) {
+                        return;
                     }
-                } else {
-                    panic!("foreach requires a function call")
                 }
             }
-            (run, source.span)
+            (run, stmt.span)
         } else {
             return;
         };

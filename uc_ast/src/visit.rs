@@ -1,4 +1,4 @@
-use crate::{Expr, ExprKind, Hir, Statement, StatementKind};
+use crate::{Context, Expr, ExprKind, Hir, Statement, StatementKind};
 
 pub trait Visitor: Sized {
     const VISIT_EXPRS: bool;
@@ -69,8 +69,11 @@ pub fn walk_statement<V: Visitor>(visit: &mut V, stmt: &Statement) {
             visit.visit_statement(retry);
             visit.visit_statements(&run.stmts);
         }
-        StatementKind::ForeachStatement { source, run } => {
-            maybe_visit_expr(visit, source);
+        StatementKind::ForeachStatement { ctx, args, run, .. } => {
+            visit_context(visit, ctx);
+            for arg in args.iter().flatten() {
+                visit.visit_expr(arg);
+            }
             visit.visit_statements(&run.stmts)
         }
         StatementKind::WhileStatement { cond, run } => {
@@ -112,19 +115,25 @@ fn maybe_visit_expr<V: Visitor>(visit: &mut V, expr: &Expr) {
     }
 }
 
+pub fn visit_context<V: Visitor>(visit: &mut V, ctx: &Context) {
+    match ctx {
+        Context::Expr(e)
+        | Context::Const(Some(e))
+        | Context::Default(Some(e))
+        | Context::Static(Some(e)) => visit.visit_expr(e),
+        _ => {}
+    }
+}
+
 pub fn walk_expr<V: Visitor>(visit: &mut V, expr: &Expr) {
     match &expr.kind {
         ExprKind::IndexExpr { base, idx } => {
             visit.visit_expr(base);
             visit.visit_expr(idx);
         }
-        ExprKind::FieldExpr { lhs, rhs: _ } => {
-            visit.visit_expr(lhs);
-        }
+        ExprKind::FieldExpr { lhs, rhs: _ } => visit_context(visit, lhs),
         ExprKind::FuncCallExpr { lhs, name: _, args } => {
-            if let Some(lhs) = lhs {
-                visit.visit_expr(lhs);
-            }
+            visit_context(visit, lhs);
             for arg in args.iter().flatten() {
                 visit.visit_expr(arg);
             }
@@ -156,7 +165,6 @@ pub fn walk_expr<V: Visitor>(visit: &mut V, expr: &Expr) {
             visit.visit_expr(then);
             visit.visit_expr(alt);
         }
-        ExprKind::SymExpr { sym: _ } => {}
         ExprKind::LiteralExpr { lit: _ } => {}
     }
 }

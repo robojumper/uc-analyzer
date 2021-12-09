@@ -42,7 +42,7 @@ impl Visitor for UneffectfulStmtsVisitor {
 fn expr_no_effects(expr: &Expr) -> Option<&'static str> {
     match &expr.kind {
         ExprKind::IndexExpr { base: _, idx: _ } => Some("index expression has no side effect"),
-        ExprKind::FieldExpr { lhs: _, rhs: _ } => Some("place expression has no side effect"),
+        ExprKind::FieldExpr { lhs: _, rhs: _ } => Some("value/field expression has no side effect"),
         ExprKind::FuncCallExpr {
             lhs: _,
             name: _,
@@ -66,7 +66,6 @@ fn expr_no_effects(expr: &Expr) -> Option<&'static str> {
                 None
             }
         }
-        ExprKind::SymExpr { sym: _ } => Some("symbol expression has no effect"),
         ExprKind::LiteralExpr { lit: _ } => Some("literal expression has no effect"),
     }
 }

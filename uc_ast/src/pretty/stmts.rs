@@ -1,6 +1,6 @@
 use std::io;
 
-use crate::{Block, Case, Expr, ExprKind, Literal, Op, Statement, StatementKind};
+use crate::{Block, Case, Context, Expr, ExprKind, Literal, Op, Statement, StatementKind};
 
 use super::PPrinter;
 
@@ -38,9 +38,16 @@ impl<W: io::Write> PPrinter<W> {
                 self.w.write_all(b")")?;
                 self.format_block(run)?;
             }
-            StatementKind::ForeachStatement { source, run } => {
+            StatementKind::ForeachStatement {
+                ctx,
+                name,
+                args,
+                run,
+            } => {
                 self.w.write_all(b"foreach ")?;
-                self.format_expr(source)?;
+                self.format_context(ctx)?;
+                self.format_i(name)?;
+                self.format_args_list(args)?;
                 self.format_block(run)?;
             }
             StatementKind::WhileStatement { cond, run } => {
@@ -130,6 +137,61 @@ impl<W: io::Write> PPrinter<W> {
         Ok(())
     }
 
+    pub fn format_ctx_opt_expr(
+        &mut self,
+        e: &Option<Expr>,
+        bridge: &'static str,
+    ) -> io::Result<()> {
+        match e {
+            Some(e) => {
+                self.format_expr(e)?;
+                self.w.write_all(b".")?
+            }
+            None => {}
+        }
+        self.w.write_all(bridge.as_bytes())?;
+        self.w.write_all(b".")
+    }
+
+    pub fn format_context(&mut self, ctx: &Context) -> io::Result<()> {
+        match ctx {
+            Context::Bare => Ok(()),
+            Context::Global => self.w.write_all(b"global."),
+            Context::Static(e) => self.format_ctx_opt_expr(e, "static"),
+            Context::Default(e) => self.format_ctx_opt_expr(e, "default"),
+            Context::Const(e) => self.format_ctx_opt_expr(e, "const"),
+            Context::Super(s) => {
+                self.w.write_all(b"super")?;
+                match s {
+                    Some(i) => {
+                        self.w.write_all(b"(")?;
+                        self.format_i(i)?;
+                        self.w.write_all(b")")?;
+                    }
+                    None => {}
+                }
+                self.w.write_all(b".")
+            }
+            Context::Expr(e) => {
+                self.format_expr(e)?;
+                self.w.write_all(b".")
+            }
+        }
+    }
+
+    fn format_args_list(&mut self, args: &[Option<Expr>]) -> io::Result<()> {
+        self.w.write_all(b"(")?;
+        for (idx, arg) in args.iter().enumerate() {
+            if let Some(arg) = arg {
+                self.format_expr(arg)?;
+            }
+            if idx != args.len() - 1 {
+                self.w.write_all(b", ")?;
+            }
+        }
+        self.w.write_all(b")")
+    }
+
     pub fn format_expr(&mut self, expr: &Expr) -> io::Result<()> {
         match &expr.kind {
             ExprKind::IndexExpr { base, idx } => {
@@ -141,26 +203,14 @@ impl<W: io::Write> PPrinter<W> {
                 self.w.write_all(b")")?;
             }
             ExprKind::FieldExpr { lhs, rhs } => {
-                self.format_expr(lhs)?;
-                self.w.write_all(b".")?;
+                self.format_context(lhs)?;
                 self.format_i(rhs)?;
             }
             ExprKind::FuncCallExpr { lhs, name, args } => {
-                if let Some(lhs) = lhs {
-                    self.format_expr(lhs)?;
-                    self.w.write_all(b".")?;
-                }
+                self.format_context(lhs)?;
                 self.format_i(name)?;
                 self.w.write_all(b"(")?;
-                for (idx, arg) in args.iter().enumerate() {
-                    if let Some(arg) = arg {
-                        self.format_expr(arg)?;
-                    }
-                    if idx != args.len() - 1 {
-                        self.w.write_all(b", ")?;
-                    }
-                }
-                self.w.write_all(b")")?;
+                self.format_args_list(args)?;
             }
             ExprKind::ClassMetaCastExpr { ty, expr } => {
                 self.format_ty(ty)?;
@@ -171,20 +221,7 @@ impl<W: io::Write> PPrinter<W> {
             ExprKind::NewExpr { args, cls, arch } => {
                 self.w.write_all(b"(")?;
                 self.w.write_all(b"new ")?;
-                if !args.is_empty() {
-                    self.w.write_all(b"(")?;
-                    for (idx, arg) in args.iter().enumerate() {
-                        if let Some(arg) = arg {
-                            self.format_expr(arg)?;
-                        } else {
-                            self.w.write_all(b",")?;
-                        }
-                        if idx != args.len() - 1 {
-                            self.w.write_all(b", ")?;
-                        }
-                    }
-                    self.w.write_all(b") ")?;
-                }
+                self.format_args_list(args)?;
                 self.format_expr(cls)?;
 
                 if let Some(arch) = arch {
@@ -225,9 +262,6 @@ impl<W: io::Write> PPrinter<W> {
                 self.format_expr(alt)?;
                 self.w.write_all(b")")?;
             }
-            ExprKind::SymExpr { sym } => {
-                self.format_i(sym)?;
-            }
             ExprKind::LiteralExpr { lit } => {
                 self.format_lit(lit)?;
             }
@@ -252,7 +286,11 @@ impl<W: io::Write> PPrinter<W> {
                 self.w.write_all(n.as_ref().as_bytes())?;
                 self.w.write_all(b"'")?;
             }
-            Literal::String(s) => self.w.write_all(s.as_bytes())?,
+            Literal::String(s) => {
+                self.w.write_all(b"\"")?;
+                self.w.write_all(s.as_bytes())?;
+                self.w.write_all(b"\"")?
+            }
         }
         Ok(())
     }

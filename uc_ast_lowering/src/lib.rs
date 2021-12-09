@@ -24,7 +24,7 @@ use uc_ast::{DimCount, Hir};
 use uc_def::{ArgFlags, ClassFlags, FuncFlags, StructFlags, VarFlags};
 use uc_files::Span;
 use uc_middle::{
-    body::Literal, ty::Ty, Class, ClassKind, Const, ConstVal, DefId, DefKind, Defs, Enum,
+    body::Literal, ty::Ty, Class, ClassKind, Const, ConstVal, Def, DefId, DefKind, Defs, Enum,
     EnumVariant, FuncArg, FuncContents, FuncSig, Function, Local, Operator, Package, ScopeWalkKind,
     State, Struct, Var,
 };
@@ -388,7 +388,7 @@ impl<'defs> LoweringContext<'defs> {
         self.add_def(|this, func_id| {
             let name = Identifier::from_str("Assert").unwrap();
             this.resolver
-                .add_scoped_func(object_id, name.clone(), func_id)
+                .add_scoped_item(object_id, name.clone(), func_id)
                 .expect("conflict in assert?");
             let bool_arg = this.add_def(|_, _| {
                 (
@@ -502,13 +502,9 @@ impl<'defs> LoweringContext<'defs> {
         match dim {
             DimCount::Complex(n) => match &**n {
                 [single] => {
-                    if let Ok(const_id) = self.resolver.get_scoped_const(
-                        scope,
-                        self.defs,
-                        ScopeWalkKind::Definitions,
-                        single,
-                    ) {
-                        let def = self.defs.get_const(const_id);
+                    if let Some((_, def)) =
+                        self.resolve_const(scope, single, ScopeWalkKind::Definitions)
+                    {
                         match &def.val {
                             ConstVal::Literal(Literal::Int(n)) => Some(*n as u16),
                             _ => panic!("invalid const value"),
@@ -548,7 +544,7 @@ impl<'defs> LoweringContext<'defs> {
             .map(|arg| {
                 self.add_def(|this, arg_id| {
                     this.resolver
-                        .add_scoped_var(func_id, arg.name.clone(), arg_id)
+                        .add_scoped_item(func_id, arg.name.clone(), arg_id)
                         .expect("duplicate arg");
                     let arg_ty = this.decode_ast_ty(&arg.ty, func_id).unwrap();
                     let ty = match this.resolve_dim(&arg.count, func_id) {
@@ -580,7 +576,7 @@ impl<'defs> LoweringContext<'defs> {
                 for inst in &local.names {
                     let inst_id = self.add_def(|this, local_id| {
                         this.resolver
-                            .add_scoped_var(func_id, inst.name.clone(), local_id)
+                            .add_scoped_item(func_id, inst.name.clone(), local_id)
                             .expect("duplicate local");
                         let ty = match this.resolve_dim(&inst.count, func_id) {
                             Some(c) => Ty::stat_array_from(local_ty, c),
@@ -639,6 +635,65 @@ impl<'defs> LoweringContext<'defs> {
         }
     }
 
+    fn resolve_const(
+        &self,
+        scope: DefId,
+        name: &Identifier,
+        kind: ScopeWalkKind,
+    ) -> Option<(DefId, &Const)> {
+        match self
+            .resolver
+            .get_scoped_item(scope, self.defs, kind, name, |d| {
+                matches!(self.defs.get_def(d).kind, DefKind::Const(_))
+            }) {
+            Ok(d) => match self.defs.get_def(d) {
+                Def {
+                    kind: DefKind::Const(c),
+                    ..
+                } => Some((d, c)),
+                _ => unreachable!(),
+            },
+            Err(_) => None,
+        }
+    }
+
+    fn resolve_func(
+        &self,
+        scope: DefId,
+        name: &Identifier,
+        kind: ScopeWalkKind,
+    ) -> Option<(DefId, &Function)> {
+        match self
+            .resolver
+            .get_scoped_item(scope, self.defs, kind, name, |d| {
+                matches!(self.defs.get_def(d).kind, DefKind::Function(_))
+            }) {
+            Ok(d) => match self.defs.get_def(d) {
+                Def {
+                    kind: DefKind::Function(f),
+                    ..
+                } => Some((d, f)),
+                _ => unreachable!(),
+            },
+            Err(_) => None,
+        }
+    }
+
+    /// Finds a local, arg, or var
+    fn resolve_var(&self, scope: DefId, name: &Identifier, kind: ScopeWalkKind) -> Option<DefId> {
+        match self
+            .resolver
+            .get_scoped_item(scope, self.defs, kind, name, |d| {
+                matches!(
+                    self.defs.get_def(d).kind,
+                    DefKind::Var(_) | DefKind::Local(_) | DefKind::FuncArg(_)
+                )
+            }) {
+            Ok(d) => Some(d),
+            Err(_) => None,
+        }
+    }
+
     fn lower_enum(&mut self, class_id: DefId, enum_def: &uc_ast::EnumDef) -> DefId {
         self.add_def(|this, enum_id| {
             this.resolver.add_scoped_ty(enum_def.name.clone(), enum_id);
@@ -654,7 +709,7 @@ impl<'defs> LoweringContext<'defs> {
                         .map(|(idx, &(span, ref name))| {
                             this.add_def(|this, var_id| {
                                 this.resolver
-                                    .add_global_value(name.clone(), var_id)
+                                    .add_enum_value(name.clone(), enum_id, var_id)
                                     .unwrap_or_else(|e| panic!("conflict in {}: {:?}", name, e));
                                 (
                                     DefKind::EnumVariant(EnumVariant {
@@ -717,7 +772,7 @@ impl<'defs> LoweringContext<'defs> {
             .map(|(idx, inst)| {
                 self.add_def(|this, var_id| {
                     this.resolver
-                        .add_scoped_var(owner_id, inst.name.clone(), var_id)
+                        .add_scoped_item(owner_id, inst.name.clone(), var_id)
                         .unwrap();
                     vars.insert(var_id, (var_def, idx));
                     (
@@ -742,7 +797,7 @@ impl<'defs> LoweringContext<'defs> {
     ) -> DefId {
         self.add_def(|this, const_id| {
             this.resolver
-                .add_scoped_const(owner_id, const_def.name.clone(), const_id)
+                .add_scoped_item(owner_id, const_def.name.clone(), const_id)
                 .unwrap();
             consts.insert(const_id, const_def);
             let val = match &const_def.val {
@@ -851,7 +906,7 @@ impl<'defs> LoweringContext<'defs> {
                             Some(func_def.span),
                         );
                         this.resolver
-                            .add_scoped_var(owner_id, name, var_id)
+                            .add_scoped_item(owner_id, name, var_id)
                             .unwrap();
                         var
                     }))
@@ -860,7 +915,7 @@ impl<'defs> LoweringContext<'defs> {
                 };
 
                 this.resolver
-                    .add_scoped_func(owner_id, func_name.clone(), func_id)
+                    .add_scoped_item(owner_id, func_name.clone(), func_id)
                     .unwrap();
                 funcs.insert(func_id, func_def);
                 (
@@ -1006,16 +1061,10 @@ impl<'defs> LoweringContext<'defs> {
                 //let class_scope = self.defs.get_function_defining(scope);
                 match &**parts {
                     [func_name] => {
-                        let func = self
-                            .resolver
-                            .get_scoped_func(
-                                scope,
-                                self.defs,
-                                ScopeWalkKind::Definitions,
-                                func_name,
-                            )
-                            .unwrap_or_else(|e| {
-                                panic!("failed to find ty {:?}: {:?}", func_name, e)
+                        let (func, _) = self
+                            .resolve_func(scope, func_name, ScopeWalkKind::Definitions)
+                            .unwrap_or_else(|| {
+                                panic!("failed to find func for delegate {}", func_name)
                             });
                         Some(Ty::delegate_from(func))
                     }
@@ -1026,16 +1075,10 @@ impl<'defs> LoweringContext<'defs> {
                             .unwrap_or_else(|e| {
                                 panic!("failed to find ty {:?}: {:?}", func_name, e)
                             });
-                        let func = self
-                            .resolver
-                            .get_scoped_func(
-                                class_def,
-                                self.defs,
-                                ScopeWalkKind::Definitions,
-                                func_name,
-                            )
-                            .unwrap_or_else(|e| {
-                                panic!("failed to find ty {:?}: {:?}", func_name, e)
+                        let (func, _) = self
+                            .resolve_func(class_def, func_name, ScopeWalkKind::Definitions)
+                            .unwrap_or_else(|| {
+                                panic!("failed to find func for delegate {}", func_name)
                             });
                         Some(Ty::delegate_from(func))
                     }

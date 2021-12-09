@@ -7,7 +7,7 @@ use uc_analysis::ast::{
     uneffectful_stmt,
 };
 use uc_analysis::middle::{bad_enum_values, bad_type_name};
-use uc_ast::Hir;
+use uc_ast::{pretty, Hir};
 use uc_ast_lowering::{LoweringInput, LoweringInputPackage};
 use uc_files::{ErrorReport, FileId, Fragment, Sources};
 use uc_name::Identifier;
@@ -121,13 +121,17 @@ fn main() {
             let (hir, errs) = parser::parse(lexer);
             if !errs.is_empty() {
                 for err in &errs {
+                    let highlight = match err.err.expected_token {
+                        Some(e) => format!("expected {:?}", e),
+                        None => "this token".to_owned(),
+                    };
                     let rep = ErrorReport {
                         code: "parser-error",
                         msg: err.err.error_message.to_owned(),
                         fragments: vec![Fragment {
                             full_text: err.err.bad_token.as_ref().unwrap().span,
                             inlay_messages: vec![(
-                                "this token".to_owned(),
+                                highlight,
                                 err.err.bad_token.as_ref().unwrap().span,
                             )],
                         }],
@@ -148,6 +152,11 @@ fn main() {
             */
             errs.iter().for_each(|e| sources.emit_err(e));
 
+            /*
+            let stdout = io::stdout();
+            let mut handle = stdout.lock();
+            pretty::format_hir(&hir, &mut handle).unwrap();
+            */
             p.hirs.push(hir);
         }
     }

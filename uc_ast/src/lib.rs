@@ -183,7 +183,9 @@ pub enum StatementKind {
         run: Block,
     },
     ForeachStatement {
-        source: Expr,
+        ctx: Box<Context>,
+        name: Identifier,
+        args: Vec<Option<Expr>>,
         run: Block,
     },
     WhileStatement {
@@ -241,6 +243,26 @@ pub struct Expr {
     pub kind: ExprKind,
 }
 
+/// It'd be nice to syntactically split this into field and function
+/// contexts, but syntactically,
+#[derive(Debug)]
+pub enum Context {
+    /// Thing
+    Bare,
+    /// global.Function(...)
+    Global,
+    /// Super(...).Function(...)
+    Super(Option<Identifier>),
+    /// static.Function.Thing, Something.static.Thing
+    Static(Option<Expr>),
+    /// default.Thing, Something.default.Thing
+    Default(Option<Expr>),
+    /// default.Thing, Something.default.Thing
+    Const(Option<Expr>),
+    /// xyz.Thing
+    Expr(Expr),
+}
+
 #[derive(Debug)]
 pub enum ExprKind {
     IndexExpr {
@@ -248,11 +270,11 @@ pub enum ExprKind {
         idx: Box<Expr>,
     },
     FieldExpr {
-        lhs: Box<Expr>,
+        lhs: Box<Context>,
         rhs: Identifier,
     },
     FuncCallExpr {
-        lhs: Option<Box<Expr>>,
+        lhs: Box<Context>,
         name: Identifier,
         args: Vec<Option<Expr>>,
     },
@@ -282,9 +304,6 @@ pub enum ExprKind {
         cond: Box<Expr>,
         then: Box<Expr>,
         alt: Box<Expr>,
-    },
-    SymExpr {
-        sym: Identifier,
     },
     LiteralExpr {
         lit: Literal,

@@ -1,6 +1,6 @@
 use uc_ast::{
     visit::{self, Visitor},
-    Expr, ExprKind, Hir,
+    Context, Expr, ExprKind, Hir,
 };
 use uc_files::{ErrorReport, Fragment, Sources, Span};
 
@@ -43,20 +43,16 @@ impl Visitor for AmbigNewVisitor {
         visit::walk_expr(self, expr);
         if let ExprKind::NewExpr { cls, .. } = &expr.kind {
             if !cls.paren {
-                if let ExprKind::FuncCallExpr { lhs: Some(lhs), .. } = &cls.kind {
-                    if let ExprKind::FieldExpr { rhs, .. } = &lhs.kind {
-                        if rhs != "class" {
-                            self.errs.push(AmbigNew {
-                                new_expr: expr.span,
-                                cls_expr: cls.span,
-                            });
+                if let ExprKind::FuncCallExpr { lhs, .. } = &cls.kind {
+                    if let Context::Expr(Expr { kind, .. }) = &**lhs {
+                        if let ExprKind::FieldExpr { rhs, .. } = kind {
+                            if rhs != "class" {
+                                self.errs.push(AmbigNew {
+                                    new_expr: expr.span,
+                                    cls_expr: cls.span,
+                                });
+                            }
                         }
-                    }
-                    if let ExprKind::SymExpr { .. } = &lhs.kind {
-                        self.errs.push(AmbigNew {
-                            new_expr: expr.span,
-                            cls_expr: cls.span,
-                        });
                     }
                 }
             }
