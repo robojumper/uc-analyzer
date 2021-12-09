@@ -47,23 +47,14 @@ pub fn walk_statements<V: Visitor>(visit: &mut V, stmts: &[Statement]) {
 
 pub fn walk_statement<V: Visitor>(visit: &mut V, stmt: &Statement) {
     match &stmt.kind {
-        StatementKind::IfStatement {
-            cond,
-            then,
-            or_else,
-        } => {
+        StatementKind::IfStatement { cond, then, or_else } => {
             maybe_visit_expr(visit, cond);
             visit.visit_statements(&then.stmts);
             if let Some(b) = or_else {
                 visit.visit_statements(&b.stmts);
             }
         }
-        StatementKind::ForStatement {
-            init,
-            cond,
-            retry,
-            run,
-        } => {
+        StatementKind::ForStatement { init, cond, retry, run } => {
             visit.visit_statement(init);
             maybe_visit_expr(visit, cond);
             visit.visit_statement(retry);

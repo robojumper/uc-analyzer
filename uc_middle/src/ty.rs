@@ -64,18 +64,9 @@ pub enum ConversionClassification {
 
 impl ConversionClassification {
     const FORBIDDEN: Self = ConversionClassification::Forbidden;
-    const ALLOW: Self = ConversionClassification::Allowed {
-        auto: false,
-        truncation: false,
-    };
-    const AUTO: Self = ConversionClassification::Allowed {
-        auto: true,
-        truncation: false,
-    };
-    const AUTO_T: Self = ConversionClassification::Allowed {
-        auto: true,
-        truncation: true,
-    };
+    const ALLOW: Self = ConversionClassification::Allowed { auto: false, truncation: false };
+    const AUTO: Self = ConversionClassification::Allowed { auto: true, truncation: false };
+    const AUTO_T: Self = ConversionClassification::Allowed { auto: true, truncation: true };
 }
 
 /// Whether conversion is possible, whether it has to be explicit, and whether
@@ -168,24 +159,14 @@ pub fn is_subtype(
                 (Delegate, None) => Some(0),
                 (Delegate, Delegate) => {
                     let (g, s) = (general.subst.unwrap(), specific.subst.unwrap());
-                    if sig_check(g, s) {
-                        Some(0)
-                    } else {
-                        Option::None
-                    }
+                    if sig_check(g, s) { Some(0) } else { Option::None }
                 }
                 _ => Option::None,
             }
         }
         (TyDecorator::DynArray, TyDecorator::DynArray) => is_subtype(
-            Ty {
-                decorator: TyDecorator::None,
-                ..general
-            },
-            Ty {
-                decorator: TyDecorator::None,
-                ..specific
-            },
+            Ty { decorator: TyDecorator::None, ..general },
+            Ty { decorator: TyDecorator::None, ..specific },
             object_id,
             subdef_check,
             sig_check,
@@ -193,14 +174,8 @@ pub fn is_subtype(
         (TyDecorator::StaticArray(i), TyDecorator::StaticArray(j)) => {
             if i == j {
                 is_subtype(
-                    Ty {
-                        decorator: TyDecorator::None,
-                        ..general
-                    },
-                    Ty {
-                        decorator: TyDecorator::None,
-                        ..specific
-                    },
+                    Ty { decorator: TyDecorator::None, ..general },
+                    Ty { decorator: TyDecorator::None, ..specific },
                     object_id,
                     subdef_check,
                     sig_check,
@@ -226,20 +201,12 @@ impl Ty {
 
     #[inline]
     const fn simple(ctor: BaseTyCtor) -> Ty {
-        Self {
-            decorator: TyDecorator::None,
-            base_ctor: ctor,
-            subst: None,
-        }
+        Self { decorator: TyDecorator::None, base_ctor: ctor, subst: None }
     }
 
     #[inline]
     const fn with_def(ctor: BaseTyCtor, id: DefId) -> Ty {
-        Self {
-            decorator: TyDecorator::None,
-            base_ctor: ctor,
-            subst: Some(id),
-        }
+        Self { decorator: TyDecorator::None, base_ctor: ctor, subst: Some(id) }
     }
 
     #[inline]
@@ -249,24 +216,15 @@ impl Ty {
 
     #[inline]
     pub fn drop_array(&self) -> Self {
-        assert!(matches!(
-            self.decorator,
-            TyDecorator::DynArray | TyDecorator::StaticArray(_)
-        ));
-        Self {
-            decorator: TyDecorator::None,
-            ..*self
-        }
+        assert!(matches!(self.decorator, TyDecorator::DynArray | TyDecorator::StaticArray(_)));
+        Self { decorator: TyDecorator::None, ..*self }
     }
 
     #[inline]
     pub fn instanciate_class(&self) -> Self {
         assert!(self.is_undecorated());
         assert!(self.is_class());
-        Self {
-            base_ctor: BaseTyCtor::Object,
-            ..*self
-        }
+        Self { base_ctor: BaseTyCtor::Object, ..*self }
     }
 
     #[inline]
@@ -280,11 +238,7 @@ impl Ty {
     #[inline]
     pub fn dyn_array_from(inner: Self) -> Ty {
         assert!(inner.is_undecorated());
-        Self {
-            subst: inner.subst,
-            decorator: TyDecorator::DynArray,
-            base_ctor: inner.base_ctor,
-        }
+        Self { subst: inner.subst, decorator: TyDecorator::DynArray, base_ctor: inner.base_ctor }
     }
 
     #[inline]

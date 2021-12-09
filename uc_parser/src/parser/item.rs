@@ -53,20 +53,9 @@ impl Parser<'_> {
 
             self.expect(Tk::Semi)?;
 
-            (
-                ClassHeader::Class {
-                    extends,
-                    within,
-                    implements: vec![],
-                },
-                mods,
-            )
+            (ClassHeader::Class { extends, within, implements: vec![] }, mods)
         } else {
-            let extends = if self.eat(kw!(Extends)) {
-                Some(self.expect_ident()?)
-            } else {
-                None
-            };
+            let extends = if self.eat(kw!(Extends)) { Some(self.expect_ident()?) } else { None };
 
             let mods = self.parse_kws(&*modifiers::INTERFACE_MODIFIERS)?;
             self.expect(Tk::Semi)?;
@@ -76,13 +65,7 @@ impl Parser<'_> {
 
         let dependson = if mods.flags.contains(ClassFlags::DEPENDSON) {
             // Key must be present and have identifiers following
-            match mods
-                .followups
-                .get(&ClassFlags::DEPENDSON)
-                .unwrap()
-                .as_ref()
-                .unwrap()
-            {
+            match mods.followups.get(&ClassFlags::DEPENDSON).unwrap().as_ref().unwrap() {
                 uc_ast::Values::Absent => unreachable!(),
                 uc_ast::Values::Nums(_) => unreachable!(),
                 uc_ast::Values::Idents(i) => i.clone(),
@@ -91,24 +74,14 @@ impl Parser<'_> {
             Box::new([])
         };
 
-        Ok(ClassDef {
-            kind: def,
-            name,
-            mods,
-            dependson,
-            span: class_m.complete(self),
-        })
+        Ok(ClassDef { kind: def, name, mods, dependson, span: class_m.complete(self) })
     }
 
     fn parse_const_val(&mut self) -> Result<ConstVal, ParseError> {
         let tok = self.next_any()?;
         match tok.kind {
-            Tk::Name => Ok(ConstVal::Literal(Literal::Name(
-                self.lex.extract_name(&tok),
-            ))),
-            Tk::String => Ok(ConstVal::Literal(Literal::String(
-                self.lex.extract_string(&tok),
-            ))),
+            Tk::Name => Ok(ConstVal::Literal(Literal::Name(self.lex.extract_name(&tok)))),
+            Tk::String => Ok(ConstVal::Literal(Literal::String(self.lex.extract_string(&tok)))),
             Tk::Number(NumberSyntax::Int(i) | NumberSyntax::Hex(i)) => {
                 Ok(ConstVal::Literal(Literal::Int(i)))
             }
@@ -137,11 +110,7 @@ impl Parser<'_> {
         let val = self.parse_const_val()?;
         self.expect(Tk::Semi)?;
 
-        Ok(ConstDef {
-            name,
-            val,
-            span: const_m.complete(self),
-        })
+        Ok(ConstDef { name, val, span: const_m.complete(self) })
     }
 
     fn parse_var(&mut self) -> Result<(Option<EnumDef>, VarDef), ParseError> {
@@ -153,13 +122,7 @@ impl Parser<'_> {
         self.parse_followups(&followups)?;
 
         let mods = self.parse_kws(&*modifiers::VAR_MODIFIERS)?;
-        let (en, ty) = if matches!(
-            self.peek_any()?,
-            Token {
-                kind: kw!(Enum),
-                ..
-            }
-        ) {
+        let (en, ty) = if matches!(self.peek_any()?, Token { kind: kw!(Enum), .. }) {
             let en = self.parse_enum(false)?;
             let ty = Ty::Simple(en.name.clone());
             (Some(en), ty)
@@ -207,11 +170,7 @@ impl Parser<'_> {
                 self.ignore_foreign_block(sig!(Lt))?;
             }
 
-            names.push(VarInstance {
-                name: var_name,
-                count,
-                span,
-            });
+            names.push(VarInstance { name: var_name, count, span });
 
             if !self.eat(Tk::Comma) {
                 break;
@@ -220,15 +179,7 @@ impl Parser<'_> {
 
         self.expect(Tk::Semi)?;
 
-        Ok((
-            en,
-            VarDef {
-                names,
-                ty,
-                mods,
-                span: var_m.complete(self),
-            },
-        ))
+        Ok((en, VarDef { names, ty, mods, span: var_m.complete(self) }))
     }
 
     fn parse_enum(&mut self, expect_semi: bool) -> Result<EnumDef, ParseError> {
@@ -266,11 +217,7 @@ impl Parser<'_> {
             self.expect(Tk::Semi)?;
         }
 
-        Ok(EnumDef {
-            name,
-            variants,
-            span: en_m.complete(self),
-        })
+        Ok(EnumDef { name, variants, span: en_m.complete(self) })
     }
 
     fn parse_struct(&mut self) -> Result<StructDef, ParseError> {
@@ -282,11 +229,8 @@ impl Parser<'_> {
         let mods = self.parse_kws(&*modifiers::STRUCT_MODIFIERS)?;
         let name = self.expect_ident()?;
 
-        let extends = if self.eat(kw!(Extends)) {
-            Some(self.parse_maybe_qualified_path()?)
-        } else {
-            None
-        };
+        let extends =
+            if self.eat(kw!(Extends)) { Some(self.parse_maybe_qualified_path()?) } else { None };
 
         self.expect(sig!(LBrace))?;
 
@@ -315,23 +259,15 @@ impl Parser<'_> {
                     self.ignore_foreign_block(opener.kind)?;
                 }
                 _ => {
-                    return Err(self.fmt_err(
-                        "expected variable declaration or foreign block",
-                        Some(peeked),
-                    ))
+                    return Err(self
+                        .fmt_err("expected variable declaration or foreign block", Some(peeked)));
                 }
             }
         }
 
         self.expect(Tk::Semi)?;
 
-        Ok(StructDef {
-            name,
-            extends,
-            fields,
-            mods,
-            span: struct_m.complete(self),
-        })
+        Ok(StructDef { name, extends, fields, mods, span: struct_m.complete(self) })
     }
 
     fn parse_function_sig(
@@ -401,14 +337,7 @@ impl Parser<'_> {
                 None
             };
 
-            args.push(FuncArg {
-                ty,
-                name,
-                count,
-                def,
-                mods,
-                span: arg_span.complete(self),
-            });
+            args.push(FuncArg { ty, name, count, def, mods, span: arg_span.complete(self) });
 
             comma = true;
         }
@@ -436,23 +365,12 @@ impl Parser<'_> {
                 let statements = self.parse_statements();
                 self.expect(sig!(RBrace))?;
                 while self.eat(Tk::Semi) {} // FIXME: Where is this hit?
-                Some(FuncBody {
-                    locals,
-                    consts,
-                    statements,
-                })
+                Some(FuncBody { locals, consts, statements })
             }
             _ => return Err(self.fmt_err("expected ; or {", Some(next))),
         };
 
-        Ok(FuncDef {
-            name,
-            overrides: None,
-            mods,
-            sig,
-            body,
-            span: func_m.complete(self),
-        })
+        Ok(FuncDef { name, overrides: None, mods, sig, body, span: func_m.complete(self) })
     }
 
     fn parse_locals(&mut self) -> Result<Vec<LocalDef>, ParseError> {
@@ -497,11 +415,7 @@ impl Parser<'_> {
                 DimCount::None
             };
 
-            names.push(VarInstance {
-                name: var_name,
-                count,
-                span: name_marker.complete(self),
-            });
+            names.push(VarInstance { name: var_name, count, span: name_marker.complete(self) });
 
             if !self.eat(Tk::Comma) {
                 break;
@@ -539,11 +453,7 @@ impl Parser<'_> {
         self.eat(kw!(Simulated));
         self.expect(kw!(State))?;
         let name = self.expect_ident()?;
-        let extends = if self.eat(kw!(Extends)) {
-            Some(self.expect_ident()?)
-        } else {
-            None
-        };
+        let extends = if self.eat(kw!(Extends)) { Some(self.expect_ident()?) } else { None };
 
         self.expect(sig!(LBrace))?;
 
@@ -569,13 +479,7 @@ impl Parser<'_> {
         self.expect(sig!(RBrace))?;
         self.eat(Tk::Semi);
 
-        Ok(StateDef {
-            name,
-            funcs,
-            statements,
-            extends,
-            span: state_m.complete(self),
-        })
+        Ok(StateDef { name, funcs, statements, extends, span: state_m.complete(self) })
     }
 
     fn ignore_directive(&mut self) -> Result<(), ParseError> {
@@ -616,13 +520,7 @@ impl Parser<'_> {
                     }
                     kw!(State) | kw!(Auto) => Ok(Some(TopLevelItem::State(self.parse_state()?))),
                     kw!(Simulated)
-                        if matches!(
-                            self.peek2(),
-                            Some(Token {
-                                kind: kw!(State),
-                                ..
-                            })
-                        ) =>
+                        if matches!(self.peek2(), Some(Token { kind: kw!(State), .. })) =>
                     {
                         self.parse_state()?;
                         continue;
@@ -642,7 +540,7 @@ impl Parser<'_> {
                     Tk::Comment => unreachable!("filtered out in next"),
                     _ => {
                         return Err(self
-                            .fmt_err("unexpected start of item", Some(self.peek_any().unwrap())))
+                            .fmt_err("unexpected start of item", Some(self.peek_any().unwrap())));
                     }
                 },
                 None => Ok(None),

@@ -108,11 +108,7 @@ impl Sources {
         let file_id = FileId(self.metadata.len() as u32);
         let line_heads = std::iter::once(start)
             .chain(data.iter().enumerate().filter_map(|(idx, &b)| {
-                if b == b'\n' {
-                    Some(BytePos::new(idx as u32 + start.get() + 1))
-                } else {
-                    None
-                }
+                if b == b'\n' { Some(BytePos::new(idx as u32 + start.get() + 1)) } else { None }
             }))
             .collect();
         self.metadata.push(SourceFileMetadata {
@@ -178,9 +174,8 @@ impl Sources {
             .collect::<Vec<_>>();
 
         let new_pos = |b_pos: u32| {
-            let num_prev_tabs = tab_indices
-                .binary_search(&(b_pos as usize))
-                .map_or_else(|x| x, |x| x);
+            let num_prev_tabs =
+                tab_indices.binary_search(&(b_pos as usize)).map_or_else(|x| x, |x| x);
             b_pos + (num_prev_tabs as u32 * 3)
         };
 
@@ -212,11 +207,7 @@ impl Sources {
     }
 
     pub fn emit_err(&self, err: &ErrorReport) {
-        let mut fragments = err
-            .fragments
-            .iter()
-            .map(|f| self.parse_slice(f))
-            .collect::<Vec<_>>();
+        let mut fragments = err.fragments.iter().map(|f| self.parse_slice(f)).collect::<Vec<_>>();
         let slices = fragments
             .iter_mut()
             .map(|f| Slice {
@@ -252,14 +243,8 @@ impl Sources {
 
         let meta = &self.metadata[fid_a.0 as usize];
 
-        let line_idx_a = meta
-            .line_heads
-            .binary_search(&span.start)
-            .map_or_else(|x| x - 1, |x| x);
-        let line_idx_b = meta
-            .line_heads
-            .binary_search(&span.end)
-            .map_or_else(|x| x - 1, |x| x);
+        let line_idx_a = meta.line_heads.binary_search(&span.start).map_or_else(|x| x - 1, |x| x);
+        let line_idx_b = meta.line_heads.binary_search(&span.end).map_or_else(|x| x - 1, |x| x);
 
         let start_idx = meta.line_heads[line_idx_a];
         let end_idx = BytePos::new(
@@ -275,12 +260,7 @@ impl Sources {
         let new_end = span.end.get() - start_idx.get();
 
         // FIXME
-        let str = self
-            .lookup_str(Span {
-                start: start_idx,
-                end: end_idx,
-            })
-            .unwrap();
+        let str = self.lookup_str(Span { start: start_idx, end: end_idx }).unwrap();
         Ok((fid_a, str, line_idx_a + 1, (new_start, new_end)))
     }
 
@@ -289,10 +269,7 @@ impl Sources {
 
         let meta = &self.metadata[fid.0 as usize];
 
-        let line_idx = meta
-            .line_heads
-            .binary_search(&byte_pos)
-            .map_or_else(|x| x - 1, |x| x);
+        let line_idx = meta.line_heads.binary_search(&byte_pos).map_or_else(|x| x - 1, |x| x);
 
         let start_idx = meta.line_heads[line_idx];
         let end_idx = BytePos::new(
@@ -305,12 +282,7 @@ impl Sources {
         );
 
         // FIXME
-        let str = self
-            .lookup_str(Span {
-                start: start_idx,
-                end: end_idx,
-            })
-            .unwrap();
+        let str = self.lookup_str(Span { start: start_idx, end: end_idx }).unwrap();
         Ok(str)
     }
 }
@@ -331,13 +303,9 @@ pub fn fix_defects<'a>(file_name: &str, input: &'a [u8]) -> Result<Cow<'a, [u8]>
         assert!(input.ends_with(bad_end));
         Ok(Cow::Borrowed(&input[0..input.len() - bad_end.len() + 1]))
     } else if input.starts_with(&[0xFF, 0xFE]) {
-        Ok(Cow::Owned(
-            decode_utf16_from_u8s(&input[2..], ByteOrder::LE)?.into_bytes(),
-        ))
+        Ok(Cow::Owned(decode_utf16_from_u8s(&input[2..], ByteOrder::LE)?.into_bytes()))
     } else if input.starts_with(&[0xFE, 0xFF]) {
-        Ok(Cow::Owned(
-            decode_utf16_from_u8s(&input[2..], ByteOrder::BE)?.into_bytes(),
-        ))
+        Ok(Cow::Owned(decode_utf16_from_u8s(&input[2..], ByteOrder::BE)?.into_bytes()))
     } else {
         Ok(Cow::Borrowed(input))
     }

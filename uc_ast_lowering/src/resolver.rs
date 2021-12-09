@@ -59,10 +59,7 @@ impl ResolverContext {
                 e.insert(vec![class]);
             }
         }
-        self.package_classes
-            .get_mut(&package)
-            .unwrap()
-            .insert(name, class);
+        self.package_classes.get_mut(&package).unwrap().insert(name, class);
         Ok(())
     }
 
@@ -73,10 +70,7 @@ impl ResolverContext {
                 e.insert(vec![value]);
             }
         }
-        let variants = self
-            .enum_values
-            .entry(owner)
-            .or_insert_with(HashMap::default);
+        let variants = self.enum_values.entry(owner).or_insert_with(HashMap::default);
         match variants.entry(name) {
             Entry::Occupied(_) => return Err(ResolutionError::ExistsInExactScope),
             Entry::Vacant(e) => {
@@ -87,10 +81,7 @@ impl ResolverContext {
     }
 
     pub fn get_package(&mut self, name: &Identifier) -> Result<DefId> {
-        self.packages
-            .get(name)
-            .copied()
-            .ok_or(ResolutionError::NotFound)
+        self.packages.get(name).copied().ok_or(ResolutionError::NotFound)
     }
 
     pub fn get_global_value(&self, scope: DefId, defs: &Defs, name: &Identifier) -> Result<DefId> {
@@ -107,9 +98,9 @@ impl ResolverContext {
                 match &*matches {
                     [] => Err(ResolutionError::InvalidAmbiguity(multiple.to_owned())),
                     [one] => Ok(*one),
-                    [multiple_in_class @ ..] => Err(ResolutionError::InvalidAmbiguity(
-                        multiple_in_class.to_owned(),
-                    )),
+                    [multiple_in_class @ ..] => {
+                        Err(ResolutionError::InvalidAmbiguity(multiple_in_class.to_owned()))
+                    }
                 }
             }
             None => Err(ResolutionError::NotFound),
@@ -135,9 +126,9 @@ impl ResolverContext {
                 match &*matches {
                     [] => Err(ResolutionError::InvalidAmbiguity(multiple.to_owned())),
                     [one] => Ok(*one),
-                    [multiple_in_package @ ..] => Err(ResolutionError::InvalidAmbiguity(
-                        multiple_in_package.to_owned(),
-                    )),
+                    [multiple_in_package @ ..] => {
+                        Err(ResolutionError::InvalidAmbiguity(multiple_in_package.to_owned()))
+                    }
                 }
             }
             None => Err(ResolutionError::NotFound),
@@ -166,10 +157,7 @@ impl ResolverContext {
     }
 
     pub fn add_scoped_item(&mut self, scope: DefId, name: Identifier, item: DefId) -> Result<()> {
-        let vars = self
-            .scoped_items
-            .entry(scope)
-            .or_insert_with(HashMap::default);
+        let vars = self.scoped_items.entry(scope).or_insert_with(HashMap::default);
         match vars.entry(name) {
             Entry::Occupied(_) => return Err(ResolutionError::ExistsInExactScope),
             Entry::Vacant(e) => {
@@ -189,10 +177,7 @@ impl ResolverContext {
     }
 
     pub fn add_scoped_op(&mut self, scope: DefId, name: Op, op: DefId) -> Result<()> {
-        let ops = self
-            .scoped_ops
-            .entry(scope)
-            .or_insert_with(HashMap::default);
+        let ops = self.scoped_ops.entry(scope).or_insert_with(HashMap::default);
         match ops.entry(name) {
             Entry::Occupied(mut e) => e.get_mut().push(op),
             Entry::Vacant(e) => {

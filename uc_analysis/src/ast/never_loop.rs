@@ -60,17 +60,12 @@ impl Visitor for NeverLoopVisitor {
                     matches!(
                         e,
                         Expr {
-                            kind: ExprKind::LiteralExpr {
-                                lit: Literal::ObjReference(_, _)
-                            },
+                            kind: ExprKind::LiteralExpr { lit: Literal::ObjReference(_, _) },
                             ..
                         }
                     )
                 }) {
-                    let mut checker = BreakContinueContext {
-                        break_levels: 0,
-                        continue_levels: 0,
-                    };
+                    let mut checker = BreakContinueContext { break_levels: 0, continue_levels: 0 };
                     if let NeverLoopResult::AlwaysBreak = checker.check_statement(stmt) {
                         return;
                     }
@@ -81,15 +76,9 @@ impl Visitor for NeverLoopVisitor {
             return;
         };
 
-        let mut checker = BreakContinueContext {
-            break_levels: 0,
-            continue_levels: 0,
-        };
+        let mut checker = BreakContinueContext { break_levels: 0, continue_levels: 0 };
         if let NeverLoopResult::AlwaysBreak = checker.check_block(block) {
-            self.errs.push(NeverLoop {
-                loop_span: stmt.span,
-                cond_span: span,
-            })
+            self.errs.push(NeverLoop { loop_span: stmt.span, cond_span: span })
         }
     }
 }
@@ -135,19 +124,15 @@ impl BreakContinueContext {
     }
 
     fn check_statements(&mut self, stmts: &[Statement]) -> NeverLoopResult {
-        stmts
-            .iter()
-            .map(|s| self.check_statement(s))
-            .fold(NeverLoopResult::Otherwise, combine_seq)
+        stmts.iter().map(|s| self.check_statement(s)).fold(NeverLoopResult::Otherwise, combine_seq)
     }
 
     fn check_statement(&mut self, stmt: &Statement) -> NeverLoopResult {
         match &stmt.kind {
             StatementKind::IfStatement { then, or_else, .. } => {
                 let then_result = self.check_block(then);
-                let or_else_result = or_else
-                    .as_ref()
-                    .map_or(NeverLoopResult::Otherwise, |b| self.check_block(b));
+                let or_else_result =
+                    or_else.as_ref().map_or(NeverLoopResult::Otherwise, |b| self.check_block(b));
                 combine_branches(then_result, or_else_result)
             }
             StatementKind::ForStatement { run, .. } => {

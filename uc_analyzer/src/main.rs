@@ -20,21 +20,15 @@ struct Package {
 }
 
 fn main() {
-    let dir = std::env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .expect("missing directory");
-    let expanded_dir = std::env::args()
-        .nth(2)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            let mut exp = dir.clone(); // Src
-            exp.pop(); // Development
-            exp.pop(); // SDK
-            exp.push("XComGame");
-            exp.push("PreprocessedFiles");
-            exp
-        });
+    let dir = std::env::args().nth(1).map(PathBuf::from).expect("missing directory");
+    let expanded_dir = std::env::args().nth(2).map(PathBuf::from).unwrap_or_else(|| {
+        let mut exp = dir.clone(); // Src
+        exp.pop(); // Development
+        exp.pop(); // SDK
+        exp.push("XComGame");
+        exp.push("PreprocessedFiles");
+        exp
+    });
 
     let mut sources = Sources::new();
     let mut packages = vec![];
@@ -43,11 +37,7 @@ fn main() {
 
     for package_dir in packages_dir {
         let package_dir = package_dir.expect("failed to open entry");
-        if !package_dir
-            .file_type()
-            .expect("failed to get file type")
-            .is_dir()
-        {
+        if !package_dir.file_type().expect("failed to get file type").is_dir() {
             continue;
         }
 
@@ -73,17 +63,10 @@ fn main() {
 
         for class in classes {
             let class = class.expect("failed to open file");
-            if !class
-                .file_type()
-                .expect("failed to get file type")
-                .is_file()
-            {
+            if !class.file_type().expect("failed to get file type").is_file() {
                 continue;
             }
-            if !matches!(
-                class.path().extension().and_then(|s| s.to_str()),
-                Some("uc" | "UC")
-            ) {
+            if !matches!(class.path().extension().and_then(|s| s.to_str()), Some("uc" | "UC")) {
                 continue;
             }
 
@@ -101,10 +84,7 @@ fn main() {
 
             let id = sources
                 .add_file(
-                    path.file_stem()
-                        .and_then(|n| n.to_str())
-                        .map(|n| n.to_owned())
-                        .unwrap(),
+                    path.file_stem().and_then(|n| n.to_str()).map(|n| n.to_owned()).unwrap(),
                     &contents,
                     path,
                 )
@@ -166,11 +146,7 @@ fn main() {
             .into_iter()
             .map(|p| {
                 let pack = LoweringInputPackage {
-                    files: p
-                        .hirs
-                        .into_iter()
-                        .map(|h| (h.header.name.clone(), h))
-                        .collect(),
+                    files: p.hirs.into_iter().map(|h| (h.header.name.clone(), h)).collect(),
                 };
                 (p.name, pack)
             })

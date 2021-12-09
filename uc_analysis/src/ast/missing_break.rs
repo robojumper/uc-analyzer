@@ -16,28 +16,20 @@ pub struct MissingBreak {
 }
 
 pub fn run(hir: &Hir, sources: &Sources) -> Vec<ErrorReport> {
-    let mut visitor = MissingBreakVisitor {
-        errs: vec![],
-        sources,
-    };
+    let mut visitor = MissingBreakVisitor { errs: vec![], sources };
     visitor.visit_hir(hir);
     visitor
         .errs
         .iter()
         .map(|err| {
             let first_msg = ("control flow from this label...".to_owned(), err.from_label);
-            let mut second_msg = (
-                "...implicitly falls through to this label".to_owned(),
-                err.to_label,
-            );
+            let mut second_msg =
+                ("...implicitly falls through to this label".to_owned(), err.to_label);
             if err.and_then_executes.is_none() {
                 second_msg.0 += " (which has no statements)";
             }
             let mut inlay_messages = vec![first_msg, second_msg];
-            let mut full_text = Span {
-                start: err.from_label.start,
-                end: err.to_label.end,
-            };
+            let mut full_text = Span { start: err.from_label.start, end: err.to_label.end };
 
             if let Some(e) = err.and_then_executes {
                 full_text.end = e.end;
@@ -47,11 +39,7 @@ pub fn run(hir: &Hir, sources: &Sources) -> Vec<ErrorReport> {
             ErrorReport {
                 code: "implicit-fallthrough",
                 msg: "implicit switch/case fallthrough".to_owned(),
-                fragments: vec![Fragment {
-                    full_text,
-
-                    inlay_messages,
-                }],
+                fragments: vec![Fragment { full_text, inlay_messages }],
             }
         })
         .collect()
@@ -62,11 +50,7 @@ impl Visitor for MissingBreakVisitor<'_> {
 
     fn visit_statement(&mut self, stmt: &Statement) {
         visit::walk_statement(self, stmt);
-        if let StatementKind::SwitchStatement {
-            scrutinee: _,
-            cases,
-        } = &stmt.kind
-        {
+        if let StatementKind::SwitchStatement { scrutinee: _, cases } = &stmt.kind {
             self.check_switch_statement(stmt, cases);
         }
     }
@@ -74,10 +58,7 @@ impl Visitor for MissingBreakVisitor<'_> {
 
 impl MissingBreakVisitor<'_> {
     fn check_switch_statement(&mut self, _statement: &Statement, cases: &[CaseClause]) {
-        let ccs = cases
-            .iter()
-            .filter(|&cc| !cc.stmts.is_empty())
-            .collect::<Vec<_>>();
+        let ccs = cases.iter().filter(|&cc| !cc.stmts.is_empty()).collect::<Vec<_>>();
         for cs in ccs.windows(2) {
             let cs1 = &cs[0];
             let cs2 = &cs[1];
@@ -97,10 +78,8 @@ impl MissingBreakVisitor<'_> {
                 continue;
             }
 
-            let search_span = Span {
-                start: cs1.stmts.last().unwrap().span.end,
-                end: cs2.case_span.start,
-            };
+            let search_span =
+                Span { start: cs1.stmts.last().unwrap().span.end, end: cs2.case_span.start };
 
             if let Ok(text) = self.sources.lookup_str(search_span) {
                 if text.contains("fallthrough")
@@ -115,10 +94,7 @@ impl MissingBreakVisitor<'_> {
             let and_then_executes = match &*cs2.stmts {
                 [] => None,
                 [s1] => Some(s1.span),
-                [s1, .., s2] => Some(Span {
-                    start: s1.span.start,
-                    end: s2.span.end,
-                }),
+                [s1, .., s2] => Some(Span { start: s1.span.start, end: s2.span.end }),
             };
 
             self.errs.push(MissingBreak {
@@ -133,11 +109,7 @@ impl MissingBreakVisitor<'_> {
 fn last_statement_unconditionally_returns(stmts: &[Statement]) -> bool {
     match stmts.last() {
         Some(stmt) => match &stmt.kind {
-            StatementKind::IfStatement {
-                cond: _,
-                then,
-                or_else,
-            } => {
+            StatementKind::IfStatement { cond: _, then, or_else } => {
                 let then_returns = last_statement_unconditionally_returns(&then.stmts);
                 let or_else_returns = match or_else {
                     Some(oe) => last_statement_unconditionally_returns(&oe.stmts),

@@ -45,10 +45,7 @@ struct SpanMarker {
 
 impl SpanMarker {
     fn complete(self, parser: &Parser<'_>) -> Span {
-        Span {
-            start: self.pos.unwrap(),
-            end: parser.last_end.unwrap(),
-        }
+        Span { start: self.pos.unwrap(), end: parser.last_end.unwrap() }
     }
 }
 
@@ -71,19 +68,13 @@ pub struct ParseErrorInner {
 
 impl<'a> Parser<'a> {
     fn new(lex: Lexer<'a>) -> Self {
-        Self {
-            lex,
-            errs: vec![],
-            last_end: None,
-        }
+        Self { lex, errs: vec![], last_end: None }
     }
 
     fn next(&mut self) -> Option<Token> {
         loop {
             match self.lex.next()? {
-                Token {
-                    kind: Tk::Comment, ..
-                } => {}
+                Token { kind: Tk::Comment, .. } => {}
                 x => {
                     self.last_end = Some(x.span.end);
                     return Some(x);
@@ -104,19 +95,15 @@ impl<'a> Parser<'a> {
     }
 
     fn marker(&self) -> SpanMarker {
-        SpanMarker {
-            pos: self.peek().map(|t| t.span.start),
-        }
+        SpanMarker { pos: self.peek().map(|t| t.span.start) }
     }
 
     fn peek_any(&self) -> Result<Token, ParseError> {
-        self.peek()
-            .ok_or_else(|| self.fmt_err("Unexpected end of file", None))
+        self.peek().ok_or_else(|| self.fmt_err("Unexpected end of file", None))
     }
 
     fn next_any(&mut self) -> Result<Token, ParseError> {
-        self.next()
-            .ok_or_else(|| self.fmt_err("Unexpected end of file", None))
+        self.next().ok_or_else(|| self.fmt_err("Unexpected end of file", None))
     }
 
     fn sym_to_ident(&self, tok: &Token) -> Identifier {
@@ -153,11 +140,7 @@ impl<'a> Parser<'a> {
             Tk::Number(NumberSyntax::Int(i) | NumberSyntax::Hex(i)) => i,
             _ => return Err(self.fmt_err("expected number", Some(tok))),
         };
-        if num < 0 {
-            Err(self.fmt_err("integer is negative", Some(tok)))
-        } else {
-            Ok(num)
-        }
+        if num < 0 { Err(self.fmt_err("integer is negative", Some(tok))) } else { Ok(num) }
     }
 
     fn fmt_err(&self, msg: &'static str, token: Option<Token>) -> ParseError {
@@ -281,9 +264,7 @@ impl<'a> Parser<'a> {
                     loop {
                         parts.push(self.expect_ident()?);
                         match self.peek() {
-                            Some(Token {
-                                kind: sig!(Dot), ..
-                            }) => {
+                            Some(Token { kind: sig!(Dot), .. }) => {
                                 self.next();
                                 continue;
                             }
@@ -329,16 +310,5 @@ pub fn parse(lex: Lexer) -> (Hir, Vec<ParseError>) {
         }
     }
 
-    (
-        Hir {
-            header,
-            structs,
-            enums,
-            consts,
-            vars,
-            states,
-            funcs,
-        },
-        parser.errs,
-    )
+    (Hir { header, structs, enums, consts, vars, states, funcs }, parser.errs)
 }

@@ -13,11 +13,7 @@ pub struct Ascii<S: AsRef<str>>(S);
 impl<S: AsRef<str>> Ascii<S> {
     #[inline]
     pub fn new(value: S) -> Result<Self, NotAscii> {
-        if !value.as_ref().is_ascii() {
-            Err(NotAscii)
-        } else {
-            Ok(Self(value))
-        }
+        if !value.as_ref().is_ascii() { Err(NotAscii) } else { Ok(Self(value)) }
     }
 }
 

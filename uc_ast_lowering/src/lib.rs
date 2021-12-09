@@ -104,9 +104,7 @@ impl<'defs> LoweringContext<'defs> {
             .iter()
             .map(|(pack_name, package)| {
                 self.add_def(|this, pack_id| {
-                    this.resolver
-                        .add_package(pack_name.clone(), pack_id)
-                        .unwrap();
+                    this.resolver.add_package(pack_name.clone(), pack_id).unwrap();
                     (
                         DefKind::Package(Package {
                             name: pack_name.clone(),
@@ -134,9 +132,7 @@ impl<'defs> LoweringContext<'defs> {
         pack_id: DefId,
     ) -> DefId {
         self.add_def(|this, file_id| {
-            this.resolver
-                .add_class(pack_id, file_name.clone(), file_id)
-                .unwrap();
+            this.resolver.add_class(pack_id, file_name.clone(), file_id).unwrap();
 
             let ty = match hir.header.kind {
                 uc_ast::ClassHeader::Class { .. } => Ty::object_from(file_id),
@@ -165,20 +161,14 @@ impl<'defs> LoweringContext<'defs> {
                 .iter()
                 .map(|const_def| self.lower_const(class_id, const_def, &mut backrefs.consts))
                 .collect::<Box<[_]>>();
-            self.defs
-                .get_class_mut(class_id)
-                .items
-                .extend_from_slice(&const_ids);
+            self.defs.get_class_mut(class_id).items.extend_from_slice(&const_ids);
 
             let var_ids = hir
                 .vars
                 .iter()
                 .flat_map(|var_def| self.lower_var(class_id, var_def, &mut backrefs.vars))
                 .collect::<Box<[_]>>();
-            self.defs
-                .get_class_mut(class_id)
-                .items
-                .extend_from_slice(&var_ids);
+            self.defs.get_class_mut(class_id).items.extend_from_slice(&var_ids);
 
             let enums = hir
                 .enums
@@ -189,10 +179,7 @@ impl<'defs> LoweringContext<'defs> {
                     lowered
                 })
                 .collect::<Vec<_>>();
-            self.defs
-                .get_class_mut(class_id)
-                .items
-                .extend_from_slice(&enums);
+            self.defs.get_class_mut(class_id).items.extend_from_slice(&enums);
 
             let structs = hir
                 .structs
@@ -203,10 +190,7 @@ impl<'defs> LoweringContext<'defs> {
                     def_id
                 })
                 .collect::<Vec<_>>();
-            self.defs
-                .get_class_mut(class_id)
-                .items
-                .extend_from_slice(&structs);
+            self.defs.get_class_mut(class_id).items.extend_from_slice(&structs);
 
             let funcs = hir
                 .funcs
@@ -215,27 +199,16 @@ impl<'defs> LoweringContext<'defs> {
                     self.lower_func(class_id, func_def, &mut backrefs.funcs, &mut backrefs.ops)
                 })
                 .collect::<Vec<_>>();
-            self.defs
-                .get_class_mut(class_id)
-                .items
-                .extend_from_slice(&funcs);
+            self.defs.get_class_mut(class_id).items.extend_from_slice(&funcs);
 
             let states = hir
                 .states
                 .iter()
                 .map(|state_def| {
-                    self.lower_state(
-                        class_id,
-                        state_def,
-                        &mut backrefs.states,
-                        &mut backrefs.funcs,
-                    )
+                    self.lower_state(class_id, state_def, &mut backrefs.states, &mut backrefs.funcs)
                 })
                 .collect::<Vec<_>>();
-            self.defs
-                .get_class_mut(class_id)
-                .items
-                .extend_from_slice(&states);
+            self.defs.get_class_mut(class_id).items.extend_from_slice(&states);
         }
     }
 
@@ -254,9 +227,7 @@ impl<'defs> LoweringContext<'defs> {
         let get_class = |this: &mut Self, package: &str, class: &str| {
             let pack = Identifier::from_str(package).unwrap();
             let cls = Identifier::from_str(class).unwrap();
-            this.resolver
-                .get_ty_in(None, this.defs, &pack, &cls)
-                .expect("Object missing")
+            this.resolver.get_ty_in(None, this.defs, &pack, &cls).expect("Object missing")
         };
 
         let core = get_package(self, "Core");
@@ -269,9 +240,7 @@ impl<'defs> LoweringContext<'defs> {
         let add_class = |this: &mut Self, package, class_name: &str, parent| {
             let ident = Identifier::from_str(class_name).unwrap();
             this.add_def(|this, class_id| {
-                this.resolver
-                    .add_class(package, ident.clone(), class_id)
-                    .unwrap();
+                this.resolver.add_class(package, ident.clone(), class_id).unwrap();
                 (
                     DefKind::Class(Box::new(Class {
                         name: ident,
@@ -373,10 +342,7 @@ impl<'defs> LoweringContext<'defs> {
                     owner: object_id,
                     flags: FuncFlags::NATIVE | FuncFlags::ITERATOR | FuncFlags::STATIC,
                     delegate_prop: None,
-                    sig: FuncSig {
-                        ret_ty: None,
-                        args: Box::new([array_arg, val_arg, idx_arg]),
-                    },
+                    sig: FuncSig { ret_ty: None, args: Box::new([array_arg, val_arg, idx_arg]) },
                     contents: None,
                 }),
                 None,
@@ -407,10 +373,7 @@ impl<'defs> LoweringContext<'defs> {
                     owner: object_id,
                     flags: FuncFlags::NATIVE | FuncFlags::STATIC,
                     delegate_prop: None,
-                    sig: FuncSig {
-                        ret_ty: None,
-                        args: Box::new([bool_arg]),
-                    },
+                    sig: FuncSig { ret_ty: None, args: Box::new([bool_arg]) },
                     contents: None,
                 }),
                 None,
@@ -421,11 +384,7 @@ impl<'defs> LoweringContext<'defs> {
     fn fixup_extends<'hir>(&mut self, backrefs: &'hir HirBackrefs) {
         for (&class_id, &hir) in &backrefs.files {
             match &hir.header.kind {
-                uc_ast::ClassHeader::Class {
-                    extends,
-                    implements,
-                    within,
-                } => {
+                uc_ast::ClassHeader::Class { extends, implements, within } => {
                     let extends = extends
                         .as_ref()
                         .map(|n| self.resolver.get_ty(class_id, self.defs, n).unwrap());
@@ -437,11 +396,7 @@ impl<'defs> LoweringContext<'defs> {
                         .as_ref()
                         .map(|n| self.resolver.get_ty(class_id, self.defs, n).unwrap());
                     let c = self.defs.get_class_mut(class_id);
-                    c.kind = Some(ClassKind::Class {
-                        extends,
-                        implements,
-                        within,
-                    })
+                    c.kind = Some(ClassKind::Class { extends, implements, within })
                 }
                 uc_ast::ClassHeader::Interface { extends } => {
                     // Honor an explicit extend on the interface. Otherwise extend `Interface`,
@@ -487,11 +442,9 @@ impl<'defs> LoweringContext<'defs> {
             let extends = match &struct_def.extends.as_deref() {
                 None => None,
                 Some([name]) => Some(self.resolver.get_ty(struct_id, self.defs, name).unwrap()),
-                Some([class, name]) => Some(
-                    self.resolver
-                        .get_ty_in(Some(struct_id), self.defs, class, name)
-                        .unwrap(),
-                ),
+                Some([class, name]) => {
+                    Some(self.resolver.get_ty_in(Some(struct_id), self.defs, class, name).unwrap())
+                }
                 Some([..]) => panic!("too many name parts"),
             };
             self.defs.get_struct_mut(struct_id).extends = extends;
@@ -534,10 +487,7 @@ impl<'defs> LoweringContext<'defs> {
     }
 
     fn resolve_sig(&mut self, func_id: DefId, sig: &uc_ast::FuncSig) -> (Option<Ty>, Box<[DefId]>) {
-        let ret_ty = sig
-            .ret_ty
-            .as_ref()
-            .map(|ty| self.decode_ast_ty(ty, func_id).unwrap());
+        let ret_ty = sig.ret_ty.as_ref().map(|ty| self.decode_ast_ty(ty, func_id).unwrap());
         let args = sig
             .args
             .iter()
@@ -583,11 +533,7 @@ impl<'defs> LoweringContext<'defs> {
                             _ => local_ty,
                         };
                         (
-                            DefKind::Local(Local {
-                                name: inst.name.clone(),
-                                owner: func_id,
-                                ty,
-                            }),
+                            DefKind::Local(Local { name: inst.name.clone(), owner: func_id, ty }),
                             Some(inst.span),
                         )
                     });
@@ -600,8 +546,8 @@ impl<'defs> LoweringContext<'defs> {
 
     fn resolve_sigs<'hir>(&mut self, backrefs: &HirBackrefs<'hir>) {
         for var_ref in &backrefs.vars {
-            let inner_ty = self.decode_ast_ty(&var_ref.1 .0.ty, *var_ref.0).unwrap();
-            let ty = match self.resolve_dim(&var_ref.1 .0.names[var_ref.1 .1].count, *var_ref.0) {
+            let inner_ty = self.decode_ast_ty(&var_ref.1.0.ty, *var_ref.0).unwrap();
+            let ty = match self.resolve_dim(&var_ref.1.0.names[var_ref.1.1].count, *var_ref.0) {
                 Some(c) => Ty::stat_array_from(inner_ty, c),
                 _ => inner_ty,
             };
@@ -614,10 +560,8 @@ impl<'defs> LoweringContext<'defs> {
 
             if let Some(body) = &func_ref.body {
                 let locals = self.resolve_locals(func_id, body);
-                self.defs.get_func_mut(func_id).contents = Some(FuncContents {
-                    locals,
-                    statements: None,
-                });
+                self.defs.get_func_mut(func_id).contents =
+                    Some(FuncContents { locals, statements: None });
             }
         }
 
@@ -627,10 +571,8 @@ impl<'defs> LoweringContext<'defs> {
 
             if let Some(body) = &op_ref.body {
                 let locals = self.resolve_locals(op_id, body);
-                self.defs.get_op_mut(op_id).contents = Some(FuncContents {
-                    locals,
-                    statements: None,
-                });
+                self.defs.get_op_mut(op_id).contents =
+                    Some(FuncContents { locals, statements: None });
             }
         }
     }
@@ -641,16 +583,11 @@ impl<'defs> LoweringContext<'defs> {
         name: &Identifier,
         kind: ScopeWalkKind,
     ) -> Option<(DefId, &Const)> {
-        match self
-            .resolver
-            .get_scoped_item(scope, self.defs, kind, name, |d| {
-                matches!(self.defs.get_def(d).kind, DefKind::Const(_))
-            }) {
+        match self.resolver.get_scoped_item(scope, self.defs, kind, name, |d| {
+            matches!(self.defs.get_def(d).kind, DefKind::Const(_))
+        }) {
             Ok(d) => match self.defs.get_def(d) {
-                Def {
-                    kind: DefKind::Const(c),
-                    ..
-                } => Some((d, c)),
+                Def { kind: DefKind::Const(c), .. } => Some((d, c)),
                 _ => unreachable!(),
             },
             Err(_) => None,
@@ -663,16 +600,11 @@ impl<'defs> LoweringContext<'defs> {
         name: &Identifier,
         kind: ScopeWalkKind,
     ) -> Option<(DefId, &Function)> {
-        match self
-            .resolver
-            .get_scoped_item(scope, self.defs, kind, name, |d| {
-                matches!(self.defs.get_def(d).kind, DefKind::Function(_))
-            }) {
+        match self.resolver.get_scoped_item(scope, self.defs, kind, name, |d| {
+            matches!(self.defs.get_def(d).kind, DefKind::Function(_))
+        }) {
             Ok(d) => match self.defs.get_def(d) {
-                Def {
-                    kind: DefKind::Function(f),
-                    ..
-                } => Some((d, f)),
+                Def { kind: DefKind::Function(f), .. } => Some((d, f)),
                 _ => unreachable!(),
             },
             Err(_) => None,
@@ -681,14 +613,12 @@ impl<'defs> LoweringContext<'defs> {
 
     /// Finds a local, arg, or var
     fn resolve_var(&self, scope: DefId, name: &Identifier, kind: ScopeWalkKind) -> Option<DefId> {
-        match self
-            .resolver
-            .get_scoped_item(scope, self.defs, kind, name, |d| {
-                matches!(
-                    self.defs.get_def(d).kind,
-                    DefKind::Var(_) | DefKind::Local(_) | DefKind::FuncArg(_)
-                )
-            }) {
+        match self.resolver.get_scoped_item(scope, self.defs, kind, name, |d| {
+            matches!(
+                self.defs.get_def(d).kind,
+                DefKind::Var(_) | DefKind::Local(_) | DefKind::FuncArg(_)
+            )
+        }) {
             Ok(d) => Some(d),
             Err(_) => None,
         }
@@ -736,8 +666,7 @@ impl<'defs> LoweringContext<'defs> {
         vars: &mut HashMap<DefId, (&'hir uc_ast::VarDef, usize)>,
     ) -> DefId {
         self.add_def(|this, struct_id| {
-            this.resolver
-                .add_scoped_ty(struct_def.name.clone(), struct_id);
+            this.resolver.add_scoped_ty(struct_def.name.clone(), struct_id);
 
             let var_ids = struct_def
                 .fields
@@ -771,9 +700,7 @@ impl<'defs> LoweringContext<'defs> {
             .enumerate()
             .map(|(idx, inst)| {
                 self.add_def(|this, var_id| {
-                    this.resolver
-                        .add_scoped_item(owner_id, inst.name.clone(), var_id)
-                        .unwrap();
+                    this.resolver.add_scoped_item(owner_id, inst.name.clone(), var_id).unwrap();
                     vars.insert(var_id, (var_def, idx));
                     (
                         DefKind::Var(Var {
@@ -796,9 +723,7 @@ impl<'defs> LoweringContext<'defs> {
         consts: &mut HashMap<DefId, &'hir uc_ast::ConstDef>,
     ) -> DefId {
         self.add_def(|this, const_id| {
-            this.resolver
-                .add_scoped_item(owner_id, const_def.name.clone(), const_id)
-                .unwrap();
+            this.resolver.add_scoped_item(owner_id, const_def.name.clone(), const_id).unwrap();
             consts.insert(const_id, const_def);
             let val = match &const_def.val {
                 uc_ast::ConstVal::Literal(l) => match l {
@@ -813,11 +738,7 @@ impl<'defs> LoweringContext<'defs> {
                 uc_ast::ConstVal::ValueReference(l) => ConstVal::Redirect(l.clone()),
             };
             (
-                DefKind::Const(Const {
-                    name: const_def.name.clone(),
-                    owner: owner_id,
-                    val,
-                }),
+                DefKind::Const(Const { name: const_def.name.clone(), owner: owner_id, val }),
                 Some(const_def.span),
             )
         })
@@ -872,10 +793,7 @@ impl<'defs> LoweringContext<'defs> {
                         op,
                         owning_class: owner_id,
                         flags: func_def.mods.flags,
-                        sig: FuncSig {
-                            ret_ty: None,
-                            args: Box::new([]),
-                        },
+                        sig: FuncSig { ret_ty: None, args: Box::new([]) },
                         contents: None,
                     }),
                     Some(func_def.span),
@@ -905,18 +823,14 @@ impl<'defs> LoweringContext<'defs> {
                             }),
                             Some(func_def.span),
                         );
-                        this.resolver
-                            .add_scoped_item(owner_id, name, var_id)
-                            .unwrap();
+                        this.resolver.add_scoped_item(owner_id, name, var_id).unwrap();
                         var
                     }))
                 } else {
                     None
                 };
 
-                this.resolver
-                    .add_scoped_item(owner_id, func_name.clone(), func_id)
-                    .unwrap();
+                this.resolver.add_scoped_item(owner_id, func_name.clone(), func_id).unwrap();
                 funcs.insert(func_id, func_def);
                 (
                     DefKind::Function(Function {
@@ -924,10 +838,7 @@ impl<'defs> LoweringContext<'defs> {
                         owner: owner_id,
                         flags: func_def.mods.flags,
                         delegate_prop: var_id,
-                        sig: FuncSig {
-                            ret_ty: None,
-                            args: Box::new([]),
-                        },
+                        sig: FuncSig { ret_ty: None, args: Box::new([]) },
                         contents: None,
                     }),
                     Some(func_def.span),
@@ -977,12 +888,7 @@ impl<'defs> LoweringContext<'defs> {
                 match self.lower_body(did, &body.statements) {
                     Ok(b) => {
                         body_count += 1;
-                        self.defs
-                            .get_func_mut(did)
-                            .contents
-                            .as_mut()
-                            .unwrap()
-                            .statements = Some(b)
+                        self.defs.get_func_mut(did).contents.as_mut().unwrap().statements = Some(b)
                     }
                     Err(e) => errs.push(e),
                 }
@@ -1040,9 +946,7 @@ impl<'defs> LoweringContext<'defs> {
             uc_ast::Ty::Array(arr_ty) => {
                 // This is filtered in the parser
                 assert!(!matches!(&**arr_ty, uc_ast::Ty::Array(_)));
-                Some(Ty::dyn_array_from(
-                    self.decode_ast_ty(arr_ty, scope).unwrap(),
-                ))
+                Some(Ty::dyn_array_from(self.decode_ast_ty(arr_ty, scope).unwrap()))
             }
             uc_ast::Ty::Class(ident) => {
                 let ty = self
@@ -1069,10 +973,8 @@ impl<'defs> LoweringContext<'defs> {
                         Some(Ty::delegate_from(func))
                     }
                     [class, func_name] => {
-                        let class_def = self
-                            .resolver
-                            .get_ty(scope, self.defs, class)
-                            .unwrap_or_else(|e| {
+                        let class_def =
+                            self.resolver.get_ty(scope, self.defs, class).unwrap_or_else(|e| {
                                 panic!("failed to find ty {:?}: {:?}", func_name, e)
                             });
                         let (func, _) = self

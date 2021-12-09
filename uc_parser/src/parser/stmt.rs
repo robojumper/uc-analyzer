@@ -32,23 +32,14 @@ fn stmt_wants_semi(stmt: &StatementKind) -> bool {
 impl Parser<'_> {
     fn parse_block_or_stmt(&mut self, ctx: (&'static str, Span)) -> Result<Block, ParseError> {
         if self.eat(Tk::Semi) {
-            Ok(Block {
-                stmts: vec![],
-                from_single_stmt: true,
-            })
+            Ok(Block { stmts: vec![], from_single_stmt: true })
         } else if self.eat(sig!(LBrace)) {
             let stmts = self.parse_statements();
             self.expect(sig!(RBrace))?;
-            Ok(Block {
-                stmts,
-                from_single_stmt: false,
-            })
+            Ok(Block { stmts, from_single_stmt: false })
         } else {
             let stmt = self.expect_one_statement(ctx, true)?;
-            Ok(Block {
-                stmts: vec![stmt],
-                from_single_stmt: true,
-            })
+            Ok(Block { stmts: vec![stmt], from_single_stmt: true })
         }
     }
 
@@ -87,10 +78,9 @@ impl Parser<'_> {
             }
             sig!(RBrace) => return Ok(None),
             _ => {
-                return Err(self.fmt_err(
-                    "switch must be followed by case or default clause",
-                    self.peek(),
-                ))
+                return Err(
+                    self.fmt_err("switch must be followed by case or default clause", self.peek())
+                );
             }
         };
         while self.eat(Tk::Semi) {} // FIXME: Where is this hit?
@@ -110,11 +100,7 @@ impl Parser<'_> {
             }
         }
 
-        Ok(Some(CaseClause {
-            case,
-            case_span,
-            stmts,
-        }))
+        Ok(Some(CaseClause { case, case_span, stmts }))
     }
 
     fn parse_one_stmt(&mut self) -> Result<Option<Statement>, ParseError> {
@@ -123,15 +109,7 @@ impl Parser<'_> {
             Some(tok) => match tok.kind {
                 sig!(RBrace) => Ok(None),
                 sig!(RParen) => Ok(None),
-                Tk::Sym(_)
-                    if matches!(
-                        self.peek2(),
-                        Some(Token {
-                            kind: sig!(Colon),
-                            ..
-                        })
-                    ) =>
-                {
+                Tk::Sym(_) if matches!(self.peek2(), Some(Token { kind: sig!(Colon), .. })) => {
                     let m = self.marker();
                     let label = self.expect_ident()?;
                     self.next();
@@ -158,11 +136,7 @@ impl Parser<'_> {
                     };
 
                     Ok(Some(Statement {
-                        kind: StatementKind::IfStatement {
-                            cond,
-                            then,
-                            or_else,
-                        },
+                        kind: StatementKind::IfStatement { cond, then, or_else },
                         span: if_m.complete(self),
                     }))
                 }
@@ -195,27 +169,20 @@ impl Parser<'_> {
                     let fake_call = self.parse_base_expression()?;
                     // Pull apart the function call expr. This makes it easier to work with later.
                     let (ctx, name, args) = match fake_call {
-                        Expr {
-                            kind: ExprKind::FuncCallExpr { lhs, name, args },
-                            span,
-                            paren,
-                        } => (lhs, name, args),
+                        Expr { kind: ExprKind::FuncCallExpr { lhs, name, args }, span, paren } => {
+                            (lhs, name, args)
+                        }
                         _ => {
                             return Err(self.fmt_err(
                                 "expected function call after foreach",
                                 Some(foreach_tok),
-                            ))
+                            ));
                         }
                     };
                     let run = self.parse_block_or_stmt(("foreach", kw_span))?;
 
                     Ok(Some(Statement {
-                        kind: StatementKind::ForeachStatement {
-                            ctx,
-                            name,
-                            args,
-                            run,
-                        },
+                        kind: StatementKind::ForeachStatement { ctx, name, args, run },
                         span: foreach_m.complete(self),
                     }))
                 }

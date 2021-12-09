@@ -36,14 +36,8 @@ pub struct Hir {
 
 #[derive(Debug)]
 pub enum ClassHeader {
-    Class {
-        extends: Option<Identifier>,
-        implements: Vec<Identifier>,
-        within: Option<Identifier>,
-    },
-    Interface {
-        extends: Option<Identifier>,
-    },
+    Class { extends: Option<Identifier>, implements: Vec<Identifier>, within: Option<Identifier> },
+    Interface { extends: Option<Identifier> },
 }
 
 #[derive(Debug)]
@@ -171,50 +165,18 @@ pub struct Statement {
 
 #[derive(Debug)]
 pub enum StatementKind {
-    IfStatement {
-        cond: Expr,
-        then: Block,
-        or_else: Option<Block>,
-    },
-    ForStatement {
-        init: Box<Statement>,
-        cond: Expr,
-        retry: Box<Statement>,
-        run: Block,
-    },
-    ForeachStatement {
-        ctx: Box<Context>,
-        name: Identifier,
-        args: Vec<Option<Expr>>,
-        run: Block,
-    },
-    WhileStatement {
-        cond: Expr,
-        run: Block,
-    },
-    DoStatement {
-        cond: Expr,
-        run: Block,
-    },
-    SwitchStatement {
-        scrutinee: Expr,
-        cases: Vec<CaseClause>,
-    },
+    IfStatement { cond: Expr, then: Block, or_else: Option<Block> },
+    ForStatement { init: Box<Statement>, cond: Expr, retry: Box<Statement>, run: Block },
+    ForeachStatement { ctx: Box<Context>, name: Identifier, args: Vec<Option<Expr>>, run: Block },
+    WhileStatement { cond: Expr, run: Block },
+    DoStatement { cond: Expr, run: Block },
+    SwitchStatement { scrutinee: Expr, cases: Vec<CaseClause> },
     BreakStatement,
     ContinueStatement,
-    ReturnStatement {
-        expr: Option<Expr>,
-    },
-    Label {
-        name: Identifier,
-    },
-    Assignment {
-        lhs: Expr,
-        rhs: Expr,
-    },
-    Expr {
-        expr: Expr,
-    },
+    ReturnStatement { expr: Option<Expr> },
+    Label { name: Identifier },
+    Assignment { lhs: Expr, rhs: Expr },
+    Expr { expr: Expr },
 }
 
 #[derive(Debug)]
@@ -265,49 +227,16 @@ pub enum Context {
 
 #[derive(Debug)]
 pub enum ExprKind {
-    IndexExpr {
-        base: Box<Expr>,
-        idx: Box<Expr>,
-    },
-    FieldExpr {
-        lhs: Box<Context>,
-        rhs: Identifier,
-    },
-    FuncCallExpr {
-        lhs: Box<Context>,
-        name: Identifier,
-        args: Vec<Option<Expr>>,
-    },
-    ClassMetaCastExpr {
-        ty: Ty,
-        expr: Box<Expr>,
-    },
-    NewExpr {
-        args: Vec<Option<Expr>>,
-        cls: Box<Expr>,
-        arch: Option<Box<Expr>>,
-    },
-    PreOpExpr {
-        op: Op,
-        rhs: Box<Expr>,
-    },
-    PostOpExpr {
-        lhs: Box<Expr>,
-        op: Op,
-    },
-    BinOpExpr {
-        lhs: Box<Expr>,
-        op: Op,
-        rhs: Box<Expr>,
-    },
-    TernExpr {
-        cond: Box<Expr>,
-        then: Box<Expr>,
-        alt: Box<Expr>,
-    },
-    LiteralExpr {
-        lit: Literal,
-    },
+    IndexExpr { base: Box<Expr>, idx: Box<Expr> },
+    FieldExpr { lhs: Box<Context>, rhs: Identifier },
+    FuncCallExpr { lhs: Box<Context>, name: Identifier, args: Vec<Option<Expr>> },
+    ClassMetaCastExpr { ty: Ty, expr: Box<Expr> },
+    NewExpr { args: Vec<Option<Expr>>, cls: Box<Expr>, arch: Option<Box<Expr>> },
+    PreOpExpr { op: Op, rhs: Box<Expr> },
+    PostOpExpr { lhs: Box<Expr>, op: Op },
+    BinOpExpr { lhs: Box<Expr>, op: Op, rhs: Box<Expr> },
+    TernExpr { cond: Box<Expr>, then: Box<Expr>, alt: Box<Expr> },
+    LiteralExpr { lit: Literal },
 }
 
 #[derive(Debug)]

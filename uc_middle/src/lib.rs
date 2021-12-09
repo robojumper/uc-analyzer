@@ -33,9 +33,7 @@ pub enum ScopeWalkKind {
 
 impl Defs {
     pub fn new() -> Self {
-        Self {
-            defs: vec![DefSlot::Empty],
-        }
+        Self { defs: vec![DefSlot::Empty] }
     }
 
     /// Create an ID and a corresponding hole in the definitions vector.
@@ -57,11 +55,7 @@ impl Defs {
         t.as_mut().defs.push(DefSlot::Empty);
         let def_id = DefId(NonZeroU32::new(next_id as u32).unwrap());
         let (kind, span) = f(t, def_id);
-        t.as_mut().defs[next_id] = DefSlot::Def(Def {
-            id: def_id,
-            span,
-            kind,
-        });
+        t.as_mut().defs[next_id] = DefSlot::Def(Def { id: def_id, span, kind });
         def_id
     }
 
@@ -97,11 +91,7 @@ impl Defs {
         };
 
         match self.walk_scopes_inner(scope, ScopeWalkKind::Definitions, &mut |id| {
-            if id == def_scope {
-                ControlFlow::Break(def_scope)
-            } else {
-                ControlFlow::Continue(())
-            }
+            if id == def_scope { ControlFlow::Break(def_scope) } else { ControlFlow::Continue(()) }
         }) {
             ControlFlow::Continue(()) => false,
             ControlFlow::Break(_) => true,
@@ -174,9 +164,7 @@ impl Defs {
             DefKind::Class(c) => {
                 cb(def.id)?;
                 match c.kind.as_ref().unwrap() {
-                    ClassKind::Class {
-                        extends, within, ..
-                    } => {
+                    ClassKind::Class { extends, within, .. } => {
                         if let Some(within) = within {
                             self.walk_scopes_inner(*within, kind, cb)?;
                         }
@@ -423,14 +411,8 @@ pub struct Class {
 
 #[derive(Debug)]
 pub enum ClassKind {
-    Class {
-        extends: Option<DefId>,
-        implements: Box<[DefId]>,
-        within: Option<DefId>,
-    },
-    Interface {
-        extends: Option<DefId>,
-    },
+    Class { extends: Option<DefId>, implements: Box<[DefId]>, within: Option<DefId> },
+    Interface { extends: Option<DefId> },
 }
 
 #[derive(Debug)]

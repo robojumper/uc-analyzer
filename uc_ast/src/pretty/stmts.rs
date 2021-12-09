@@ -7,11 +7,7 @@ use super::PPrinter;
 impl<W: io::Write> PPrinter<W> {
     pub fn format_statement(&mut self, stmt: &Statement) -> io::Result<()> {
         match &stmt.kind {
-            StatementKind::IfStatement {
-                cond,
-                then,
-                or_else,
-            } => {
+            StatementKind::IfStatement { cond, then, or_else } => {
                 self.w.write_all(b"if (")?;
                 self.format_expr(cond)?;
                 self.w.write_all(b")")?;
@@ -23,12 +19,7 @@ impl<W: io::Write> PPrinter<W> {
                     self.w.write_all(b"\n")?;
                 }
             }
-            StatementKind::ForStatement {
-                init,
-                cond,
-                retry,
-                run,
-            } => {
+            StatementKind::ForStatement { init, cond, retry, run } => {
                 self.w.write_all(b"for (")?;
                 self.format_statement(init)?;
                 self.w.write_all(b" ")?;
@@ -38,12 +29,7 @@ impl<W: io::Write> PPrinter<W> {
                 self.w.write_all(b")")?;
                 self.format_block(run)?;
             }
-            StatementKind::ForeachStatement {
-                ctx,
-                name,
-                args,
-                run,
-            } => {
+            StatementKind::ForeachStatement { ctx, name, args, run } => {
                 self.w.write_all(b"foreach ")?;
                 self.format_context(ctx)?;
                 self.format_i(name)?;

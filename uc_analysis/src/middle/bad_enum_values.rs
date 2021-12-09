@@ -18,11 +18,7 @@ pub fn run(defs: &Defs, resolver: &ResolverContext, _: &Sources) -> Vec<ErrorRep
                 .collect::<Vec<_>>();
 
             let msg = "enum values have the same name".to_owned();
-            errs.push(ErrorReport {
-                code: "enum-value-conflict",
-                msg,
-                fragments,
-            })
+            errs.push(ErrorReport { code: "enum-value-conflict", msg, fragments })
         }
     }
     errs

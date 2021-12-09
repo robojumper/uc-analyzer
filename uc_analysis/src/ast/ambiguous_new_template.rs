@@ -47,10 +47,8 @@ impl Visitor for AmbigNewVisitor {
                     if let Context::Expr(Expr { kind, .. }) = &**lhs {
                         if let ExprKind::FieldExpr { rhs, .. } = kind {
                             if rhs != "class" {
-                                self.errs.push(AmbigNew {
-                                    new_expr: expr.span,
-                                    cls_expr: cls.span,
-                                });
+                                self.errs
+                                    .push(AmbigNew { new_expr: expr.span, cls_expr: cls.span });
                             }
                         }
                     }

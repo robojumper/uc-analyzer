@@ -42,12 +42,7 @@ impl<W: io::Write> PPrinter<W> {
 
     fn format_class(&mut self, header: &ClassDef) -> io::Result<()> {
         match &header.kind {
-            ClassHeader::Class {
-                extends,
-                implements,
-                within,
-                ..
-            } => {
+            ClassHeader::Class { extends, implements, within, .. } => {
                 self.w.write_all(b"class ")?;
                 self.w.write_all(header.name.as_ref().as_bytes())?;
                 match extends {

@@ -109,10 +109,7 @@ impl Parser<'_> {
                 Ok(None)
             }
             DeclFollowups::OptForeignBlock => match self.peek() {
-                Some(Token {
-                    kind: opener @ sig!(LBrace),
-                    ..
-                }) => {
+                Some(Token { kind: opener @ sig!(LBrace), .. }) => {
                     self.next();
                     self.ignore_foreign_block(opener)?;
                     Ok(None)
@@ -121,9 +118,7 @@ impl Parser<'_> {
             },
             DeclFollowups::IdentModifiers(mods) | DeclFollowups::NumberModifiers(mods) => {
                 match self.peek() {
-                    Some(Token {
-                        kind: sig!(LParen), ..
-                    }) => {
+                    Some(Token { kind: sig!(LParen), .. }) => {
                         if mods.intersects(ModifierCount::ALLOW_PAREN) {
                             match followups {
                                 DeclFollowups::IdentModifiers(_) => self
@@ -178,10 +173,7 @@ impl Parser<'_> {
             }
         }
 
-        Ok(Modifiers {
-            flags: F::from_raw(flags),
-            followups,
-        })
+        Ok(Modifiers { flags: F::from_raw(flags), followups })
     }
 }
 
@@ -190,20 +182,11 @@ pub static CLASS_MODIFIERS: Lazy<ModifierConfig<ClassFlags>> = Lazy::new(|| {
     type CF = ClassFlags;
     let e = ClassFlags::empty();
 
-    m.insert(
-        Kw::Native,
-        C::new(
-            CF::NATIVE,
-            DF::IdentModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE),
-        ),
-    );
+    m.insert(Kw::Native, C::new(CF::NATIVE, DF::IdentModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE)));
 
     m.insert(Kw::Config, C::new(CF::CONFIG, ONE_IDENT));
 
-    m.insert(
-        Kw::PerObjectConfig,
-        C::new(CF::PEROBJECTCONFIG, DF::Nothing),
-    );
+    m.insert(Kw::PerObjectConfig, C::new(CF::PEROBJECTCONFIG, DF::Nothing));
     m.insert(Kw::Implements, C::new(CF::IMPLEMENTS, MORE_IDENTS));
 
     m.insert(Kw::Abstract, C::new(CF::ABSTRACT, DF::Nothing));
@@ -235,13 +218,7 @@ pub static INTERFACE_MODIFIERS: Lazy<ModifierConfig<ClassFlags>> = Lazy::new(|| 
     type CF = ClassFlags;
     let e = ClassFlags::empty();
 
-    m.insert(
-        Kw::Native,
-        C::new(
-            CF::NATIVE,
-            DF::IdentModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE),
-        ),
-    );
+    m.insert(Kw::Native, C::new(CF::NATIVE, DF::IdentModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE)));
 
     m.insert(Kw::DependsOn, C::new(e, MORE_IDENTS));
 
@@ -254,13 +231,7 @@ pub static VAR_MODIFIERS: Lazy<ModifierConfig<VarFlags>> = Lazy::new(|| {
     let e = VarFlags::empty();
 
     m.insert(Kw::Native, C::new(VF::NATIVE, DF::Nothing));
-    m.insert(
-        Kw::Config,
-        C::new(
-            VF::CONFIG,
-            DF::IdentModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE),
-        ),
-    );
+    m.insert(Kw::Config, C::new(VF::CONFIG, DF::IdentModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE)));
     m.insert(Kw::GlobalConfig, C::new(VF::GLOBALCONFIG, DF::Nothing));
     m.insert(Kw::Localized, C::new(VF::LOCALIZED, DF::Nothing));
     m.insert(Kw::Const, C::new(VF::CONST, DF::Nothing));
@@ -293,15 +264,9 @@ pub static VAR_MODIFIERS: Lazy<ModifierConfig<VarFlags>> = Lazy::new(|| {
 
     m.insert(Kw::Public, C::new(VF::PUBLIC, DF::OptForeignBlock));
     m.insert(Kw::Private, C::new(VF::PRIVATE, DF::OptForeignBlock));
-    m.insert(
-        Kw::PrivateWrite,
-        C::new(VF::PRIVATEWRITE, DF::OptForeignBlock),
-    );
+    m.insert(Kw::PrivateWrite, C::new(VF::PRIVATEWRITE, DF::OptForeignBlock));
     m.insert(Kw::Protected, C::new(VF::PROTECTED, DF::OptForeignBlock));
-    m.insert(
-        Kw::ProtectedWrite,
-        C::new(VF::PROTECTEDWRITE, DF::OptForeignBlock),
-    );
+    m.insert(Kw::ProtectedWrite, C::new(VF::PROTECTEDWRITE, DF::OptForeignBlock));
 
     ModifierConfig { modifiers: m }
 });
@@ -342,19 +307,10 @@ pub static FUNC_MODIFIERS: Lazy<ModifierConfig<FuncFlags>> = Lazy::new(|| {
 
     m.insert(Kw::Function, C::new(e, DF::Nothing));
     m.insert(Kw::Event, C::new(FF::EVENT, DF::Nothing));
-    m.insert(
-        Kw::Native,
-        C::new(
-            FF::NATIVE,
-            DF::NumberModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE),
-        ),
-    );
+    m.insert(Kw::Native, C::new(FF::NATIVE, DF::NumberModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE)));
     m.insert(
         Kw::Operator,
-        C::new(
-            FF::OPERATOR,
-            DF::NumberModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE),
-        ),
+        C::new(FF::OPERATOR, DF::NumberModifiers(MC::ALLOW_NONE | MC::ALLOW_ONE)),
     );
     m.insert(Kw::PreOperator, C::new(FF::PREOPERATOR, DF::Nothing));
     m.insert(Kw::PostOperator, C::new(FF::POSTOPERATOR, DF::Nothing));

@@ -152,13 +152,7 @@ impl Parser<'_> {
                             // Hack: Simply eat a preoperator + if followed by a number directly. UCC just considers it
                             // part of the number by feeding info back from the parser to the lexer.
                             if sig == Sigil::Add
-                                && matches!(
-                                    self.peek(),
-                                    Some(Token {
-                                        kind: Tk::Number(_),
-                                        ..
-                                    })
-                                )
+                                && matches!(self.peek(), Some(Token { kind: Tk::Number(_), .. }))
                             {
                                 let tok = self.next().unwrap();
                                 let syn = match tok.kind {
@@ -184,11 +178,7 @@ impl Parser<'_> {
                     }
                 }
                 kw!(New) => {
-                    let args = if self.eat(sig!(LParen)) {
-                        self.parse_arg_list()?
-                    } else {
-                        vec![]
-                    };
+                    let args = if self.eat(sig!(LParen)) { self.parse_arg_list()? } else { vec![] };
 
                     let ((), r_bp) = NEW_PREFIX_POWER;
 
@@ -211,13 +201,7 @@ impl Parser<'_> {
                     }
                 }
                 kw!(Class)
-                    if matches!(
-                        self.peek(),
-                        Some(Token {
-                            kind: sig!(Lt) | sig!(LParen),
-                            ..
-                        })
-                    ) =>
+                    if matches!(self.peek(), Some(Token { kind: sig!(Lt) | sig!(LParen), .. })) =>
                 {
                     let name = if self.eat(sig!(Lt)) {
                         let ident = self.expect_ident()?;
@@ -240,13 +224,7 @@ impl Parser<'_> {
                     }
                 }
                 Tk::Sym(_)
-                    if matches!(
-                        self.peek(),
-                        Some(Token {
-                            kind: Tk::Name | Tk::DotName,
-                            ..
-                        })
-                    ) =>
+                    if matches!(self.peek(), Some(Token { kind: Tk::Name | Tk::DotName, .. })) =>
                 {
                     let nm_tok = self.next().unwrap();
                     let a = self.sym_to_ident(&tok);
@@ -254,17 +232,13 @@ impl Parser<'_> {
                     Expr {
                         span: lhs_marker.complete(self),
                         paren: false,
-                        kind: ExprKind::LiteralExpr {
-                            lit: uc_ast::Literal::ObjReference(a, b),
-                        },
+                        kind: ExprKind::LiteralExpr { lit: uc_ast::Literal::ObjReference(a, b) },
                     }
                 }
                 kw!(None) => Expr {
                     span: lhs_marker.complete(self),
                     paren: false,
-                    kind: ExprKind::LiteralExpr {
-                        lit: uc_ast::Literal::None,
-                    },
+                    kind: ExprKind::LiteralExpr { lit: uc_ast::Literal::None },
                 },
                 Tk::Sym(_) => {
                     let ident = self.sym_to_ident(&tok);
@@ -275,21 +249,14 @@ impl Parser<'_> {
                         Expr {
                             span: lhs_marker.complete(self),
                             paren: false,
-                            kind: ExprKind::FuncCallExpr {
-                                lhs: Box::new(ctx),
-                                name,
-                                args,
-                            },
+                            kind: ExprKind::FuncCallExpr { lhs: Box::new(ctx), name, args },
                         }
                     } else {
                         let span = lhs_marker.complete(self);
                         Expr {
                             span,
                             paren: false,
-                            kind: ExprKind::FieldExpr {
-                                lhs: Box::new(ctx),
-                                rhs: name,
-                            },
+                            kind: ExprKind::FieldExpr { lhs: Box::new(ctx), rhs: name },
                         }
                     }
                 }
@@ -320,9 +287,7 @@ impl Parser<'_> {
                 Tk::Bool(b) => Expr {
                     span: lhs_marker.complete(self),
                     paren: false,
-                    kind: ExprKind::LiteralExpr {
-                        lit: uc_ast::Literal::Bool(b),
-                    },
+                    kind: ExprKind::LiteralExpr { lit: uc_ast::Literal::Bool(b) },
                 },
                 _ => return Err(self.fmt_err("Unknown start of expression", Some(tok))),
             }
@@ -349,19 +314,13 @@ impl Parser<'_> {
                     Expr {
                         span: lhs_marker.complete(self),
                         paren: false,
-                        kind: ExprKind::IndexExpr {
-                            base: Box::new(lhs),
-                            idx: Box::new(rhs),
-                        },
+                        kind: ExprKind::IndexExpr { base: Box::new(lhs), idx: Box::new(rhs) },
                     }
                 } else {
                     Expr {
                         span: lhs_marker.complete(self),
                         paren: false,
-                        kind: ExprKind::PostOpExpr {
-                            lhs: Box::new(lhs),
-                            op: op.unwrap_op(),
-                        },
+                        kind: ExprKind::PostOpExpr { lhs: Box::new(lhs), op: op.unwrap_op() },
                     }
                 };
             } else if let Some((l_bp, r_bp)) = infix_binding_power(op) {
@@ -399,20 +358,13 @@ impl Parser<'_> {
                         Expr {
                             span: lhs_marker.complete(self),
                             paren: false,
-                            kind: ExprKind::FuncCallExpr {
-                                lhs: Box::new(ctx),
-                                name,
-                                args,
-                            },
+                            kind: ExprKind::FuncCallExpr { lhs: Box::new(ctx), name, args },
                         }
                     } else {
                         Expr {
                             span: lhs_marker.complete(self),
                             paren: false,
-                            kind: ExprKind::FieldExpr {
-                                lhs: Box::new(ctx),
-                                rhs: name,
-                            },
+                            kind: ExprKind::FieldExpr { lhs: Box::new(ctx), rhs: name },
                         }
                     }
                 } else {

@@ -17,32 +17,22 @@ pub struct MisleadingIndent {
 }
 
 pub fn run(hir: &Hir, sources: &Sources) -> Vec<ErrorReport> {
-    let mut visitor = MisleadingIndentVisitor {
-        errs: vec![],
-        sources,
-    };
+    let mut visitor = MisleadingIndentVisitor { errs: vec![], sources };
     visitor.visit_hir(hir);
     visitor
         .errs
         .iter()
         .map(|err| {
-            let first_msg = (
-                format!("this {} statement (+ guarded statement)...", err.guard.0),
-                err.guard.1,
-            );
-            let second_msg = (
-                "...looks like it guards this statement".to_owned(),
-                err.affected_statement,
-            );
+            let first_msg =
+                (format!("this {} statement (+ guarded statement)...", err.guard.0), err.guard.1);
+            let second_msg =
+                ("...looks like it guards this statement".to_owned(), err.affected_statement);
 
             ErrorReport {
                 code: "misleading-indent",
                 msg: "misleading indentation".to_owned(),
                 fragments: vec![Fragment {
-                    full_text: Span {
-                        start: err.guard.1.start,
-                        end: err.affected_statement.end,
-                    },
+                    full_text: Span { start: err.guard.1.start, end: err.affected_statement.end },
 
                     inlay_messages: vec![first_msg, second_msg],
                 }],

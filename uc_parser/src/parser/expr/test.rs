@@ -75,11 +75,7 @@ fn free_func_call() {
 fn assert_parse_pretty(text: &str, pretty: &str) {
     let mut sources = Sources::new();
     let id = sources
-        .add_file(
-            "TestFile".to_owned(),
-            text.as_bytes(),
-            PathBuf::from("<anonymous>"),
-        )
+        .add_file("TestFile".to_owned(), text.as_bytes(), PathBuf::from("<anonymous>"))
         .unwrap();
     let lex = Lexer::new(&sources, id);
     let mut p = Parser::new(lex);

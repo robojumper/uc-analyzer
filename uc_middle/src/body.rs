@@ -86,12 +86,7 @@ pub enum StatementKind {
     If(ExprId, BlockId, Option<BlockId>),
     /// An infinite loop. The loop-specific break condition is within
     /// the block and can be identified by looking at the LoopDesugaring.
-    Loop(
-        /*init*/ Option<StmtId>,
-        /*retry*/ Option<StmtId>,
-        BlockId,
-        LoopDesugaring,
-    ),
+    Loop(/*init*/ Option<StmtId>, /*retry*/ Option<StmtId>, BlockId, LoopDesugaring),
     /// Switch, with the scrutinee expression, the case clauses,
     /// and the number of statements in that block to skip for every
     /// expression, or the default case
@@ -105,22 +100,10 @@ pub enum StatementKind {
 
 #[derive(Debug)]
 pub enum LoopDesugaring {
-    For {
-        init: StmtId,
-        cond: ExprId,
-        retry: StmtId,
-    },
-    While {
-        cond: ExprId,
-    },
-    Do {
-        cond: ExprId,
-    },
-    Foreach {
-        init: StmtId,
-        cond: ExprId,
-        next: StmtId,
-    },
+    For { init: StmtId, cond: ExprId, retry: StmtId },
+    While { cond: ExprId },
+    Do { cond: ExprId },
+    Foreach { init: StmtId, cond: ExprId, next: StmtId },
 }
 
 #[derive(Copy, Clone, Debug)]

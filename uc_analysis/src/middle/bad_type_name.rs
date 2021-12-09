@@ -27,16 +27,9 @@ pub fn run(defs: &Defs, resolver: &ResolverContext, _: &Sources) -> Vec<ErrorRep
             let msg = if fragments.len() != ids.len() {
                 format!("{} {} with a builtin type", num.0, num.1)
             } else {
-                format!(
-                    "{} have the same name and can't always be disambiguated",
-                    num.0
-                )
+                format!("{} have the same name and can't always be disambiguated", num.0)
             };
-            errs.push(ErrorReport {
-                code: "type-name-conflict",
-                msg,
-                fragments,
-            })
+            errs.push(ErrorReport { code: "type-name-conflict", msg, fragments })
         }
 
         for &def_id in ids {

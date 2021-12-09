@@ -92,10 +92,7 @@ impl<'a> Lexer<'a> {
     pub fn new(source: &'a Sources, f_id: FileId) -> Self {
         let bytes_span = source.file_span(f_id);
         let bytes = source.lookup_bytes(bytes_span);
-        Self {
-            bytes: Bytes::new(bytes, bytes_span.start),
-            source,
-        }
+        Self { bytes: Bytes::new(bytes, bytes_span.start), source }
     }
 
     #[allow(clippy::should_implement_trait)]
@@ -203,7 +200,7 @@ impl<'a> Lexer<'a> {
                 (b'/', Some(b'/')) => return Some(self.parse_eol_comment(pos)),
                 (b'/', Some(b'*')) => return Some(self.parse_block_comment(pos)),
                 (b'0'..=b'9', _) | (b'.', Some(b'0'..=b'9')) => {
-                    return Some(self.parse_number(pos))
+                    return Some(self.parse_number(pos));
                 }
                 (c, _) => match c {
                     b'(' => Sig(LParen),
@@ -239,23 +236,14 @@ impl<'a> Lexer<'a> {
                     any => {
                         return Some(Token {
                             kind: TokenKind::Error(any),
-                            span: Span {
-                                start: pos,
-                                end: self.bytes.pos(),
-                            },
-                        })
+                            span: Span { start: pos, end: self.bytes.pos() },
+                        });
                     }
                 },
             }
         };
 
-        Some(Token {
-            kind,
-            span: Span {
-                start: pos,
-                end: self.bytes.pos(),
-            },
-        })
+        Some(Token { kind, span: Span { start: pos, end: self.bytes.pos() } })
     }
 
     /// Eats the {...} from a defaultproperties block, or the <Tooltip=...>
@@ -264,10 +252,7 @@ impl<'a> Lexer<'a> {
         let (recurser, closer) = match opener {
             TokenKind::Sig(Sigil::LBrace) => (Some(b'{'), Some(b'}')),
             TokenKind::Sig(Sigil::Lt) => (None, Some(b'>')),
-            _ => panic!(
-                "TokenKind {:?} is not a valid opener for foreign block",
-                opener
-            ),
+            _ => panic!("TokenKind {:?} is not a valid opener for foreign block", opener),
         };
 
         let mut brace_count = 1;
@@ -282,10 +267,7 @@ impl<'a> Lexer<'a> {
                 next
             } else {
                 return Err(Token {
-                    span: Span {
-                        start: first,
-                        end: self.bytes.pos(),
-                    },
+                    span: Span { start: first, end: self.bytes.pos() },
                     kind: TokenKind::Incomplete(IncompleteReason::Eol),
                 });
             };
@@ -302,21 +284,12 @@ impl<'a> Lexer<'a> {
     }
 
     fn parse_ident(&mut self, first: BytePos) -> Token {
-        while matches!(
-            self.bytes.peek(),
-            Some(b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'0'..=b'9')
-        ) {
+        while matches!(self.bytes.peek(), Some(b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'0'..=b'9')) {
             self.bytes.next();
         }
 
-        let span = Span {
-            start: first,
-            end: self.bytes.pos(),
-        };
-        let text = self
-            .source
-            .lookup_str(span)
-            .expect("just checked for ASCII subset");
+        let span = Span { start: first, end: self.bytes.pos() };
+        let text = self.source.lookup_str(span).expect("just checked for ASCII subset");
 
         let kind = if text.eq_ignore_ascii_case("true") {
             TokenKind::Bool(true)
@@ -334,10 +307,7 @@ impl<'a> Lexer<'a> {
 
     pub fn extract_ident(&self, token: &Token) -> Identifier {
         assert!(matches!(token.kind, TokenKind::Sym(Symbol::Identifier)));
-        let text = self
-            .source
-            .lookup_str(token.span)
-            .expect("this is a valid identifier");
+        let text = self.source.lookup_str(token.span).expect("this is a valid identifier");
         Identifier::from_str(text).unwrap()
     }
 
@@ -360,14 +330,8 @@ impl<'a> Lexer<'a> {
             self.bytes.next();
         }
 
-        let span = Span {
-            start: first,
-            end: self.bytes.pos(),
-        };
-        Token {
-            kind: TokenKind::Comment,
-            span,
-        }
+        let span = Span { start: first, end: self.bytes.pos() };
+        Token { kind: TokenKind::Comment, span }
     }
 
     fn parse_block_comment(&mut self, first: BytePos) -> Token {
@@ -386,11 +350,8 @@ impl<'a> Lexer<'a> {
                     None => {
                         return Token {
                             kind: TokenKind::Incomplete(IncompleteReason::Eol),
-                            span: Span {
-                                start: first,
-                                end: self.bytes.pos(),
-                            },
-                        }
+                            span: Span { start: first, end: self.bytes.pos() },
+                        };
                     }
                 },
                 Some(b'/') => match self.bytes.peek() {
@@ -402,33 +363,21 @@ impl<'a> Lexer<'a> {
                     None => {
                         return Token {
                             kind: TokenKind::Incomplete(IncompleteReason::Eol),
-                            span: Span {
-                                start: first,
-                                end: self.bytes.pos(),
-                            },
-                        }
+                            span: Span { start: first, end: self.bytes.pos() },
+                        };
                     }
                 },
                 Some(_) => continue,
                 None => {
                     return Token {
                         kind: TokenKind::Incomplete(IncompleteReason::Eol),
-                        span: Span {
-                            start: first,
-                            end: self.bytes.pos(),
-                        },
-                    }
+                        span: Span { start: first, end: self.bytes.pos() },
+                    };
                 }
             }
         }
 
-        Token {
-            kind: TokenKind::Comment,
-            span: Span {
-                start: first,
-                end: self.bytes.pos(),
-            },
-        }
+        Token { kind: TokenKind::Comment, span: Span { start: first, end: self.bytes.pos() } }
     }
 
     fn parse_number(&mut self, first: BytePos) -> Token {
@@ -442,10 +391,7 @@ impl<'a> Lexer<'a> {
             self.bytes.next();
         }
 
-        let span = Span {
-            start: first,
-            end: self.bytes.pos(),
-        };
+        let span = Span { start: first, end: self.bytes.pos() };
         let bytes = self.source.lookup_str(span).unwrap();
         let num_kind = match (float, hex) {
             (true, true) => TokenKind::BadNumber,
@@ -477,10 +423,7 @@ impl<'a> Lexer<'a> {
                 Err(_) => TokenKind::BadNumber,
             },
         };
-        Token {
-            kind: num_kind,
-            span,
-        }
+        Token { kind: num_kind, span }
     }
 
     fn parse_name(&mut self, first: BytePos) -> Token {
@@ -495,22 +438,12 @@ impl<'a> Lexer<'a> {
         let kind = match self.bytes.peek() {
             Some(b'\'') => {
                 self.bytes.next();
-                if seen_dot {
-                    TokenKind::DotName
-                } else {
-                    TokenKind::Name
-                }
+                if seen_dot { TokenKind::DotName } else { TokenKind::Name }
             }
             Some(_) => TokenKind::Incomplete(IncompleteReason::InvalidChar),
             None => TokenKind::Incomplete(IncompleteReason::Eol),
         };
-        Token {
-            kind,
-            span: Span {
-                start: first,
-                end: self.bytes.pos(),
-            },
-        }
+        Token { kind, span: Span { start: first, end: self.bytes.pos() } }
     }
 
     fn parse_string(&mut self, first: BytePos) -> Token {
@@ -520,10 +453,7 @@ impl<'a> Lexer<'a> {
                     self.bytes.next();
                     return Token {
                         kind: TokenKind::String,
-                        span: Span {
-                            start: first,
-                            end: self.bytes.pos(),
-                        },
+                        span: Span { start: first, end: self.bytes.pos() },
                     };
                 }
                 Some(b'\\') => {
@@ -532,11 +462,8 @@ impl<'a> Lexer<'a> {
                         Some(b'\r' | b'\n') | None => {
                             return Token {
                                 kind: TokenKind::Incomplete(IncompleteReason::Eol),
-                                span: Span {
-                                    start: first,
-                                    end: self.bytes.pos(),
-                                },
-                            }
+                                span: Span { start: first, end: self.bytes.pos() },
+                            };
                         }
                         _ => {
                             self.bytes.next();
@@ -549,11 +476,8 @@ impl<'a> Lexer<'a> {
                 None => {
                     return Token {
                         kind: TokenKind::Incomplete(IncompleteReason::Eol),
-                        span: Span {
-                            start: first,
-                            end: self.bytes.pos(),
-                        },
-                    }
+                        span: Span { start: first, end: self.bytes.pos() },
+                    };
                 }
             }
         }
@@ -569,11 +493,7 @@ struct Bytes<'a> {
 
 impl<'a> Bytes<'a> {
     fn new(text: &'a [u8], start_offset: BytePos) -> Self {
-        Self {
-            text,
-            bytes: text.iter(),
-            start_offset,
-        }
+        Self { text, bytes: text.iter(), start_offset }
     }
 
     fn pos(&self) -> BytePos {

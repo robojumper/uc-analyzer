@@ -37,17 +37,11 @@ impl Visitor for DanglingElseVisitor {
             if then.from_single_stmt {
                 if let [ref inner_statement] = *then.stmts {
                     if let StatementKind::IfStatement {
-                        or_else:
-                            Some(Block {
-                                from_single_stmt: true,
-                                ..
-                            }),
+                        or_else: Some(Block { from_single_stmt: true, .. }),
                         ..
                     } = &inner_statement.kind
                     {
-                        self.errs.push(DanglingElse {
-                            whole_thing: stmt.span,
-                        })
+                        self.errs.push(DanglingElse { whole_thing: stmt.span })
                     }
                 }
             }
