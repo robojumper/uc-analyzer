@@ -61,6 +61,10 @@ pub struct SpecialItems {
     pub object_id: Option<DefId>,
     /// The DefId of the Core.Interface class
     pub interface_id: Option<DefId>,
+    /// The DefId of the Core.Object.vector struct
+    pub vector_id: Option<DefId>,
+    /// The DefId of the Core.Object.rotator struct
+    pub rotator_id: Option<DefId>,
     /// The DefId of the synthetically generated __DynArrayIterator iterator
     pub dyn_array_iterator: Option<DefId>,
 }
@@ -133,6 +137,12 @@ impl<'defs> LoweringContext<'defs> {
     ) -> DefId {
         self.add_def(|this, file_id| {
             this.resolver.add_class(pack_id, file_name.clone(), file_id).unwrap();
+
+            if &hir.header.name == "Object" {
+                this.special_items.object_id = Some(file_id);
+            } else if &hir.header.name == "Interface" {
+                this.special_items.interface_id = Some(file_id);
+            }
 
             let ty = match hir.header.kind {
                 uc_ast::ClassHeader::Class { .. } => Ty::object_from(file_id),
@@ -236,6 +246,17 @@ impl<'defs> LoweringContext<'defs> {
 
         let object_id = get_class(self, "Core", "Object");
         self.special_items.object_id = Some(object_id);
+
+        self.special_items.vector_id = Some(
+            self.resolver
+                .get_ty(object_id, self.defs, &Identifier::from_str("vector").unwrap())
+                .unwrap(),
+        );
+        self.special_items.rotator_id = Some(
+            self.resolver
+                .get_ty(object_id, self.defs, &Identifier::from_str("rotator").unwrap())
+                .unwrap(),
+        );
 
         let add_class = |this: &mut Self, package, class_name: &str, parent| {
             let ident = Identifier::from_str(class_name).unwrap();
@@ -405,14 +426,7 @@ impl<'defs> LoweringContext<'defs> {
                         .map(|n| self.resolver.get_ty(class_id, self.defs, n).unwrap())
                         .or_else(|| {
                             if &hir.header.name == "Interface" {
-                                self.special_items.interface_id = Some(class_id);
-                                None
-                                /*self.resolver.get_ty_in(
-                                    None,
-                                    self.defs,
-                                    &Identifier::from_str("Core").unwrap(),
-                                    &Identifier::from_str("Object").unwrap(),
-                                )*/
+                                Some(self.special_items.object_id.unwrap())
                             } else {
                                 Some(
                                     self.resolver
@@ -477,7 +491,7 @@ impl<'defs> LoweringContext<'defs> {
                         .resolver
                         .get_ty(scope, self.defs, en)
                         .unwrap_or_else(|e| panic!("failed to find enum {:?}: {:?}", en, e));
-                    Some(self.defs.get_enum(en_def).variants.len() as u16)
+                    Some(self.defs.get_enum(en_def).variants.len() as u16 - 1)
                 }
                 x => panic!("invalid static array length specification: {:?}", x),
             },
@@ -627,32 +641,75 @@ impl<'defs> LoweringContext<'defs> {
     fn lower_enum(&mut self, class_id: DefId, enum_def: &uc_ast::EnumDef) -> DefId {
         self.add_def(|this, enum_id| {
             this.resolver.add_scoped_ty(enum_def.name.clone(), enum_id);
+
+            let mut names = vec![];
+            let mut variants = enum_def
+                .variants
+                .iter()
+                .enumerate()
+                .map(|(idx, &(span, ref name))| {
+                    this.add_def(|this, var_id| {
+                        names.push(name.clone());
+                        this.resolver
+                            .add_enum_value(name.clone(), enum_id, var_id)
+                            .unwrap_or_else(|e| panic!("conflict in {}: {:?}", name, e));
+                        (
+                            DefKind::EnumVariant(EnumVariant {
+                                owning_enum: enum_id,
+                                name: name.clone(),
+                                idx: idx.try_into().expect("too many variants"),
+                            }),
+                            Some(span),
+                        )
+                    })
+                })
+                .collect::<Vec<_>>();
+            let prefix = if names.is_empty() {
+                ""
+            } else {
+                let first = names[0].as_ref().as_bytes();
+                let mut len = first.len();
+                for str in &names[1..] {
+                    len = std::cmp::min(
+                        len,
+                        str.as_ref()
+                            .as_bytes()
+                            .iter()
+                            .zip(first)
+                            .take_while(|&(a, b)| a.eq_ignore_ascii_case(b))
+                            .count(),
+                    );
+                }
+                &names[0].as_ref()[0..len]
+            };
+            let stripped_prefix =
+                if let Some(idx) = prefix.rfind('_') { &prefix[0..idx] } else { prefix };
+            let final_prefix =
+                if stripped_prefix.is_empty() { enum_def.name.as_ref() } else { stripped_prefix };
+
+            let new_name = Identifier::from_str(&(String::from(final_prefix) + "_MAX")).unwrap();
+            if !names.contains(&new_name) {
+                let max_id = this.add_def(|this, var_id| {
+                    this.resolver
+                        .add_enum_value(new_name.clone(), enum_id, var_id)
+                        .unwrap_or_else(|e| panic!("conflict in {}: {:?}", new_name, e));
+                    (
+                        DefKind::EnumVariant(EnumVariant {
+                            owning_enum: enum_id,
+                            name: new_name.clone(),
+                            idx: variants.len().try_into().expect("too many variants"),
+                        }),
+                        Some(enum_def.span),
+                    )
+                });
+                variants.push(max_id);
+            }
             (
                 DefKind::Enum(Enum {
                     owning_class: class_id,
                     self_ty: Ty::enum_from(enum_id),
                     name: enum_def.name.clone(),
-                    variants: enum_def
-                        .variants
-                        .iter()
-                        .enumerate()
-                        .map(|(idx, &(span, ref name))| {
-                            this.add_def(|this, var_id| {
-                                this.resolver
-                                    .add_enum_value(name.clone(), enum_id, var_id)
-                                    .unwrap_or_else(|e| panic!("conflict in {}: {:?}", name, e));
-                                (
-                                    DefKind::EnumVariant(EnumVariant {
-                                        owning_enum: enum_id,
-                                        name: name.clone(),
-                                        idx: idx.try_into().expect("too many variants"),
-                                    }),
-                                    Some(span),
-                                )
-                            })
-                        })
-                        .collect::<Vec<_>>()
-                        .into_boxed_slice(),
+                    variants: variants.into_boxed_slice(),
                 }),
                 Some(enum_def.span),
             )
@@ -883,6 +940,7 @@ impl<'defs> LoweringContext<'defs> {
     ) -> Vec<BodyError> {
         let mut body_count = 0u32;
         let mut errs = vec![];
+        dbg!(&self.special_items);
         for (&did, &def) in funcs {
             if let Some(body) = &def.body {
                 match self.lower_body(did, &body.statements) {

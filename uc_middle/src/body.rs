@@ -215,6 +215,7 @@ pub enum Literal {
     Byte(u8),
     Object(DefId),
     Class(DefId),
+    Struct(DefId),
 }
 
 #[derive(Copy, Clone, Debug)]

@@ -718,10 +718,25 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     });
                 }
                 TyConversionCost::Disallowed => {
-                    return Err(BodyError {
-                        kind: BodyErrorKind::InvalidCast { to: to_type, from: expr_ty },
-                        span: inner_expr.span,
-                    });
+                    if expr_ty.is_struct() && to_type.is_struct() {
+                        if expr_ty.get_def() == self.ctx.special_items.vector_id
+                            && to_type.get_def() == self.ctx.special_items.rotator_id
+                            || expr_ty.get_def() == self.ctx.special_items.rotator_id
+                                && to_type.get_def() == self.ctx.special_items.vector_id
+                        {
+                            // vector->rotator or rotator->vector: ok
+                        } else {
+                            return Err(BodyError {
+                                kind: BodyErrorKind::InvalidCast { to: to_type, from: expr_ty },
+                                span: inner_expr.span,
+                            });
+                        }
+                    } else {
+                        return Err(BodyError {
+                            kind: BodyErrorKind::InvalidCast { to: to_type, from: expr_ty },
+                            span: inner_expr.span,
+                        });
+                    }
                 }
                 TyConversionCost::Expansion
                 | TyConversionCost::IntToFloat
@@ -1126,13 +1141,73 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             return Ok(None);
         }
 
-        if name == "ArrayCount" && args.len() == 1 {
+        if name == "ArrayCount" {
+            assert_eq!(args.len(), 1, "ArrayCount");
             // TODO: Cleanup const
             let e = self.lower_expr(args[0].as_ref().unwrap(), TypeExpectation::None)?;
             let ty = self.body.get_expr_ty(e).expect_ty("ArrayCount");
             Ok(Some((
                 ExprKind::Value(ValueExprKind::Lit(Literal::Int(ty.get_array_count() as i32))),
                 Ty::INT,
+            )))
+        } else if name == "nameof" {
+            assert_eq!(args.len(), 1, "nameof");
+            // TODO: Cleanup expr
+            let expr = self.lower_expr(args[0].as_ref().unwrap(), TypeExpectation::None)?;
+            let _ = match &self.body.get_expr(expr).kind {
+                ExprKind::Value(ValueExprKind::DelegateCreation(_, d)) => {
+                    &self.ctx.defs.get_func(*d).name
+                }
+                ExprKind::Place(PlaceExprKind::Field(_, d)) => &self.ctx.defs.get_var(*d).name,
+                _ => {
+                    return Err(BodyError {
+                        kind: BodyErrorKind::NotYetImplemented("bad nameof target"),
+                        span,
+                    });
+                }
+            };
+            Ok(Some((ExprKind::Value(ValueExprKind::Lit(Literal::Name)), Ty::NAME)))
+        } else if name == "vect" {
+            assert_eq!(args.len(), 3, "vect");
+            let arg_exprs = args
+                .iter()
+                .map(|a| self.lower_expr(a.as_ref().unwrap(), TypeExpectation::HintTy(Ty::FLOAT)))
+                .collect::<Result<Vec<_>, _>>()?;
+            arg_exprs.iter().try_for_each(|&expr| {
+                match &self.body.get_expr(expr).kind {
+                    ExprKind::Value(ValueExprKind::Lit(_)) => Ok(()),
+                    ExprKind::Value(ValueExprKind::OpCall(_, _, _)) => Ok(()), // TODO
+                    _ => Err(BodyError {
+                        kind: BodyErrorKind::NotYetImplemented("vect without literal?"),
+                        span,
+                    }),
+                }
+            })?;
+            let vec_id = self.ctx.special_items.vector_id.unwrap();
+            Ok(Some((
+                ExprKind::Value(ValueExprKind::Lit(Literal::Struct(vec_id))),
+                Ty::struct_from(vec_id),
+            )))
+        } else if name == "rot" {
+            assert_eq!(args.len(), 3, "rot");
+            let arg_exprs = args
+                .iter()
+                .map(|a| self.lower_expr(a.as_ref().unwrap(), TypeExpectation::HintTy(Ty::FLOAT)))
+                .collect::<Result<Vec<_>, _>>()?;
+            arg_exprs.iter().try_for_each(|&expr| {
+                match &self.body.get_expr(expr).kind {
+                    ExprKind::Value(ValueExprKind::Lit(_)) => Ok(()),
+                    ExprKind::Value(ValueExprKind::OpCall(_, _, _)) => Ok(()), // TODO
+                    _ => Err(BodyError {
+                        kind: BodyErrorKind::NotYetImplemented("rot without literal?"),
+                        span,
+                    }),
+                }
+            })?;
+            let vec_id = self.ctx.special_items.rotator_id.unwrap();
+            Ok(Some((
+                ExprKind::Value(ValueExprKind::Lit(Literal::Struct(vec_id))),
+                Ty::struct_from(vec_id),
             )))
         } else {
             Ok(None)
@@ -1316,10 +1391,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 } else if ty.is_dyn_array() {
                     Ok(ContextResolution::Array(expr))
                 } else {
-                    return Err(BodyError {
-                        kind: BodyErrorKind::NonObjectType { found: ty },
-                        span,
-                    });
+                    Err(BodyError { kind: BodyErrorKind::NonObjectType { found: ty }, span })
                 }
             }
             ast::Context::Bare => {
@@ -1373,14 +1445,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             _ => unreachable!(),
                         }
                     }
-                    Err(_) => {
-                        return Err(BodyError {
-                            kind: BodyErrorKind::NotYetImplemented(
-                                "unknown freestanding function call",
-                            ),
-                            span,
-                        });
-                    }
+                    Err(_) => Err(BodyError {
+                        kind: BodyErrorKind::NotYetImplemented("unknown freestanding symbol"),
+                        span,
+                    }),
                 }
             }
             ast::Context::Const(_) => unreachable!(),
@@ -1448,16 +1516,21 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                 DefKind::Const(_) => {
                                     match recv {
                                         Receiver::Expr(e) => {
-                                            let ty = self.body.get_expr_ty(e).expect_ty("const access");
+                                            let ty =
+                                                self.body.get_expr_ty(e).expect_ty("const access");
                                             if ty.is_object() {
                                                 // TODO: Delete compiled code
-                                                let (lit, ty) = self.resolve_const(item, ty_expec)?;
-                                                (ExprKind::Value(ValueExprKind::Lit(lit)), ExprTy::Ty(ty))
+                                                let (lit, ty) =
+                                                    self.resolve_const(item, ty_expec)?;
+                                                (
+                                                    ExprKind::Value(ValueExprKind::Lit(lit)),
+                                                    ExprTy::Ty(ty),
+                                                )
                                             } else {
                                                 todo!("downgrade?")
                                             }
-                                        },
-                                        _ => todo!("error?")
+                                        }
+                                        _ => todo!("error?"),
                                     }
                                 }
                                 DefKind::Function(func) => {
