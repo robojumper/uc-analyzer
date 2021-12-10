@@ -58,6 +58,9 @@ implementation. The different behavior is documented.
   function returning a class, or be a local property followed by the object
   template for the `new` operator.
   * aaaaaaaahh
+* `A op B ? C : D` is `A op (B ? C : D)` if `B` is a `bool`, otherwise it's
+  `(A op B) ? C : D`.
+  * we always parse `(A op B) ? C : D` and usually error out with a type error.
 
 ## TODO Lints
 
@@ -65,3 +68,4 @@ implementation. The different behavior is documented.
 * Never assigned out variable
 * Dead assignment
 * Access to const through member variable syntax
+* Ternary operator we interpret differently from UCC
