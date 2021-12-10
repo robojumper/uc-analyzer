@@ -311,6 +311,23 @@ impl<'defs> LoweringContext<'defs> {
             })
         };
 
+        let add_var = |this: &mut Self, class: DefId, var_name: &str, ty: Ty| {
+            let name = Identifier::from_str(var_name).unwrap();
+            this.add_def(|this, var_id| {
+                this.resolver.add_scoped_item(class, name.clone(), var_id).unwrap();
+                (
+                    DefKind::Var(Var {
+                        name,
+                        owner: class,
+                        flags: VarFlags::empty(),
+                        ty: Some(ty),
+                    }),
+                    None,
+                )
+            })
+        };
+
+        add_class(self, core, "Class", object_id);
         add_class(self, core, "Enum", object_id);
         add_class(self, core, "Function", object_id);
         add_class(self, core, "Package", object_id);
@@ -318,7 +335,28 @@ impl<'defs> LoweringContext<'defs> {
         add_class(self, core, "Property", object_id);
 
         let static_mesh_id = add_class(self, engine, "StaticMesh", object_id);
-        add_class(self, engine, "FracturedStaticMesh", static_mesh_id);
+        let frac_static_mesh_id = add_class(self, engine, "FracturedStaticMesh", static_mesh_id);
+        add_var(self, frac_static_mesh_id, "bSpawnPhysicsChunks", Ty::BOOL);
+        add_var(self, frac_static_mesh_id, "bFixIsolatedChunks", Ty::BOOL);
+        add_var(self, frac_static_mesh_id, "bAlwaysBreakOffIsolatedIslands", Ty::BOOL);
+        add_var(self, frac_static_mesh_id, "UseSimpleRigidBodyCollision", Ty::BOOL);
+        add_var(self, frac_static_mesh_id, "ChunkLinHorizontalScale", Ty::FLOAT);
+        add_var(self, frac_static_mesh_id, "OutsideMaterialIndex", Ty::INT);
+        add_var(self, frac_static_mesh_id, "ChanceOfPhysicsChunk", Ty::FLOAT);
+        add_var(self, frac_static_mesh_id, "ExplosionPhysicsChunkScaleMin", Ty::FLOAT);
+        add_var(self, frac_static_mesh_id, "ExplosionPhysicsChunkScaleMax", Ty::FLOAT);
+        add_var(self, frac_static_mesh_id, "NormalPhysicsChunkScaleMin", Ty::FLOAT);
+        add_var(self, frac_static_mesh_id, "NormalPhysicsChunkScaleMax", Ty::FLOAT);
+        add_var(self, frac_static_mesh_id, "ChunkLinVel", Ty::FLOAT);
+        add_var(self, frac_static_mesh_id, "ChunkAngVel", Ty::FLOAT);
+        add_var(self, frac_static_mesh_id, "FragmentDestroyEffectScale", Ty::FLOAT);
+
+        let mat_intf = get_class(self, "Engine", "MaterialInterface");
+        add_var(self, frac_static_mesh_id, "LoseChunkOutsideMaterial", Ty::object_from(mat_intf));
+
+        let part_sys = get_class(self, "Engine", "ParticleSystem");
+        let frag_destr_fx_ty = Ty::dyn_array_from(Ty::object_from(part_sys));
+        add_var(self, frac_static_mesh_id, "FragmentDestroyEffects", frag_destr_fx_ty);
 
         let level_base_id = add_class(self, engine, "LevelBase", object_id);
         add_class(self, engine, "Level", level_base_id);
@@ -336,33 +374,8 @@ impl<'defs> LoweringContext<'defs> {
         let player_id = get_class(self, "Engine", "Player");
         let net_conn_id = add_class(self, engine, "NetConnection", player_id);
         let child_conn_id = add_class(self, engine, "ChildConnection", net_conn_id);
-        self.add_def(|this, var_id| {
-            let name = Identifier::from_str("Children").unwrap();
-            this.resolver.add_scoped_item(net_conn_id, name.clone(), var_id).unwrap();
-            (
-                DefKind::Var(Var {
-                    name,
-                    owner: net_conn_id,
-                    flags: VarFlags::empty(),
-                    ty: Some(Ty::dyn_array_from(Ty::object_from(child_conn_id))),
-                }),
-                None,
-            )
-        });
-
-        self.add_def(|this, var_id| {
-            let name = Identifier::from_str("Parent").unwrap();
-            this.resolver.add_scoped_item(child_conn_id, name.clone(), var_id).unwrap();
-            (
-                DefKind::Var(Var {
-                    name,
-                    owner: child_conn_id,
-                    flags: VarFlags::empty(),
-                    ty: Some(Ty::object_from(net_conn_id)),
-                }),
-                None,
-            )
-        });
+        add_var(self, net_conn_id, "Children", Ty::dyn_array_from(Ty::object_from(child_conn_id)));
+        add_var(self, child_conn_id, "Parent", Ty::object_from(net_conn_id));
 
         self.add_def(|this, struct_id| {
             let map = Identifier::from_str("Map").unwrap();
