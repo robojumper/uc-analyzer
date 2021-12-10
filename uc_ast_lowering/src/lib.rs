@@ -57,16 +57,22 @@ struct HirBackrefs<'hir> {
 
 #[derive(Debug, Default)]
 pub struct SpecialItems {
-    /// The DefId of the Core.Object class
+    /// The Core.Object class
     pub object_id: Option<DefId>,
-    /// The DefId of the Core.Interface class
+    /// The Core.Interface class
     pub interface_id: Option<DefId>,
-    /// The DefId of the Core.Object.vector struct
+    /// The Core.Object.vector struct
     pub vector_id: Option<DefId>,
-    /// The DefId of the Core.Object.rotator struct
+    /// The Core.Object.rotator struct
     pub rotator_id: Option<DefId>,
-    /// The DefId of the synthetically generated __DynArrayIterator iterator
+    /// The synthetically generated __DynArrayIterator iterator
     pub dyn_array_iterator: Option<DefId>,
+    /// The Core.Object:Class variable, which is special-cased to
+    /// be of type class<Self>.
+    pub class_var: Option<DefId>,
+    /// The Core.Object:Outer variable, which is special-cased to
+    /// be of the outer type if the class is `within`.
+    pub outer_var: Option<DefId>,
 }
 
 #[derive(Debug)]
@@ -255,6 +261,29 @@ impl<'defs> LoweringContext<'defs> {
         self.special_items.rotator_id = Some(
             self.resolver
                 .get_ty(object_id, self.defs, &Identifier::from_str("rotator").unwrap())
+                .unwrap(),
+        );
+
+        self.special_items.class_var = Some(
+            self.resolver
+                .get_scoped_item(
+                    object_id,
+                    self.defs,
+                    ScopeWalkKind::Access,
+                    &Identifier::from_str("Class").unwrap(),
+                    |d| matches!(self.defs.get_def(d).kind, DefKind::Var(_)),
+                )
+                .unwrap(),
+        );
+        self.special_items.outer_var = Some(
+            self.resolver
+                .get_scoped_item(
+                    object_id,
+                    self.defs,
+                    ScopeWalkKind::Access,
+                    &Identifier::from_str("Outer").unwrap(),
+                    |d| matches!(self.defs.get_def(d).kind, DefKind::Var(_)),
+                )
                 .unwrap(),
         );
 

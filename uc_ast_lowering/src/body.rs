@@ -1508,9 +1508,36 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                         rhs,
                                         recv
                                     );
+                                    let ty = if item == self.ctx.special_items.class_var.unwrap() {
+                                        match recv {
+                                            Receiver::StaticSelf => Ty::class_from(self.class_did),
+                                            Receiver::Expr(e) => {
+                                                let mut ty = self
+                                                    .body
+                                                    .get_expr_ty(e)
+                                                    .expect_ty("class specialization");
+                                                if ty.is_class() {
+                                                    ty = ty.instanciate_class()
+                                                }
+                                                if ty.is_object() {
+                                                    Ty::class_from(ty.get_def().unwrap())
+                                                } else {
+                                                    return Err(BodyError {
+                                                        kind: BodyErrorKind::NonObjectType {
+                                                            found: ty,
+                                                        },
+                                                        span: expr.span,
+                                                    });
+                                                }
+                                            }
+                                            _ => unreachable!(),
+                                        }
+                                    } else {
+                                        var.ty.unwrap()
+                                    };
                                     (
                                         ExprKind::Place(PlaceExprKind::Field(recv, item)),
-                                        ExprTy::Ty(var.ty.unwrap()),
+                                        ExprTy::Ty(ty),
                                     )
                                 }
                                 DefKind::Const(_) => {
