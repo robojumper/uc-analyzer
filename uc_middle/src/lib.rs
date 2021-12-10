@@ -165,8 +165,10 @@ impl Defs {
                 cb(def.id)?;
                 match c.kind.as_ref().unwrap() {
                     ClassKind::Class { extends, within, .. } => {
-                        if let Some(within) = within {
-                            self.walk_scopes_inner(*within, kind, cb)?;
+                        if matches!(kind, ScopeWalkKind::Definitions) {
+                            if let Some(within) = within {
+                                self.walk_scopes_inner(*within, kind, cb)?;
+                            }
                         }
                         if let Some(extends) = extends {
                             self.walk_scopes_inner(*extends, kind, cb)?;
