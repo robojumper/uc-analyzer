@@ -1446,12 +1446,19 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                     )
                                 }
                                 DefKind::Const(_) => {
-                                    return Err(BodyError {
-                                        kind: BodyErrorKind::NotYetImplemented(
-                                            "const access via var syntax",
-                                        ),
-                                        span: expr.span,
-                                    });
+                                    match recv {
+                                        Receiver::Expr(e) => {
+                                            let ty = self.body.get_expr_ty(e).expect_ty("const access");
+                                            if ty.is_object() {
+                                                // TODO: Delete compiled code
+                                                let (lit, ty) = self.resolve_const(item, ty_expec)?;
+                                                (ExprKind::Value(ValueExprKind::Lit(lit)), ExprTy::Ty(ty))
+                                            } else {
+                                                todo!("downgrade?")
+                                            }
+                                        },
+                                        _ => todo!("error?")
+                                    }
                                 }
                                 DefKind::Function(func) => {
                                     assert!(
