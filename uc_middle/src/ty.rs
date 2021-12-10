@@ -312,6 +312,11 @@ impl Ty {
     }
 
     #[inline]
+    pub fn is_bool(&self) -> bool {
+        self.is_undecorated() && matches!(self.base_ctor, BaseTyCtor::Bool)
+    }
+
+    #[inline]
     pub fn is_float(&self) -> bool {
         self.is_undecorated() && matches!(self.base_ctor, BaseTyCtor::Float)
     }
@@ -319,6 +324,11 @@ impl Ty {
     #[inline]
     pub fn is_byte(&self) -> bool {
         self.is_undecorated() && matches!(self.base_ctor, BaseTyCtor::Byte)
+    }
+
+    #[inline]
+    pub fn is_string(&self) -> bool {
+        self.is_undecorated() && matches!(self.base_ctor, BaseTyCtor::String)
     }
 
     #[inline]

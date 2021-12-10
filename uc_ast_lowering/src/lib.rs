@@ -49,7 +49,6 @@ struct HirBackrefs<'hir> {
     structs: HashMap<DefId, &'hir uc_ast::StructDef>,
     enums: HashMap<DefId, &'hir uc_ast::EnumDef>,
     vars: HashMap<DefId, (&'hir uc_ast::VarDef, usize)>,
-    consts: HashMap<DefId, &'hir uc_ast::ConstDef>,
     funcs: HashMap<DefId, &'hir uc_ast::FuncDef>,
     ops: HashMap<DefId, &'hir uc_ast::FuncDef>,
     states: HashMap<DefId, &'hir uc_ast::StateDef>,
@@ -175,7 +174,7 @@ impl<'defs> LoweringContext<'defs> {
             let const_ids = hir
                 .consts
                 .iter()
-                .map(|const_def| self.lower_const(class_id, const_def, &mut backrefs.consts))
+                .map(|const_def| self.lower_const(class_id, const_def))
                 .collect::<Box<[_]>>();
             self.defs.get_class_mut(class_id).items.extend_from_slice(&const_ids);
 
@@ -346,6 +345,20 @@ impl<'defs> LoweringContext<'defs> {
                     owner: net_conn_id,
                     flags: VarFlags::empty(),
                     ty: Some(Ty::dyn_array_from(Ty::object_from(child_conn_id))),
+                }),
+                None,
+            )
+        });
+
+        self.add_def(|this, var_id| {
+            let name = Identifier::from_str("Parent").unwrap();
+            this.resolver.add_scoped_item(child_conn_id, name.clone(), var_id).unwrap();
+            (
+                DefKind::Var(Var {
+                    name,
+                    owner: child_conn_id,
+                    flags: VarFlags::empty(),
+                    ty: Some(Ty::object_from(net_conn_id)),
                 }),
                 None,
             )
@@ -818,15 +831,9 @@ impl<'defs> LoweringContext<'defs> {
             .collect()
     }
 
-    fn lower_const<'hir>(
-        &mut self,
-        owner_id: DefId,
-        const_def: &'hir uc_ast::ConstDef,
-        consts: &mut HashMap<DefId, &'hir uc_ast::ConstDef>,
-    ) -> DefId {
+    fn lower_const(&mut self, owner_id: DefId, const_def: &uc_ast::ConstDef) -> DefId {
         self.add_def(|this, const_id| {
             this.resolver.add_scoped_item(owner_id, const_def.name.clone(), const_id).unwrap();
-            consts.insert(const_id, const_def);
             let val = match &const_def.val {
                 uc_ast::ConstVal::Literal(l) => match l {
                     uc_ast::Literal::None => ConstVal::Literal(Literal::None),
@@ -986,6 +993,15 @@ impl<'defs> LoweringContext<'defs> {
         let mut body_count = 0u32;
         let mut errs = vec![];
         dbg!(&self.special_items);
+
+        for (&did, &def) in funcs {
+            if let Some(body) = &def.body {
+                body.consts.iter().for_each(|const_def| {
+                    self.lower_const(did, const_def);
+                });
+            }
+        }
+
         for (&did, &def) in funcs {
             if let Some(body) = &def.body {
                 match self.lower_body(did, &body.statements) {

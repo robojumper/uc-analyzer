@@ -20,6 +20,7 @@ struct FuncLowerer<'hir, 'a: 'hir> {
     ctx: &'a LoweringContext<'hir>,
     body: Body,
     body_scope: DefId,
+    unqualified_super_scope: Option<DefId>,
     ret_ty: Option<Ty>,
     class_did: DefId,
     class_ty: Ty,
@@ -135,6 +136,11 @@ impl<'hir> LoweringContext<'hir> {
             _ => unreachable!(),
         };
 
+        let unqualified_super_scope = match self.defs.get_class(class_did).kind.as_ref().unwrap() {
+            ClassKind::Class { extends, .. } => *extends,
+            ClassKind::Interface { extends } => *extends,
+        };
+
         let lowerer = FuncLowerer {
             ctx: self,
             body: Body::new(),
@@ -142,6 +148,7 @@ impl<'hir> LoweringContext<'hir> {
             ret_ty,
             class_ty,
             class_did,
+            unqualified_super_scope,
             self_ty,
         };
         lowerer.lower_body(statements)
@@ -681,7 +688,32 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 _ => panic!("bad removeitem call"),
             }
         } else if name == "Sort" {
-            Err(BodyError { kind: BodyErrorKind::NotYetImplemented("dyn array Sort"), span })
+            match args {
+                [Some(item)] => {
+                    let delegate = self.lower_expr(item, TypeExpectation::None)?;
+                    let ty = self.body.get_expr_ty(delegate).expect_ty("comparison delegate");
+                    assert!(ty.is_delegate());
+                    let func = self.ctx.defs.get_func(ty.get_def().unwrap());
+                    assert!(func.sig.ret_ty.unwrap().is_int());
+                    assert_eq!(func.sig.args.len(), 2);
+                    assert!(
+                        self.ty_match(self.ctx.defs.get_arg(func.sig.args[0]).ty, inner_ty)
+                            .is_some()
+                    );
+                    assert!(
+                        self.ty_match(self.ctx.defs.get_arg(func.sig.args[1]).ty, inner_ty)
+                            .is_some()
+                    );
+                    Ok((
+                        ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
+                            receiver,
+                            DynArrayOpKind::Sort(delegate),
+                        )),
+                        ExprTy::Ty(Ty::INT),
+                    ))
+                }
+                _ => panic!("bad sort call"),
+            }
         } else if name == "RandomizeOrder" {
             assert!(args.is_empty());
             Ok((
@@ -718,25 +750,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     });
                 }
                 TyConversionCost::Disallowed => {
-                    if expr_ty.is_struct() && to_type.is_struct() {
-                        if expr_ty.get_def() == self.ctx.special_items.vector_id
-                            && to_type.get_def() == self.ctx.special_items.rotator_id
-                            || expr_ty.get_def() == self.ctx.special_items.rotator_id
-                                && to_type.get_def() == self.ctx.special_items.vector_id
-                        {
-                            // vector->rotator or rotator->vector: ok
-                        } else {
-                            return Err(BodyError {
-                                kind: BodyErrorKind::InvalidCast { to: to_type, from: expr_ty },
-                                span: inner_expr.span,
-                            });
-                        }
-                    } else {
-                        return Err(BodyError {
-                            kind: BodyErrorKind::InvalidCast { to: to_type, from: expr_ty },
-                            span: inner_expr.span,
-                        });
-                    }
+                    return Err(BodyError {
+                        kind: BodyErrorKind::InvalidCast { to: to_type, from: expr_ty },
+                        span: inner_expr.span,
+                    });
                 }
                 TyConversionCost::Expansion
                 | TyConversionCost::IntToFloat
@@ -838,7 +855,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         );
         candidate_ops.sort_unstable();
         candidate_ops.dedup();
-        // Preoperators never have argument coercion going on, so simply collect the best op
+        // Preoperators/postoperators never have argument coercion going on, so simply collect the best op
         let mut best = candidate_ops
             .iter()
             .filter(|&op| filter(*op))
@@ -906,8 +923,13 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 let op_def = self.ctx.defs.get_op(op);
                 let l_arg = self.ctx.defs.get_arg(op_def.sig.args[0]);
                 let r_arg = self.ctx.defs.get_arg(op_def.sig.args[1]);
-                let l_cc =
+                let mut l_cc =
                     self.conversion_cost(l_arg.ty, l_ty, l_arg.flags.contains(ArgFlags::COERCE));
+                if l_arg.flags.intersects(ArgFlags::OUT | ArgFlags::REF)
+                    && !matches!(l_cc, TyConversionCost::Same)
+                {
+                    l_cc = TyConversionCost::Disallowed;
+                }
                 let r_cc =
                     self.conversion_cost(r_arg.ty, r_ty, r_arg.flags.contains(ArgFlags::COERCE));
                 let cc = std::cmp::max(l_cc, r_cc);
@@ -1264,19 +1286,18 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         (Receiver::Super(s_class), func)
                     }
                     None => {
-                        let super_class =
-                            match self.ctx.defs.get_class(self.class_did).kind.as_ref().unwrap() {
-                                ClassKind::Class { extends, .. } => extends.unwrap(),
-                                ClassKind::Interface { .. } => unreachable!(),
-                            };
                         let (func, _) = self
                             .ctx
-                            .resolve_func(super_class, name, ScopeWalkKind::Access)
+                            .resolve_func(
+                                self.unqualified_super_scope.unwrap(),
+                                name,
+                                ScopeWalkKind::Access,
+                            )
                             .ok_or_else(|| BodyError {
                                 kind: BodyErrorKind::FuncNotFound { name: name.clone() },
                                 span,
                             })?;
-                        (Receiver::Super(super_class), func)
+                        (Receiver::Super(self.unqualified_super_scope.unwrap()), func)
                     }
                 };
 
@@ -1906,13 +1927,31 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 Ok(self.body.add_expr(Expr { ty, kind, span: Some(expr.span) }))
             } else {
                 match ty::classify_conversion(got_non_void, expected_ty) {
-                    ty::ConversionClassification::Forbidden => Err(BodyError {
-                        kind: BodyErrorKind::TyMismatch {
-                            expected: expected_ty,
-                            found: got_non_void,
-                        },
-                        span: expr.span,
-                    }),
+                    ty::ConversionClassification::Forbidden => {
+                        if matches!(ty_expec, TypeExpectation::CoerceToTy(_))
+                            && self.allow_special_cast(expected_ty, got_non_void)
+                        {
+                            let inner_expr =
+                                self.body.add_expr(Expr { ty, kind, span: Some(expr.span) });
+                            Ok(self.body.add_expr(Expr {
+                                ty: ExprTy::Ty(expected_ty),
+                                kind: ExprKind::Value(ValueExprKind::CastExpr(
+                                    expected_ty,
+                                    inner_expr,
+                                    false,
+                                )),
+                                span: Some(expr.span),
+                            }))
+                        } else {
+                            Err(BodyError {
+                                kind: BodyErrorKind::InvalidCast {
+                                    to: expected_ty,
+                                    from: got_non_void,
+                                },
+                                span: expr.span,
+                            })
+                        }
+                    }
                     ty::ConversionClassification::Allowed { auto, truncation } => {
                         if auto || matches!(ty_expec, TypeExpectation::CoerceToTy(_)) {
                             let inner_expr =
@@ -1941,6 +1980,39 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         } else {
             Ok(self.body.add_expr(Expr { ty, kind, span: Some(expr.span) }))
         }
+    }
+
+    fn allow_special_cast(&self, to: Ty, from: Ty) -> bool {
+        enum SpecCastTy {
+            String,
+            Vector,
+            Rotator,
+            None,
+        }
+
+        let get_special = |ty: Ty| {
+            if ty.is_string() {
+                SpecCastTy::String
+            } else if ty.is_struct() {
+                if ty.get_def() == self.ctx.special_items.vector_id {
+                    SpecCastTy::Vector
+                } else if ty.get_def() == self.ctx.special_items.rotator_id {
+                    SpecCastTy::Rotator
+                } else {
+                    SpecCastTy::None
+                }
+            } else {
+                SpecCastTy::None
+            }
+        };
+
+        matches!(
+            (get_special(to), get_special(from)),
+            (SpecCastTy::String, SpecCastTy::Vector | SpecCastTy::Rotator)
+                | (SpecCastTy::Vector | SpecCastTy::Rotator, SpecCastTy::String)
+                | (SpecCastTy::Vector, SpecCastTy::Rotator)
+                | (SpecCastTy::Rotator, SpecCastTy::Vector)
+        )
     }
 
     /// For the ternary operator, determine the resulting type
@@ -2044,7 +2116,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         let val = self.ctx.defs.get_const(konst);
         match &val.val {
             ConstVal::Literal(l) => match l {
-                Literal::Bool(_) => Ok((l.clone(), Ty::FLOAT)),
+                Literal::Bool(_) => Ok((l.clone(), Ty::BOOL)),
                 Literal::Int(i) => Ok((l.clone(), self.adjust_int(*i, ty_expec).1)),
                 Literal::Float(_) => Ok((l.clone(), Ty::FLOAT)),
                 Literal::Name => Ok((l.clone(), Ty::NAME)),
@@ -2079,7 +2151,13 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         }
 
         match ty::classify_conversion(src, dest) {
-            ty::ConversionClassification::Forbidden => TyConversionCost::Disallowed,
+            ty::ConversionClassification::Forbidden => {
+                if coerce && self.allow_special_cast(dest, src) {
+                    TyConversionCost::Truncation
+                } else {
+                    TyConversionCost::Disallowed
+                }
+            }
             ty::ConversionClassification::Allowed { auto, truncation } => {
                 if !auto && !coerce {
                     TyConversionCost::Disallowed

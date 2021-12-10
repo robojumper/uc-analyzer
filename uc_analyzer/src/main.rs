@@ -3,8 +3,8 @@ use std::str::FromStr;
 use std::{fs, path::PathBuf};
 
 use uc_analysis::ast::{
-    ambiguous_new_template, dangling_else, misleading_indentation, missing_break, never_loop,
-    uneffectful_stmt,
+    ambiguous_new_template, ambiguous_ternary_op, dangling_else, misleading_indentation,
+    missing_break, never_loop, uneffectful_stmt,
 };
 use uc_analysis::middle::{bad_enum_values, bad_type_name};
 use uc_ast::{pretty, Hir};
@@ -124,6 +124,7 @@ fn main() {
             let mut errs = vec![];
             /*
             errs.extend(ambiguous_new_template::run(&hir, &sources));
+            errs.extend(ambiguous_ternary_op::run(&hir, &sources));
             errs.extend(dangling_else::run(&hir, &sources));
             errs.extend(misleading_indentation::run(&hir, &sources));
             errs.extend(missing_break::run(&hir, &sources));

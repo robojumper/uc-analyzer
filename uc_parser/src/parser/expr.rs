@@ -445,6 +445,9 @@ fn infix_binding_power(op: OpLike) -> Option<(u8, u8)> {
         Op::Mul => (30, 31),
         Op::Div => (30, 31),
 
+        Op::VecCross => (30, 31),
+        Op::VecDot => (30, 31),
+
         Op::Mod => (28, 29),
 
         Op::Add => (26, 27),
@@ -471,9 +474,6 @@ fn infix_binding_power(op: OpLike) -> Option<(u8, u8)> {
 
         Op::AndAnd => (16, 17),
         Op::PowPow => (16, 17),
-
-        Op::VecCross => (16, 17),
-        Op::VecDot => (16, 17),
 
         Op::OrOr => (14, 15),
 
