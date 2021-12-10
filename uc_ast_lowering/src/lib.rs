@@ -233,6 +233,8 @@ impl<'defs> LoweringContext<'defs> {
         // declared in UnrealScript. This list is incomplete and may require
         // further additions.
 
+        // TODO: Add these as children for pretty-printing!!
+
         let get_package = |this: &mut Self, package: &str| {
             let name = Identifier::from_str(package).unwrap();
             this.resolver
@@ -310,6 +312,7 @@ impl<'defs> LoweringContext<'defs> {
             })
         };
 
+        add_class(self, core, "Enum", object_id);
         add_class(self, core, "Function", object_id);
         add_class(self, core, "Package", object_id);
         add_class(self, core, "Polys", object_id);
@@ -333,7 +336,20 @@ impl<'defs> LoweringContext<'defs> {
 
         let player_id = get_class(self, "Engine", "Player");
         let net_conn_id = add_class(self, engine, "NetConnection", player_id);
-        add_class(self, engine, "ChildConnection", net_conn_id);
+        let child_conn_id = add_class(self, engine, "ChildConnection", net_conn_id);
+        self.add_def(|this, var_id| {
+            let name = Identifier::from_str("Children").unwrap();
+            this.resolver.add_scoped_item(net_conn_id, name.clone(), var_id).unwrap();
+            (
+                DefKind::Var(Var {
+                    name,
+                    owner: net_conn_id,
+                    flags: VarFlags::empty(),
+                    ty: Some(Ty::dyn_array_from(Ty::object_from(child_conn_id))),
+                }),
+                None,
+            )
+        });
 
         self.add_def(|this, struct_id| {
             let map = Identifier::from_str("Map").unwrap();

@@ -1395,63 +1395,119 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 }
             }
             ast::Context::Bare => {
-                match self.ctx.resolver.get_scoped_item(
-                    self.body_scope,
-                    self.ctx.defs,
-                    ScopeWalkKind::Access,
-                    name,
-                    |d| {
-                        matches!(
-                            self.ctx.defs.get_def(d).kind,
-                            DefKind::Function(_) | DefKind::Var(_)
-                        )
-                    },
-                ) {
-                    Ok(i) => {
-                        let def = self.ctx.defs.get_def(i);
-                        match &def.kind {
-                            DefKind::Var(_) => {
-                                let s = self.body.add_expr(Expr {
-                                    ty: ExprTy::Ty(self.self_ty.ok_or(BodyError {
-                                        kind: BodyErrorKind::InvalidSelfAccess,
-                                        span,
-                                    })?),
-                                    kind: ExprKind::Place(PlaceExprKind::SelfAccess),
-                                    span: None,
-                                });
-                                Ok(ContextResolution::Item(Receiver::Expr(s), i))
-                            }
-                            DefKind::Function(f) => {
-                                // access to bare function
-                                // TODO: This disallows binding non-static functions to the static self in delegate
-                                // creation, which code may rely on heavily?
-                                let recv = if self.self_ty.is_some()
-                                    && !f.flags.contains(FuncFlags::STATIC)
-                                {
-                                    let s = self.body.add_expr(Expr {
-                                        ty: ExprTy::Ty(self.self_ty.ok_or(BodyError {
-                                            kind: BodyErrorKind::InvalidSelfAccess,
-                                            span,
-                                        })?),
-                                        kind: ExprKind::Place(PlaceExprKind::SelfAccess),
-                                        span: None,
-                                    });
-                                    Receiver::Expr(s)
-                                } else {
-                                    Receiver::StaticSelf
-                                };
-                                Ok(ContextResolution::Item(recv, i))
-                            }
-                            _ => unreachable!(),
-                        }
-                    }
-                    Err(_) => Err(BodyError {
-                        kind: BodyErrorKind::NotYetImplemented("unknown freestanding symbol"),
-                        span,
-                    }),
-                }
+                self.access_bare_item(self.body_scope, name, span)?.ok_or(BodyError {
+                    kind: BodyErrorKind::NotYetImplemented("unknown freestanding symbol"),
+                    span,
+                })
             }
             ast::Context::Const(_) => unreachable!(),
+        }
+    }
+
+    fn access_bare_item(
+        &mut self,
+        scope: DefId,
+        name: &Identifier,
+        span: Span,
+    ) -> Result<Option<ContextResolution>, BodyError> {
+        match self.ctx.resolver.get_scoped_item(
+            scope,
+            self.ctx.defs,
+            ScopeWalkKind::Access,
+            name,
+            |d| matches!(self.ctx.defs.get_def(d).kind, DefKind::Function(_) | DefKind::Var(_)),
+        ) {
+            Ok(i) => {
+                let def = self.ctx.defs.get_def(i);
+                match &def.kind {
+                    DefKind::Var(_) => {
+                        let s = self.body.add_expr(Expr {
+                            ty: ExprTy::Ty(self.self_ty.ok_or(BodyError {
+                                kind: BodyErrorKind::InvalidSelfAccess,
+                                span,
+                            })?),
+                            kind: ExprKind::Place(PlaceExprKind::SelfAccess),
+                            span: None,
+                        });
+                        Ok(Some(ContextResolution::Item(Receiver::Expr(s), i)))
+                    }
+                    DefKind::Function(f) => {
+                        // access to bare function
+                        // TODO: This disallows binding non-static functions to the static self in delegate
+                        // creation, which code may rely on heavily?
+                        let recv = if self.self_ty.is_some() && !f.flags.contains(FuncFlags::STATIC)
+                        {
+                            let s = self.body.add_expr(Expr {
+                                ty: ExprTy::Ty(self.self_ty.ok_or(BodyError {
+                                    kind: BodyErrorKind::InvalidSelfAccess,
+                                    span,
+                                })?),
+                                kind: ExprKind::Place(PlaceExprKind::SelfAccess),
+                                span: None,
+                            });
+                            Receiver::Expr(s)
+                        } else {
+                            Receiver::StaticSelf
+                        };
+                        Ok(Some(ContextResolution::Item(recv, i)))
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            Err(_) => {
+                let outer = self.get_next_outer(scope);
+                if let Some(outer) = outer {
+                    // Symbol not found here -- try the outer
+                    match self.access_bare_item(outer, name, span)? {
+                        Some(res) => {
+                            let (receiver, item) = match res {
+                                ContextResolution::Item(recv, item) => match recv {
+                                    Receiver::StaticSelf => (recv, item),
+                                    Receiver::Expr(e) => {
+                                        let expr = self.body.get_expr(e);
+                                        match &expr.kind {
+                                            ExprKind::Place(_) => {
+                                                let outer_access = self.body.add_expr(Expr {
+                                                    ty: ExprTy::Ty(Ty::object_from(outer)),
+                                                    kind: ExprKind::Place(PlaceExprKind::Field(
+                                                        Receiver::Expr(e),
+                                                        self.ctx.special_items.outer_var.unwrap(),
+                                                    )),
+                                                    span: None,
+                                                });
+                                                (Receiver::Expr(outer_access), item)
+                                            }
+                                            _ => unreachable!(),
+                                        }
+                                    }
+                                    _ => unreachable!(),
+                                },
+                                ContextResolution::Array(_) => unreachable!("bare access"),
+                            };
+                            Ok(Some(ContextResolution::Item(receiver, item)))
+                        }
+                        None => Ok(None),
+                    }
+                } else {
+                    Ok(None)
+                }
+            }
+        }
+    }
+
+    fn get_next_outer(&mut self, scope: DefId) -> Option<DefId> {
+        let mut look_at_class = self.ctx.defs.get_item_class(scope);
+        loop {
+            match self.ctx.defs.get_class(look_at_class).kind.as_ref().unwrap() {
+                ClassKind::Class { extends, within, .. } => match within {
+                    x @ Some(_) => break *x,
+                    None => match extends {
+                        Some(e) => look_at_class = *e,
+                        None => break None,
+                    },
+                },
+                ClassKind::Interface { .. } => break None,
+            }
         }
     }
 
@@ -1521,6 +1577,35 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                                 }
                                                 if ty.is_object() {
                                                     Ty::class_from(ty.get_def().unwrap())
+                                                } else {
+                                                    return Err(BodyError {
+                                                        kind: BodyErrorKind::NonObjectType {
+                                                            found: ty,
+                                                        },
+                                                        span: expr.span,
+                                                    });
+                                                }
+                                            }
+                                            _ => unreachable!(),
+                                        }
+                                    } else if item == self.ctx.special_items.outer_var.unwrap() {
+                                        match recv {
+                                            Receiver::Expr(e) => {
+                                                let ty = self
+                                                    .body
+                                                    .get_expr_ty(e)
+                                                    .expect_ty("outer specialization");
+                                                if ty.is_object() {
+                                                    match self.get_next_outer(ty.get_def().unwrap())
+                                                    {
+                                                        Some(outer) => Ty::object_from(outer),
+                                                        None => Ty::object_from(
+                                                            self.ctx
+                                                                .special_items
+                                                                .object_id
+                                                                .unwrap(),
+                                                        ),
+                                                    }
                                                 } else {
                                                     return Err(BodyError {
                                                         kind: BodyErrorKind::NonObjectType {
