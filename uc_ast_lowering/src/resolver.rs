@@ -34,6 +34,8 @@ pub struct ResolverContext {
     pub scoped_items: HashMap<DefId, HashMap<Identifier, DefId>>,
     /// Class -> Op -> Func
     pub scoped_ops: HashMap<DefId, HashMap<Op, Vec<DefId>>>,
+    /// Class -> Name -> State
+    pub scoped_states: HashMap<DefId, HashMap<Identifier, DefId>>,
 }
 
 impl ResolverContext {
@@ -178,6 +180,22 @@ impl ResolverContext {
         Ok(())
     }
 
+    pub fn add_scoped_state(
+        &mut self,
+        scope: DefId,
+        name: Identifier,
+        state_def: DefId,
+    ) -> Result<()> {
+        let states = self.scoped_states.entry(scope).or_insert_with(HashMap::default);
+        match states.entry(name) {
+            Entry::Occupied(_) => return Err(ResolutionError::ExistsInExactScope),
+            Entry::Vacant(e) => {
+                e.insert(state_def);
+            }
+        }
+        Ok(())
+    }
+
     pub fn add_scoped_op(&mut self, scope: DefId, name: Op, op: DefId) -> Result<()> {
         let ops = self.scoped_ops.entry(scope).or_insert_with(HashMap::default);
         match ops.entry(name) {
@@ -200,6 +218,26 @@ impl ResolverContext {
         match defs.walk_scopes(scope, kind, |def_id| match self.scoped_items.get(&def_id) {
             Some(items) => match items.get(name) {
                 Some(&d) if pred(d) => ControlFlow::Break(d),
+                Some(_) => ControlFlow::Continue(()),
+                None => ControlFlow::Continue(()),
+            },
+            None => ControlFlow::Continue(()),
+        }) {
+            Some(d) => Ok(d),
+            None => Err(ResolutionError::NotFound),
+        }
+    }
+
+    pub fn get_scoped_state(
+        &self,
+        scope: DefId,
+        defs: &Defs,
+        kind: ScopeWalkKind,
+        name: &Identifier,
+    ) -> Result<DefId> {
+        match defs.walk_scopes(scope, kind, |def_id| match self.scoped_states.get(&def_id) {
+            Some(items) => match items.get(name) {
+                Some(&d) => ControlFlow::Break(d),
                 Some(_) => ControlFlow::Continue(()),
                 None => ControlFlow::Continue(()),
             },

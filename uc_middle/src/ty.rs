@@ -81,12 +81,15 @@ pub fn classify_conversion(from: Ty, to: Ty) -> ConversionClassification {
     match (from.base_ctor, to.base_ctor) {
         (Byte, Int | Float) => CC::AUTO,
         (Byte, Bool | String) => CC::ALLOW,
-        (Int, Byte) => CC::AUTO_T,
+        (Int, Byte) if to.get_def().is_none() => CC::AUTO_T,
+        (Int, Byte) => CC::ALLOW,
         (Int, Float) => CC::AUTO,
         (Int, Bool | String) => CC::ALLOW,
         (Bool, Byte | Int | Float | String) => CC::ALLOW,
         (Float, Bool | String) => CC::ALLOW,
-        (Float, Byte | Int) => CC::AUTO_T,
+        (Float, Byte) if to.get_def().is_none() => CC::AUTO_T,
+        (Float, Byte) => CC::ALLOW,
+        (Float, Int) => CC::AUTO_T,
         (Name, Bool | String) => CC::ALLOW,
         (String, Byte | Int | Bool | Float | Name) => CC::ALLOW,
 
@@ -95,6 +98,7 @@ pub fn classify_conversion(from: Ty, to: Ty) -> ConversionClassification {
         (Object, Class) => CC::ALLOW,
         (Class, Object | String) => CC::ALLOW,
         (Interface, Bool | String) => CC::ALLOW,
+        (Interface, Interface) => CC::ALLOW,
         (Interface, Object) => CC::AUTO,
 
         (Delegate, String) => CC::ALLOW,
@@ -143,6 +147,9 @@ pub fn is_subtype(
                 }
                 (Object, None) => Some(0),
                 (Object, Object) => subdef_check(general.subst.unwrap(), specific.subst.unwrap()),
+                (Object, Interface) => {
+                    subdef_check(general.subst.unwrap(), specific.subst.unwrap())
+                }
                 (Object, Class) => {
                     if general.subst.unwrap() == object_id {
                         Some(1)

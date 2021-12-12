@@ -204,7 +204,9 @@ impl Defs {
                 cb(def.id)?;
                 match kind {
                     ScopeWalkKind::Access => {
-                        // TODO: Also walk extends
+                        if let Some(extends) = s.extends {
+                            self.walk_scopes_inner(extends, kind, cb)?;
+                        }
                         self.walk_scopes_inner(s.owner, kind, cb)?;
                     }
                     ScopeWalkKind::Definitions => {
@@ -347,6 +349,20 @@ impl Defs {
         }
     }
 
+    pub fn get_state(&self, def_id: DefId) -> &State {
+        match &self.get_def(def_id).kind {
+            DefKind::State(s) => s,
+            _ => panic!("expected state"),
+        }
+    }
+
+    pub fn get_state_mut(&mut self, def_id: DefId) -> &mut State {
+        match &mut self.get_def_mut(def_id).kind {
+            DefKind::State(s) => s,
+            _ => panic!("expected state"),
+        }
+    }
+
     pub fn get_arg(&self, def_id: DefId) -> &FuncArg {
         match &self.get_def(def_id).kind {
             DefKind::FuncArg(f) => f,
@@ -469,7 +485,8 @@ pub enum ConstVal {
 #[derive(Debug)]
 pub struct State {
     pub name: Identifier,
-    pub owner: DefId, // Class
+    pub owner: DefId,           // Class
+    pub extends: Option<DefId>, // State
     pub funcs: Box<[DefId]>,
     pub contents: Option<Body>,
 }

@@ -134,13 +134,29 @@ impl<'hir> LoweringContext<'hir> {
                     if f.flags.contains(FuncFlags::STATIC) { None } else { Some(class_ty) };
                 (self_ty, f.sig.ret_ty)
             }
-            DefKind::State(_) => todo!(),
+            DefKind::State(_) => (Some(class_ty), None),
             _ => unreachable!(),
         };
 
-        let unqualified_super_scope = match self.defs.get_class(class_did).kind.as_ref().unwrap() {
-            ClassKind::Class { extends, .. } => *extends,
-            ClassKind::Interface { extends } => *extends,
+        let get_super_class =
+            |class_did| match self.defs.get_class(class_did).kind.as_ref().unwrap() {
+                ClassKind::Class { extends, .. } => *extends,
+                ClassKind::Interface { extends } => *extends,
+            };
+
+        let body = self.defs.get_def(body_scope);
+        let unqualified_super_scope = match &body.kind {
+            DefKind::State(s) => Some(s.owner),
+            DefKind::Operator(o) => get_super_class(o.owning_class),
+            DefKind::Function(f) => {
+                let owner = self.defs.get_def(f.owner);
+                match &owner.kind {
+                    DefKind::Class(_) => get_super_class(f.owner),
+                    DefKind::State(s) => Some(s.owner),
+                    _ => unreachable!(),
+                }
+            }
+            _ => unreachable!(),
         };
 
         let lowerer = FuncLowerer {
@@ -316,12 +332,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 let e = expr.as_ref().map(|e| self.lower_expr(e, ret_ty)).transpose()?;
                 StatementKind::Return(e)
             }
-            ast::StatementKind::Label { name } => {
-                return Err(BodyError {
-                    kind: BodyErrorKind::NotYetImplemented("label"),
-                    span: stmt.span,
-                });
-            }
+            ast::StatementKind::Label { .. } => StatementKind::Label,
             ast::StatementKind::Assignment { lhs, rhs } => {
                 let l = self.lower_expr(lhs, TypeExpectation::PlaceTy(None, true))?;
                 let l_ty = self.body.get_expr(l).ty.ty_or(BodyError {
@@ -781,43 +792,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         inner_expr: &'hir ast::Expr,
         to_type: Ty,
     ) -> Result<ExprKind, BodyError> {
-        let expr = self.lower_expr(
-            inner_expr,
-            if to_type.is_byte() && to_type.get_def().is_some() {
-                TypeExpectation::HintTy(to_type)
-            } else {
-                TypeExpectation::None
-            },
-        )?;
-        let expr_ty = self.body.get_expr_ty(expr).ty_or(BodyError {
-            kind: BodyErrorKind::VoidType { expected: None },
-            span: inner_expr.span,
-        })?;
-        if self.ty_match(expr_ty, to_type).is_some() {
-            // We cast to a subtype. Note the reversed arguments
-        } else {
-            let cc = self.conversion_cost(to_type, expr_ty, true);
-            match cc {
-                TyConversionCost::Same | TyConversionCost::Generalization(_) => {
-                    return Err(BodyError {
-                        kind: BodyErrorKind::UnnecessaryCast { to: to_type, from: expr_ty },
-                        span: inner_expr.span,
-                    });
-                }
-                TyConversionCost::Disallowed => {
-                    return Err(BodyError {
-                        kind: BodyErrorKind::InvalidCast { to: to_type, from: expr_ty },
-                        span: inner_expr.span,
-                    });
-                }
-                TyConversionCost::Expansion
-                | TyConversionCost::IntToFloat
-                | TyConversionCost::Truncation => {
-                    // Cast is allowed
-                }
-            }
-        }
-        Ok(ExprKind::Value(ValueExprKind::CastExpr(to_type, expr, true)))
+        let (kind, ty) = self.lower_raw_expr(inner_expr, TypeExpectation::HintTy(to_type))?;
+        let (adjusted, _) =
+            self.adjust_expr(kind, ty, TypeExpectation::CoerceToTy(to_type), inner_expr.span)?;
+        Ok(adjusted)
     }
 
     fn lower_call_sig(
@@ -898,9 +876,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         &mut self,
         rhs: &'hir ast::Expr,
         op: Op,
+        ty_hint: TypeExpectation,
         filter: F,
     ) -> Result<(ExprKind, ExprTy), BodyError> {
-        let r = self.lower_expr(rhs, TypeExpectation::None)?;
+        let mut r = self.lower_expr(rhs, ty_hint)?;
         let r_ty = self.body.get_expr_ty(r).expect_ty("unary operator");
         let mut candidate_ops = self.ctx.resolver.collect_scoped_ops(
             self.body_scope,
@@ -918,7 +897,20 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 let op_def = self.ctx.defs.get_op(op);
                 let arg = op_def.sig.args[0];
                 let arg_def = self.ctx.defs.get_arg(arg);
-                self.ty_match(arg_def.ty, r_ty).map(|p| (p, op))
+                let mut cc = self.conversion_cost(
+                    arg_def.ty,
+                    r_ty,
+                    arg_def.flags.contains(ArgFlags::COERCE),
+                );
+                if arg_def.flags.intersects(ArgFlags::OUT | ArgFlags::REF)
+                    && !matches!(cc, TyConversionCost::Same)
+                {
+                    cc = TyConversionCost::Disallowed;
+                }
+                match cc {
+                    TyConversionCost::Disallowed => None,
+                    _ => Some((cc, op)),
+                }
             })
             .collect::<Vec<_>>();
         best.sort_unstable_by_key(|(p, _)| *p);
@@ -936,6 +928,20 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 }
             }
         };
+
+        let op_def = self.ctx.defs.get_op(best);
+        let arg_def = self.ctx.defs.get_arg(op_def.sig.args[0]);
+
+        let r_cc = self.conversion_cost(arg_def.ty, r_ty, false);
+
+        if r_cc == TyConversionCost::Disallowed {
+            r = self.body.add_expr(Expr {
+                ty: ExprTy::Ty(arg_def.ty),
+                kind: ExprKind::Value(ValueExprKind::CastExpr(arg_def.ty, r, false)),
+                span: self.body.get_expr(r).span,
+            });
+        }
+
         let ret_ty = self.ctx.defs.get_op(best).sig.ret_ty.unwrap();
         Ok((ExprKind::Value(ValueExprKind::OpCall(best, r, None)), ExprTy::Ty(ret_ty)))
     }
@@ -1186,7 +1192,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         args: &'hir [Option<ast::Expr>],
         span: Span,
     ) -> Result<Option<(ExprKind, Ty)>, BodyError> {
-        if !matches!(ctx, ast::Context::Bare) {
+        if !matches!(ctx, ast::Context::Bare) || args.len() != 1 {
             return Ok(None);
         }
         let cast_to_type = self.ctx.decode_simple_ty(name, self.body_scope);
@@ -1615,12 +1621,22 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         expr: &'hir ast::Expr,
         ty_expec: TypeExpectation,
     ) -> Result<ExprId, BodyError> {
+        let (kind, ty) = self.lower_raw_expr(expr, ty_expec)?;
+        let (adjusted, adjusted_ty) = self.adjust_expr(kind, ty, ty_expec, expr.span)?;
+        Ok(self.body.add_expr(Expr { kind: adjusted, ty: adjusted_ty, span: Some(expr.span) }))
+    }
+
+    fn lower_raw_expr(
+        &mut self,
+        expr: &'hir ast::Expr,
+        ty_expec: TypeExpectation,
+    ) -> Result<(ExprKind, ExprTy), BodyError> {
         // If we coerce our type anyway, it'd be bad to eagerly expect something different
-        let (lhs_ty_hint, passdown_ty_expec) = match ty_expec {
+        let (op_ty_hint, passdown_ty_expec) = match ty_expec {
             TypeExpectation::RequiredTy(t) => {
                 (TypeExpectation::HintTy(t), TypeExpectation::RequiredTy(t))
             }
-            TypeExpectation::HintTy(t) => (TypeExpectation::HintTy(t), TypeExpectation::None),
+            TypeExpectation::HintTy(t) => (TypeExpectation::HintTy(t), TypeExpectation::HintTy(t)),
             TypeExpectation::PlaceTy(_, _) => (TypeExpectation::None, TypeExpectation::None),
             TypeExpectation::CoerceToTy(_) | TypeExpectation::None => {
                 (TypeExpectation::None, TypeExpectation::None)
@@ -1969,14 +1985,18 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     ExprTy::Ty(inst_ty),
                 )
             }
-            ast::ExprKind::PreOpExpr { op, rhs } => self.lower_unary_op(rhs, *op, |def| {
-                self.ctx.defs.get_op(def).flags.contains(FuncFlags::PREOPERATOR)
-            })?,
-            ast::ExprKind::PostOpExpr { lhs, op } => self.lower_unary_op(lhs, *op, |def| {
-                self.ctx.defs.get_op(def).flags.contains(FuncFlags::POSTOPERATOR)
-            })?,
+            ast::ExprKind::PreOpExpr { op, rhs } => {
+                self.lower_unary_op(rhs, *op, op_ty_hint, |def| {
+                    self.ctx.defs.get_op(def).flags.contains(FuncFlags::PREOPERATOR)
+                })?
+            }
+            ast::ExprKind::PostOpExpr { lhs, op } => {
+                self.lower_unary_op(lhs, *op, op_ty_hint, |def| {
+                    self.ctx.defs.get_op(def).flags.contains(FuncFlags::POSTOPERATOR)
+                })?
+            }
             ast::ExprKind::BinOpExpr { lhs, op, rhs } => {
-                self.lower_bin_op(expr.span, lhs, rhs, *op, lhs_ty_hint)?
+                self.lower_bin_op(expr.span, lhs, rhs, *op, op_ty_hint)?
             }
             ast::ExprKind::TernExpr { cond, then, alt } => {
                 let e = self.lower_expr(cond, TypeExpectation::RequiredTy(Ty::BOOL))?;
@@ -1995,18 +2015,27 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 (ExprKind::Value(ValueExprKind::Lit(lit)), ExprTy::Ty(ty))
             }
         };
+        Ok((kind, ty))
+    }
 
+    fn adjust_expr(
+        &mut self,
+        kind: ExprKind,
+        ty: ExprTy,
+        ty_expec: TypeExpectation,
+        span: Span,
+    ) -> Result<(ExprKind, ExprTy), BodyError> {
         if let TypeExpectation::PlaceTy(expected_ty, mutable) = ty_expec {
             if !matches!(kind, ExprKind::Place(_)) {
-                return Err(BodyError { kind: BodyErrorKind::ByRefArgNotPlace, span: expr.span });
+                return Err(BodyError { kind: BodyErrorKind::ByRefArgNotPlace, span });
             }
 
             match expected_ty {
-                None => Ok(self.body.add_expr(Expr { ty, kind, span: Some(expr.span) })),
+                None => Ok((kind, ty)),
                 Some(expected_ty) => {
                     let got_non_void = ty.ty_or(BodyError {
                         kind: BodyErrorKind::VoidType { expected: Some(expected_ty) },
-                        span: expr.span,
+                        span,
                     })?;
 
                     let ty_match = self.ty_match(expected_ty, got_non_void);
@@ -2015,7 +2044,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         (Some(0), _) | (Some(_), false) => {
                             // Exact match -- mutability doesn't matter.
                             // Inexact match -- only for const out
-                            Ok(self.body.add_expr(Expr { ty, kind, span: Some(expr.span) }))
+                            Ok((kind, ty))
                         }
                         (Some(_), true) | (None, _) => {
                             // Generalization but mutable -- error
@@ -2025,7 +2054,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                     expected: expected_ty,
                                     found: got_non_void,
                                 },
-                                span: expr.span,
+                                span,
                             })
                         }
                     }
@@ -2036,10 +2065,18 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         {
             let got_non_void = ty.ty_or(BodyError {
                 kind: BodyErrorKind::VoidType { expected: Some(expected_ty) },
-                span: expr.span,
+                span,
             })?;
             if self.ty_match(expected_ty, got_non_void).is_some() {
-                Ok(self.body.add_expr(Expr { ty, kind, span: Some(expr.span) }))
+                Ok((kind, ty))
+            } else if self.ty_match(got_non_void, expected_ty).is_some()
+                && matches!(ty_expec, TypeExpectation::CoerceToTy(_))
+            {
+                let inner_expr = self.body.add_expr(Expr { ty, kind, span: Some(span) });
+                Ok((
+                    ExprKind::Value(ValueExprKind::CastExpr(expected_ty, inner_expr, false)),
+                    ExprTy::Ty(expected_ty),
+                ))
             } else {
                 match ty::classify_conversion(got_non_void, expected_ty) {
                     ty::ConversionClassification::Forbidden => {
@@ -2047,53 +2084,51 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             && self.allow_special_cast(expected_ty, got_non_void)
                         {
                             let inner_expr =
-                                self.body.add_expr(Expr { ty, kind, span: Some(expr.span) });
-                            Ok(self.body.add_expr(Expr {
-                                ty: ExprTy::Ty(expected_ty),
-                                kind: ExprKind::Value(ValueExprKind::CastExpr(
+                                self.body.add_expr(Expr { ty, kind, span: Some(span) });
+                            Ok((
+                                ExprKind::Value(ValueExprKind::CastExpr(
                                     expected_ty,
                                     inner_expr,
                                     false,
                                 )),
-                                span: Some(expr.span),
-                            }))
+                                ExprTy::Ty(expected_ty),
+                            ))
                         } else {
                             Err(BodyError {
                                 kind: BodyErrorKind::TyMismatch {
                                     expected: expected_ty,
                                     found: got_non_void,
                                 },
-                                span: expr.span,
+                                span,
                             })
                         }
                     }
                     ty::ConversionClassification::Allowed { auto, truncation } => {
                         if auto || matches!(ty_expec, TypeExpectation::CoerceToTy(_)) {
                             let inner_expr =
-                                self.body.add_expr(Expr { ty, kind, span: Some(expr.span) });
-                            Ok(self.body.add_expr(Expr {
-                                ty: ExprTy::Ty(expected_ty),
-                                kind: ExprKind::Value(ValueExprKind::CastExpr(
+                                self.body.add_expr(Expr { ty, kind, span: Some(span) });
+                            Ok((
+                                ExprKind::Value(ValueExprKind::CastExpr(
                                     expected_ty,
                                     inner_expr,
                                     false,
                                 )),
-                                span: Some(expr.span),
-                            }))
+                                ExprTy::Ty(expected_ty),
+                            ))
                         } else {
                             Err(BodyError {
                                 kind: BodyErrorKind::MissingCast {
                                     to: expected_ty,
                                     from: got_non_void,
                                 },
-                                span: expr.span,
+                                span,
                             })
                         }
                     }
                 }
             }
         } else {
-            Ok(self.body.add_expr(Expr { ty, kind, span: Some(expr.span) }))
+            Ok((kind, ty))
         }
     }
 
@@ -2102,11 +2137,14 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             String,
             Vector,
             Rotator,
+            Interface,
             None,
         }
 
         let get_special = |ty: Ty| {
-            if ty.is_string() {
+            if ty.is_interface() {
+                SpecCastTy::Interface
+            } else if ty.is_string() {
                 SpecCastTy::String
             } else if ty.is_struct() {
                 if ty.get_def() == self.ctx.special_items.vector_id {
@@ -2127,6 +2165,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 | (SpecCastTy::Vector | SpecCastTy::Rotator, SpecCastTy::String)
                 | (SpecCastTy::Vector, SpecCastTy::Rotator)
                 | (SpecCastTy::Rotator, SpecCastTy::Vector)
+                | (SpecCastTy::Interface, SpecCastTy::Interface)
         )
     }
 
@@ -2267,9 +2306,9 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
 
         if interp_ty.map(|t| t.is_float()).unwrap_or(false) {
             (Literal::Float(i as f32), Ty::FLOAT)
-        } else if interp_ty.map(|t| t.is_byte()).unwrap_or(false) {
-            // TODO: Lint truncation
-            (Literal::Byte(i as u8), Ty::BYTE)
+        //} else if interp_ty.map(|t| t.is_byte()).unwrap_or(false) {
+        // TODO: Lint truncation
+        //    (Literal::Byte(i as u8), Ty::BYTE)
         } else {
             (Literal::Int(i), Ty::INT)
         }

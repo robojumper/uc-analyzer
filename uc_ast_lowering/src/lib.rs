@@ -100,7 +100,7 @@ impl<'defs> LoweringContext<'defs> {
         self.add_builtin_items();
         self.resolve_sigs(&backrefs);
         //println!("{:?}", self.defs);
-        self.lower_bodies(&backrefs.funcs, &backrefs.ops)
+        self.lower_bodies(&backrefs.funcs, &backrefs.ops, &backrefs.states)
     }
 
     /// Create DefIds for packages and classes
@@ -332,6 +332,7 @@ impl<'defs> LoweringContext<'defs> {
         add_class(self, core, "Function", object_id);
         add_class(self, core, "Package", object_id);
         add_class(self, core, "Polys", object_id);
+        add_class(self, core, "ArrayProperty", object_id);
         add_class(self, core, "Property", object_id);
 
         let static_mesh_id = add_class(self, engine, "StaticMesh", object_id);
@@ -379,7 +380,7 @@ impl<'defs> LoweringContext<'defs> {
 
         self.add_def(|this, struct_id| {
             let map = Identifier::from_str("Map").unwrap();
-            this.resolver.add_scoped_ty(object_id, map.clone(), struct_id);
+            this.resolver.add_scoped_ty(object_id, map.clone(), struct_id).unwrap();
             (
                 DefKind::Struct(Struct {
                     name: map,
@@ -533,6 +534,25 @@ impl<'defs> LoweringContext<'defs> {
                 Some([..]) => panic!("too many name parts"),
             };
             self.defs.get_struct_mut(struct_id).extends = extends;
+        }
+
+        for (&state_id, &state_def) in &backrefs.states {
+            let extends = match &state_def.extends {
+                None => None,
+                Some(name) => {
+                    let extends_id = self
+                        .resolver
+                        .get_scoped_state(
+                            self.defs.get_state(state_id).owner,
+                            self.defs,
+                            ScopeWalkKind::Access,
+                            name,
+                        )
+                        .unwrap();
+                    Some(extends_id)
+                }
+            };
+            self.defs.get_state_mut(state_id).extends = extends;
         }
     }
 
@@ -711,7 +731,7 @@ impl<'defs> LoweringContext<'defs> {
 
     fn lower_enum(&mut self, class_id: DefId, enum_def: &uc_ast::EnumDef) -> DefId {
         self.add_def(|this, enum_id| {
-            this.resolver.add_scoped_ty(class_id, enum_def.name.clone(), enum_id);
+            this.resolver.add_scoped_ty(class_id, enum_def.name.clone(), enum_id).unwrap();
 
             let mut names = vec![];
             let mut variants = enum_def
@@ -978,6 +998,7 @@ impl<'defs> LoweringContext<'defs> {
     ) -> DefId {
         self.add_def(|this, state_id| {
             states.insert(state_id, state_def);
+            this.resolver.add_scoped_state(owner_id, state_def.name.clone(), state_id).unwrap();
             let mut ops = HashMap::default();
             let funcs = state_def
                 .funcs
@@ -990,6 +1011,7 @@ impl<'defs> LoweringContext<'defs> {
                 DefKind::State(State {
                     name: state_def.name.clone(),
                     owner: owner_id,
+                    extends: None,
                     funcs,
                     contents: None,
                 }),
@@ -1002,6 +1024,7 @@ impl<'defs> LoweringContext<'defs> {
         &mut self,
         funcs: &HashMap<DefId, &'hir uc_ast::FuncDef>,
         ops: &HashMap<DefId, &'hir uc_ast::FuncDef>,
+        states: &HashMap<DefId, &'hir uc_ast::StateDef>,
     ) -> Vec<BodyError> {
         let mut body_count = 0u32;
         let mut errs = vec![];
@@ -1037,6 +1060,17 @@ impl<'defs> LoweringContext<'defs> {
                 }
             }
         }
+
+        for (&did, &def) in states.iter() {
+            match self.lower_body(did, &def.statements) {
+                Ok(b) => {
+                    body_count += 1;
+                    self.defs.get_state_mut(did).contents = Some(b)
+                }
+                Err(e) => errs.push(e),
+            }
+        }
+
         dbg!(body_count);
         dbg!(errs.len());
         errs
@@ -1143,7 +1177,7 @@ pub fn lower(input: LoweringInput) -> (Defs, ResolverContext, Vec<BodyError>) {
         resolver: ResolverContext::default(),
     };
 
-    let errs = l_ctx.run(&input);
+    let mut errs = l_ctx.run(&input);
 
     let resolver = l_ctx.resolver;
     (defs, resolver, errs)

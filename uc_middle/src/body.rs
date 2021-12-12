@@ -96,6 +96,7 @@ pub enum StatementKind {
     Break,
     Continue,
     Assign(ExprId, ExprId),
+    Label,
 }
 
 #[derive(Debug)]

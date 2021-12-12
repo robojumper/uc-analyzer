@@ -61,6 +61,15 @@ implementation. The different behavior is documented.
 * `A op B ? C : D` is `A op (B ? C : D)` if `B` is a `bool`, otherwise it's
   `(A op B) ? C : D`.
   * we always parse `(A op B) ? C : D` and usually error out with a type error.
+* Delegate->delegate assignments/func args aren't typechecked and cause soundness issues
+  * we conservatively error
+* out structs allow base structs in place of extended structs (order!), soundness issue
+  * we conservatively error and disallow struct subtyping
+* integer literals can be used where an enum value is expected, and different enum
+  types are compatible
+  * we issue a type error
+* function calls can look like casts
+  * we error
 
 ## TODO Lints
 
