@@ -110,8 +110,10 @@ enum NativeIteratorKind {
 enum ContextResolution {
     /// LHS had an object or struct type, so var or function access is legitimate
     Item(Receiver, DefId),
-    // LHS had a dyn array type, so access must be a builtin
+    /// LHS had a dyn array type, so access must be a builtin
     Array(ExprId),
+    /// Name of an enum on the LHS
+    Enum(DefId),
 }
 
 impl<'hir> LoweringContext<'hir> {
@@ -354,6 +356,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             let (recv, item) = match resolution {
                 ContextResolution::Item(recv, target) => (recv, target),
                 ContextResolution::Array(_) => todo!("error: iterating over dyn array?"),
+                ContextResolution::Enum(_) => todo!("error: iterating over enum?"),
             };
 
             let def = self.ctx.defs.get_def(item);
@@ -565,7 +568,29 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         if name == "Find" {
             match args {
                 [Some(val)] => {
-                    let inner = self.lower_expr(val, TypeExpectation::RequiredTy(inner_ty))?;
+                    let lookup_ty = if inner_ty.is_object() {
+                        Ty::object_from(self.ctx.special_items.object_id.unwrap())
+                    } else {
+                        inner_ty
+                    };
+                    let inner = self.lower_expr(val, TypeExpectation::RequiredTy(lookup_ty))?;
+                    if inner_ty.is_object() {
+                        let expr_ty = self.body.get_expr_ty(inner).expect_ty("find call arg");
+                        assert!(expr_ty.is_object());
+                        let (elem_id, expr_id) =
+                            (inner_ty.get_def().unwrap(), expr_ty.get_def().unwrap());
+                        if self.inheritance_distance(elem_id, expr_id).is_none()
+                            && self.inheritance_distance(expr_id, elem_id).is_none()
+                        {
+                            return Err(BodyError {
+                                kind: BodyErrorKind::TyMismatch {
+                                    expected: inner_ty,
+                                    found: expr_ty,
+                                },
+                                span,
+                            });
+                        }
+                    }
                     Ok((
                         ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
                             receiver,
@@ -589,7 +614,30 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         _ => panic!("bad find call"),
                     };
                     let field_ty = self.ctx.defs.get_var(field_id).ty.unwrap();
-                    let inner = self.lower_expr(val, TypeExpectation::RequiredTy(field_ty))?;
+                    let lookup_ty = if field_ty.is_object() {
+                        Ty::object_from(self.ctx.special_items.object_id.unwrap())
+                    } else {
+                        field_ty
+                    };
+                    let inner = self.lower_expr(val, TypeExpectation::RequiredTy(lookup_ty))?;
+
+                    if field_ty.is_object() {
+                        let expr_ty = self.body.get_expr_ty(inner).expect_ty("find call arg");
+                        assert!(expr_ty.is_object());
+                        let (elem_id, expr_id) =
+                            (field_ty.get_def().unwrap(), expr_ty.get_def().unwrap());
+                        if self.inheritance_distance(elem_id, expr_id).is_none()
+                            && self.inheritance_distance(expr_id, elem_id).is_none()
+                        {
+                            return Err(BodyError {
+                                kind: BodyErrorKind::TyMismatch {
+                                    expected: field_ty,
+                                    found: expr_ty,
+                                },
+                                span,
+                            });
+                        }
+                    }
                     Ok((
                         ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
                             receiver,
@@ -733,7 +781,14 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         inner_expr: &'hir ast::Expr,
         to_type: Ty,
     ) -> Result<ExprKind, BodyError> {
-        let expr = self.lower_expr(inner_expr, TypeExpectation::None)?;
+        let expr = self.lower_expr(
+            inner_expr,
+            if to_type.is_byte() && to_type.get_def().is_some() {
+                TypeExpectation::HintTy(to_type)
+            } else {
+                TypeExpectation::None
+            },
+        )?;
         let expr_ty = self.body.get_expr_ty(expr).ty_or(BodyError {
             kind: BodyErrorKind::VoidType { expected: None },
             span: inner_expr.span,
@@ -1002,7 +1057,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         ))
     }
 
-    fn try_enum_variant(
+    fn try_bare_enum_variant(
         &mut self,
         ctx: &ast::Context,
         name: &Identifier,
@@ -1082,7 +1137,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         }
     }
 
-    fn try_const(
+    fn try_bare_or_explicit_const(
         &mut self,
         ctx: &'hir ast::Context,
         name: &Identifier,
@@ -1134,8 +1189,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         if !matches!(ctx, ast::Context::Bare) {
             return Ok(None);
         }
-        let cast_to_type =
-            if args.len() == 1 { self.ctx.decode_simple_ty(name, self.body_scope) } else { None };
+        let cast_to_type = self.ctx.decode_simple_ty(name, self.body_scope);
         // A freestanding function call could be a cast. Check if name is a type
         match cast_to_type {
             Some(cast_ty) => {
@@ -1236,6 +1290,27 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         }
     }
 
+    /// MyEnum.Variant1 or MyEnum.EnumCount
+    fn try_qualified_enum(&mut self, expr: &'hir ast::Expr) -> Option<DefId> {
+        match &expr.kind {
+            ast::ExprKind::FieldExpr { lhs, rhs } => match &**lhs {
+                ast::Context::Bare => self
+                    .ctx
+                    .resolver
+                    .get_scoped_item(
+                        self.body_scope,
+                        self.ctx.defs,
+                        ScopeWalkKind::Access,
+                        rhs,
+                        |d| matches!(self.ctx.defs.get_def(d).kind, DefKind::Enum(_)),
+                    )
+                    .ok(),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     /// Turn a context and an item name into a receiver and item def.
     /// This essentially pre-processes the syntactic options to always have
     /// an explicit receiver, and tries to find the item that is being referred.
@@ -1247,7 +1322,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
     /// are filtered above.
     fn translate_context(
         &mut self,
-        ctx: &'hir uc_ast::Context,
+        ctx: &'hir ast::Context,
         name: &Identifier,
         span: Span,
     ) -> Result<ContextResolution, BodyError> {
@@ -1382,37 +1457,41 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 Ok(ContextResolution::Item(recv, item))
             }
             ast::Context::Expr(e) => {
-                let expr = self.lower_expr(e, TypeExpectation::None)?;
-                let mut ty = self.body.get_expr_ty(expr).expect_ty("field access");
-                if ty.is_class() {
-                    ty = ty.instanciate_class();
-                }
-                if ty.is_object() || ty.is_struct() || ty.is_interface() {
-                    let scope_def = ty.get_def().unwrap();
-                    let item = self
-                        .ctx
-                        .resolver
-                        .get_scoped_item(
-                            scope_def,
-                            self.ctx.defs,
-                            ScopeWalkKind::Access,
-                            name,
-                            |d| {
-                                matches!(
-                                    self.ctx.defs.get_def(d).kind,
-                                    DefKind::Const(_) | DefKind::Var(_) | DefKind::Function(_)
-                                )
-                            },
-                        )
-                        .map_err(|_| BodyError {
-                            kind: BodyErrorKind::SymNotFound { name: name.clone() },
-                            span,
-                        })?;
-                    Ok(ContextResolution::Item(Receiver::Expr(expr), item))
-                } else if ty.is_dyn_array() {
-                    Ok(ContextResolution::Array(expr))
+                if let Some(en_id) = self.try_qualified_enum(e) {
+                    Ok(ContextResolution::Enum(en_id))
                 } else {
-                    Err(BodyError { kind: BodyErrorKind::NonObjectType { found: ty }, span })
+                    let expr = self.lower_expr(e, TypeExpectation::None)?;
+                    let mut ty = self.body.get_expr_ty(expr).expect_ty("field access");
+                    if ty.is_class() {
+                        ty = ty.instanciate_class();
+                    }
+                    if ty.is_object() || ty.is_struct() || ty.is_interface() {
+                        let scope_def = ty.get_def().unwrap();
+                        let item = self
+                            .ctx
+                            .resolver
+                            .get_scoped_item(
+                                scope_def,
+                                self.ctx.defs,
+                                ScopeWalkKind::Access,
+                                name,
+                                |d| {
+                                    matches!(
+                                        self.ctx.defs.get_def(d).kind,
+                                        DefKind::Const(_) | DefKind::Var(_) | DefKind::Function(_)
+                                    )
+                                },
+                            )
+                            .map_err(|_| BodyError {
+                                kind: BodyErrorKind::SymNotFound { name: name.clone() },
+                                span,
+                            })?;
+                        Ok(ContextResolution::Item(Receiver::Expr(expr), item))
+                    } else if ty.is_dyn_array() {
+                        Ok(ContextResolution::Array(expr))
+                    } else {
+                        Err(BodyError { kind: BodyErrorKind::NonObjectType { found: ty }, span })
+                    }
                 }
             }
             ast::Context::Bare => {
@@ -1454,8 +1533,6 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     }
                     DefKind::Function(f) => {
                         // access to bare function
-                        // TODO: This disallows binding non-static functions to the static self in delegate
-                        // creation, which code may rely on heavily?
                         let recv = if self.self_ty.is_some() && !f.flags.contains(FuncFlags::STATIC)
                         {
                             let s = self.body.add_expr(Expr {
@@ -1504,6 +1581,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                     _ => unreachable!(),
                                 },
                                 ContextResolution::Array(_) => unreachable!("bare access"),
+                                ContextResolution::Enum(_) => unreachable!("bare access"),
                             };
                             Ok(Some(ContextResolution::Item(receiver, item)))
                         }
@@ -1566,9 +1644,11 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 (ExprKind::Place(PlaceExprKind::Index(base_id, idx)), ExprTy::Ty(inner_ty))
             }
             ast::ExprKind::FieldExpr { lhs, rhs } => {
-                if let Some((kind, ty)) = self.try_enum_variant(lhs, rhs, ty_expec) {
+                if let Some((kind, ty)) = self.try_bare_enum_variant(lhs, rhs, ty_expec) {
                     (kind, ExprTy::Ty(ty))
-                } else if let Some((kind, ty)) = self.try_const(lhs, rhs, ty_expec, expr.span)? {
+                } else if let Some((kind, ty)) =
+                    self.try_bare_or_explicit_const(lhs, rhs, ty_expec, expr.span)?
+                {
                     (kind, ExprTy::Ty(ty))
                 } else if let Some((kind, ty)) = self.try_local_or_arg(lhs, rhs) {
                     (kind, ExprTy::Ty(ty))
@@ -1667,6 +1747,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                     }
                                 }
                                 DefKind::Function(func) => {
+                                    // TODO: Investigate disallowing statically bound instance function?
                                     assert!(
                                         matches!(
                                             recv,
@@ -1705,6 +1786,24 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             // Receiver is a dynamic array
                             assert!(rhs == "Length");
                             (ExprKind::Place(PlaceExprKind::DynArrayLen(expr)), ExprTy::Ty(Ty::INT))
+                        }
+                        ContextResolution::Enum(en_id) => {
+                            // Receiver is an enum name, look for EnumCount or variant name
+                            let enum_def = self.ctx.defs.get_enum(en_id);
+                            let num = if rhs == "EnumCount" {
+                                enum_def.variants.len() as i32 - 1
+                            } else {
+                                let val =
+                                    self.ctx.resolver.get_enum_value(en_id, rhs).map_err(|_| {
+                                        BodyError {
+                                            kind: BodyErrorKind::SymNotFound { name: rhs.clone() },
+                                            span: expr.span,
+                                        }
+                                    })?;
+                                self.ctx.defs.get_variant(val).idx as i32
+                            };
+                            let (lit, ty) = self.adjust_int(num, ty_expec);
+                            (ExprKind::Value(ValueExprKind::Lit(lit)), ExprTy::Ty(ty))
                         }
                     }
                 }
@@ -1792,6 +1891,9 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         ContextResolution::Array(arr_expr) => {
                             self.lower_dyn_array_call(arr_expr, name, args, expr.span)?
                         }
+                        ContextResolution::Enum(enum_id) => {
+                            todo!("error: can't call enum")
+                        }
                     }
                 }
             }
@@ -1839,10 +1941,23 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         span: cls.span,
                     });
                 };
-                let arch = arch
-                    .as_ref()
-                    .map(|a| self.lower_expr(a, TypeExpectation::RequiredTy(inst_ty)))
-                    .transpose()?;
+                let arch =
+                    arch.as_ref().map(|a| self.lower_expr(a, TypeExpectation::None)).transpose()?;
+
+                if let Some(arch_e) = arch {
+                    let arch_ty = self.body.get_expr_ty(arch_e).expect_ty("new archetype arg");
+                    assert!(arch_ty.is_object());
+                    let (arch_id, new_id) =
+                        (arch_ty.get_def().unwrap(), inst_ty.get_def().unwrap());
+                    if self.inheritance_distance(arch_id, new_id).is_none()
+                        && self.inheritance_distance(new_id, arch_id).is_none()
+                    {
+                        return Err(BodyError {
+                            kind: BodyErrorKind::TyMismatch { expected: inst_ty, found: arch_ty },
+                            span: cls.span,
+                        });
+                    }
+                }
 
                 (
                     ExprKind::Value(ValueExprKind::NewExpr(
@@ -1944,9 +2059,9 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             }))
                         } else {
                             Err(BodyError {
-                                kind: BodyErrorKind::InvalidCast {
-                                    to: expected_ty,
-                                    from: got_non_void,
+                                kind: BodyErrorKind::TyMismatch {
+                                    expected: expected_ty,
+                                    found: got_non_void,
                                 },
                                 span: expr.span,
                             })
@@ -2022,16 +2137,68 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             let right_to_left = self.ty_match(r, l);
             match (left_to_right, right_to_left) {
                 (None, None) => {
-                    return None;
-                    // TODO: get lowest common ancestor for classes
+                    if l.is_class() && r.is_class() {
+                        Some(ExprTy::Ty(Ty::class_from(
+                            self.lowest_common_ancestor(l.get_def().unwrap(), r.get_def().unwrap()),
+                        )))
+                    } else if l.is_interface() && r.is_interface() {
+                        Some(ExprTy::Ty(Ty::interface_from(
+                            self.lowest_common_ancestor(l.get_def().unwrap(), r.get_def().unwrap()),
+                        )))
+                    } else if (l.is_object() || l.is_class() || l.is_interface())
+                        && (r.is_object() || r.is_class() || r.is_interface())
+                    {
+                        Some(ExprTy::Ty(Ty::object_from(
+                            self.lowest_common_ancestor(l.get_def().unwrap(), r.get_def().unwrap()),
+                        )))
+                    } else {
+                        None
+                    }
                 }
                 // L is subtype of R
                 (None, Some(_)) => Some(right),
+                // R is subtype of L
                 (Some(_), None) => Some(left),
                 (Some(_), Some(_)) => Some(left),
             }
         } else {
             Some(ExprTy::Void)
+        }
+    }
+
+    fn lowest_common_ancestor(&self, mut left: DefId, mut right: DefId) -> DefId {
+        // Check the distance to the Object class
+        let obj_id = self.ctx.special_items.object_id.unwrap();
+        let mut l_depth = self.inheritance_distance(obj_id, left).expect("caller checked class ty");
+        let mut r_depth =
+            self.inheritance_distance(obj_id, right).expect("caller checked class ty");
+
+        let get_superclass = |def_id| match self.ctx.defs.get_class(def_id).kind.as_ref().unwrap() {
+            ClassKind::Class { extends, .. } => extends.unwrap(),
+            ClassKind::Interface { extends } => extends.unwrap(),
+        };
+
+        // While one is strictly further away from Object than the other, bring it up
+        while l_depth > r_depth {
+            left = get_superclass(left);
+            l_depth -= 1;
+        }
+
+        while r_depth > l_depth {
+            right = get_superclass(right);
+            r_depth -= 1;
+        }
+
+        // Left and right have the same inheritance distance to Object, so check
+        // superclasses in lockstep until we hit the LCA, which will be Object
+        // if there's no lower common ancestor
+        loop {
+            if left == right {
+                return left;
+            } else {
+                left = get_superclass(left);
+                right = get_superclass(right);
+            }
         }
     }
 

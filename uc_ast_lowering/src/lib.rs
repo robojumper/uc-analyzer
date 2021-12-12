@@ -379,7 +379,7 @@ impl<'defs> LoweringContext<'defs> {
 
         self.add_def(|this, struct_id| {
             let map = Identifier::from_str("Map").unwrap();
-            this.resolver.add_scoped_ty(map.clone(), object_id);
+            this.resolver.add_scoped_ty(object_id, map.clone(), struct_id);
             (
                 DefKind::Struct(Struct {
                     name: map,
@@ -548,7 +548,7 @@ impl<'defs> LoweringContext<'defs> {
                             _ => panic!("invalid const value"),
                         }
                     } else if let Ok(en_def) = self.resolver.get_ty(scope, self.defs, single) {
-                        Some(self.defs.get_enum(en_def).variants.len() as u16)
+                        Some(self.defs.get_enum(en_def).variants.len() as u16 - 1)
                     } else {
                         panic!("invalid const static array bound")
                     }
@@ -711,7 +711,7 @@ impl<'defs> LoweringContext<'defs> {
 
     fn lower_enum(&mut self, class_id: DefId, enum_def: &uc_ast::EnumDef) -> DefId {
         self.add_def(|this, enum_id| {
-            this.resolver.add_scoped_ty(enum_def.name.clone(), enum_id);
+            this.resolver.add_scoped_ty(class_id, enum_def.name.clone(), enum_id);
 
             let mut names = vec![];
             let mut variants = enum_def
@@ -794,7 +794,7 @@ impl<'defs> LoweringContext<'defs> {
         vars: &mut HashMap<DefId, (&'hir uc_ast::VarDef, usize)>,
     ) -> DefId {
         self.add_def(|this, struct_id| {
-            this.resolver.add_scoped_ty(struct_def.name.clone(), struct_id);
+            this.resolver.add_scoped_ty(class_id, struct_def.name.clone(), struct_id);
 
             let var_ids = struct_def
                 .fields
@@ -1007,7 +1007,7 @@ impl<'defs> LoweringContext<'defs> {
         let mut errs = vec![];
         dbg!(&self.special_items);
 
-        for (&did, &def) in funcs {
+        for (&did, &def) in funcs.iter().chain(ops) {
             if let Some(body) = &def.body {
                 body.consts.iter().for_each(|const_def| {
                     self.lower_const(did, const_def);
@@ -1015,12 +1015,23 @@ impl<'defs> LoweringContext<'defs> {
             }
         }
 
-        for (&did, &def) in funcs {
+        for (&did, &def) in funcs.iter() {
             if let Some(body) = &def.body {
                 match self.lower_body(did, &body.statements) {
                     Ok(b) => {
                         body_count += 1;
                         self.defs.get_func_mut(did).contents.as_mut().unwrap().statements = Some(b)
+                    }
+                    Err(e) => errs.push(e),
+                }
+            }
+        }
+        for (&did, &def) in ops.iter() {
+            if let Some(body) = &def.body {
+                match self.lower_body(did, &body.statements) {
+                    Ok(b) => {
+                        body_count += 1;
+                        self.defs.get_op_mut(did).contents.as_mut().unwrap().statements = Some(b)
                     }
                     Err(e) => errs.push(e),
                 }

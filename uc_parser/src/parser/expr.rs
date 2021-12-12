@@ -183,12 +183,29 @@ impl Parser<'_> {
                     let ((), r_bp) = NEW_PREFIX_POWER;
 
                     let cls = self.parse_base_expression_bp(r_bp)?;
-                    let arch = if self.eat(sig!(LParen)) {
+                    let (cls, arch) = if self.eat(sig!(LParen)) {
                         let arch = self.parse_base_expression_bp(0)?;
                         self.expect(sig!(RParen))?;
-                        Some(arch)
+                        (cls, Some(arch))
                     } else {
-                        None
+                        match cls.kind {
+                            ExprKind::FuncCallExpr { lhs, name, mut args } => {
+                                if args.len() > 1 {
+                                    return Err(
+                                        self.fmt_err("too many args in new template", Some(tok))
+                                    );
+                                }
+                                (
+                                    Expr {
+                                        span: cls.span,
+                                        paren: false,
+                                        kind: ExprKind::FieldExpr { lhs, rhs: name },
+                                    },
+                                    args.pop().flatten(),
+                                )
+                            }
+                            _ => (cls, None),
+                        }
                     };
                     Expr {
                         span: lhs_marker.complete(self),

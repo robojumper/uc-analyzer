@@ -167,13 +167,15 @@ impl ResolverContext {
         Ok(())
     }
 
-    pub fn add_scoped_ty(&mut self, name: Identifier, ty: DefId) {
+    pub fn add_scoped_ty(&mut self, scope: DefId, name: Identifier, ty: DefId) -> Result<()> {
+        self.add_scoped_item(scope, name.clone(), ty)?;
         match self.global_ty_defs.entry(name) {
             Entry::Occupied(mut e) => e.get_mut().push(ty),
             Entry::Vacant(e) => {
                 e.insert(vec![ty]);
             }
         }
+        Ok(())
     }
 
     pub fn add_scoped_op(&mut self, scope: DefId, name: Op, op: DefId) -> Result<()> {
