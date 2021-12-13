@@ -352,4 +352,118 @@ impl Ty {
     pub fn is_stat_array(&self) -> bool {
         matches!(self.decorator, TyDecorator::StaticArray(_))
     }
+
+    pub fn format_ty_verbose(&self, def_formatter: &dyn Fn(DefId) -> String) -> String {
+        match self.decorator {
+            TyDecorator::None => match self.base_ctor {
+                BaseTyCtor::None => "none".to_owned(),
+                BaseTyCtor::Int => "primitive int".to_owned(),
+                BaseTyCtor::Float => "primitive float".to_owned(),
+                BaseTyCtor::Bool => "primitive bool".to_owned(),
+                BaseTyCtor::Byte => {
+                    if let Some(did) = self.get_def() {
+                        let mut base = "enum<".to_owned();
+                        base += &def_formatter(did);
+                        base += ">";
+                        base
+                    } else {
+                        "primitive byte".to_owned()
+                    }
+                }
+                BaseTyCtor::String => "primitive string".to_owned(),
+                BaseTyCtor::Name => "primitive name".to_owned(),
+                BaseTyCtor::Struct => {
+                    let mut base = "struct<".to_owned();
+                    base += &def_formatter(self.get_def().unwrap());
+                    base += ">";
+                    base
+                }
+                BaseTyCtor::Object => {
+                    let mut base = "object<".to_owned();
+                    base += &def_formatter(self.get_def().unwrap());
+                    base += ">";
+                    base
+                }
+                BaseTyCtor::Class => {
+                    let mut base = "class<".to_owned();
+                    base += &def_formatter(self.get_def().unwrap());
+                    base += ">";
+                    base
+                }
+                BaseTyCtor::Interface => {
+                    let mut base = "interface<".to_owned();
+                    base += &def_formatter(self.get_def().unwrap());
+                    base += ">";
+                    base
+                }
+                BaseTyCtor::Delegate => {
+                    let mut base = "delegate<".to_owned();
+                    base += &def_formatter(self.get_def().unwrap());
+                    base += ">";
+                    base
+                }
+            },
+            TyDecorator::DynArray => {
+                let mut base = "array<".to_owned();
+                base += &self.drop_array().format_ty_verbose(def_formatter);
+                base += ">";
+                base
+            }
+            TyDecorator::StaticArray(count) => {
+                let mut base = self.drop_array().format_ty_verbose(def_formatter);
+                base += "[";
+                base += &count.to_string();
+                base += "]";
+                base
+            }
+        }
+    }
+
+    pub fn format_ty(&self, def_formatter: &dyn Fn(DefId) -> String) -> String {
+        match self.decorator {
+            TyDecorator::None => match self.base_ctor {
+                BaseTyCtor::None => "none".to_owned(),
+                BaseTyCtor::Int => "int".to_owned(),
+                BaseTyCtor::Float => "float".to_owned(),
+                BaseTyCtor::Bool => "bool".to_owned(),
+                BaseTyCtor::Byte => {
+                    if let Some(did) = self.get_def() {
+                        def_formatter(did)
+                    } else {
+                        "byte".to_owned()
+                    }
+                }
+                BaseTyCtor::String => "string".to_owned(),
+                BaseTyCtor::Name => "name".to_owned(),
+                BaseTyCtor::Struct => def_formatter(self.get_def().unwrap()),
+                BaseTyCtor::Object => def_formatter(self.get_def().unwrap()),
+                BaseTyCtor::Class => {
+                    let mut base = "class<".to_owned();
+                    base += &def_formatter(self.get_def().unwrap());
+                    base += ">";
+                    base
+                }
+                BaseTyCtor::Interface => def_formatter(self.get_def().unwrap()),
+                BaseTyCtor::Delegate => {
+                    let mut base = "delegate<".to_owned();
+                    base += &def_formatter(self.get_def().unwrap());
+                    base += ">";
+                    base
+                }
+            },
+            TyDecorator::DynArray => {
+                let mut base = "array<".to_owned();
+                base += &self.drop_array().format_ty(def_formatter);
+                base += ">";
+                base
+            }
+            TyDecorator::StaticArray(count) => {
+                let mut base = self.drop_array().format_ty(def_formatter);
+                base += "[";
+                base += &count.to_string();
+                base += "]";
+                base
+            }
+        }
+    }
 }

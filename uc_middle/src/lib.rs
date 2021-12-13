@@ -1,3 +1,5 @@
+#![feature(iter_intersperse)]
+
 //! The middle representation of a whole UnrealScript workspace.
 
 use std::{num::NonZeroU32, ops::ControlFlow};
@@ -9,6 +11,7 @@ use uc_files::Span;
 use uc_name::Identifier;
 
 pub mod body;
+pub mod pretty;
 pub mod ty;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -34,6 +37,13 @@ pub enum ScopeWalkKind {
 impl Defs {
     pub fn new() -> Self {
         Self { defs: vec![DefSlot::Empty] }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Def> {
+        self.defs.iter().skip(1).map(|s| match s {
+            DefSlot::Empty => unreachable!(),
+            DefSlot::Def(d) => d,
+        })
     }
 
     /// Create an ID and a corresponding hole in the definitions vector.
@@ -237,6 +247,20 @@ impl Defs {
         self.get_def(def_id).span
     }
 
+    pub fn get_package(&self, def_id: DefId) -> &Package {
+        match &self.get_def(def_id).kind {
+            DefKind::Package(c) => c,
+            _ => panic!("expected package"),
+        }
+    }
+
+    pub fn get_package_mut(&mut self, def_id: DefId) -> &mut Package {
+        match &mut self.get_def_mut(def_id).kind {
+            DefKind::Package(c) => c,
+            _ => panic!("expected package"),
+        }
+    }
+
     pub fn get_class(&self, def_id: DefId) -> &Class {
         match &self.get_def(def_id).kind {
             DefKind::Class(c) => c,
@@ -376,6 +400,19 @@ impl Defs {
             _ => panic!("expected arg"),
         }
     }
+
+    pub fn format_ty(&self, ty: Ty) -> String {
+        ty.format_ty_verbose(&|def_id| {
+            let def = self.get_def(def_id);
+            match &def.kind {
+                DefKind::Class(c) => c.name.as_ref().to_owned(),
+                DefKind::Enum(e) => e.name.as_ref().to_owned(),
+                DefKind::Struct(s) => s.name.as_ref().to_owned(),
+                DefKind::Function(f) => f.name.as_ref().to_owned(),
+                _ => unreachable!(),
+            }
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -473,13 +510,7 @@ pub struct Var {
 pub struct Const {
     pub name: Identifier,
     pub owner: DefId, // Class
-    pub val: ConstVal,
-}
-
-#[derive(Debug)]
-pub enum ConstVal {
-    Literal(Literal),
-    Redirect(Identifier),
+    pub val: Option<Literal>,
 }
 
 #[derive(Debug)]

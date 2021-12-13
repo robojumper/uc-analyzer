@@ -10,7 +10,7 @@ use uc_middle::{
         ValueExprKind,
     },
     ty::{self, Ty},
-    ClassKind, ConstVal, DefId, DefKind, FuncSig, ScopeWalkKind,
+    ClassKind, DefId, DefKind, FuncSig, ScopeWalkKind,
 };
 use uc_name::Identifier;
 
@@ -64,8 +64,6 @@ pub enum BodyErrorKind {
     TyMismatch { expected: Ty, found: Ty },
     /// A compatible type that requires an explicit cast was found.
     MissingCast { to: Ty, from: Ty },
-    /// An unneeded cast was found
-    UnnecessaryCast { to: Ty, from: Ty },
     /// An invalid cast was found
     InvalidCast { to: Ty, from: Ty },
     /// Invalid number of arguments
@@ -1175,7 +1173,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 let def = self.ctx.defs.get_def(c);
                 match def.kind {
                     DefKind::Const(_) => {
-                        let (lit, ty) = self.resolve_const(c, ty_expec)?;
+                        let (lit, ty) = self.get_const(c, ty_expec)?;
                         Ok(Some((ExprKind::Value(ValueExprKind::Lit(lit)), ty)))
                     }
                     _ => unreachable!(),
@@ -1749,8 +1747,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                                 self.body.get_expr_ty(e).expect_ty("const access");
                                             if ty.is_object() {
                                                 // TODO: Delete compiled code
-                                                let (lit, ty) =
-                                                    self.resolve_const(item, ty_expec)?;
+                                                let (lit, ty) = self.get_const(item, ty_expec)?;
                                                 (
                                                     ExprKind::Value(ValueExprKind::Lit(lit)),
                                                     ExprTy::Ty(ty),
@@ -2314,32 +2311,20 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         }
     }
 
-    fn resolve_const(
+    fn get_const(
         &self,
         konst: DefId,
         ty_expec: TypeExpectation,
     ) -> Result<(Literal, Ty), BodyError> {
         let val = self.ctx.defs.get_const(konst);
-        match &val.val {
-            ConstVal::Literal(l) => match l {
-                Literal::Bool(_) => Ok((l.clone(), Ty::BOOL)),
-                Literal::Int(i) => Ok((l.clone(), self.adjust_int(*i, ty_expec).1)),
-                Literal::Float(_) => Ok((l.clone(), Ty::FLOAT)),
-                Literal::Name => Ok((l.clone(), Ty::NAME)),
-                Literal::String => Ok((l.clone(), Ty::STRING)),
-                _ => unreachable!(),
-            },
-            ConstVal::Redirect(i) => {
-                let (did, _) =
-                    self.ctx.resolve_const(konst, i, ScopeWalkKind::Access).ok_or_else(|| {
-                        BodyError {
-                            kind: BodyErrorKind::SymNotFound { name: i.clone() },
-                            span: self.ctx.defs.get_def(konst).span.unwrap(),
-                        }
-                    })?;
-                // Exciting potential for a stack overflow here
-                self.resolve_const(did, ty_expec)
-            }
+        let lit = val.val.as_ref().unwrap();
+        match lit {
+            Literal::Bool(_) => Ok((lit.clone(), Ty::BOOL)),
+            Literal::Int(i) => Ok((lit.clone(), self.adjust_int(*i, ty_expec).1)),
+            Literal::Float(_) => Ok((lit.clone(), Ty::FLOAT)),
+            Literal::Name => Ok((lit.clone(), Ty::NAME)),
+            Literal::String => Ok((lit.clone(), Ty::STRING)),
+            _ => unreachable!(),
         }
     }
 

@@ -7,9 +7,10 @@ use uc_analysis::ast::{
     missing_break, never_loop, uneffectful_stmt,
 };
 use uc_analysis::middle::{bad_enum_values, bad_type_name};
-use uc_ast::{pretty, Hir};
-use uc_ast_lowering::{LoweringInput, LoweringInputPackage};
+use uc_ast::Hir;
+use uc_ast_lowering::{BodyError, BodyErrorKind, LoweringInput, LoweringInputPackage};
 use uc_files::{ErrorReport, FileId, Fragment, Sources};
+use uc_middle::DefKind;
 use uc_name::Identifier;
 use uc_parser::{lexer, parser};
 
@@ -136,7 +137,7 @@ fn main() {
             /*
             let stdout = io::stdout();
             let mut handle = stdout.lock();
-            pretty::format_hir(&hir, &mut handle).unwrap();
+            uc_ast::pretty::format_hir(&hir, &mut handle).unwrap();
             */
             p.hirs.push(hir);
         }
@@ -157,9 +158,23 @@ fn main() {
     let (defs, resolver, body_errs) = uc_ast_lowering::lower(input);
 
     body_errs.iter().for_each(|b| {
+        let msg = match &b.kind {
+            BodyErrorKind::TyMismatch { expected, found } => format!(
+                "type mismatch: expected {}, found {}",
+                defs.format_ty(*expected),
+                defs.format_ty(*found)
+            ),
+            BodyErrorKind::MissingCast { to, from } => {
+                format!("missing cast from {} to {}", defs.format_ty(*from), defs.format_ty(*to))
+            }
+            BodyErrorKind::InvalidCast { to, from } => {
+                format!("cannot cast from {} to {}", defs.format_ty(*from), defs.format_ty(*to))
+            }
+            x => format!("{:?}", x),
+        };
         let err = ErrorReport {
             code: "body-lowering-error",
-            msg: format!("failed to lower function body: {:?}", b.kind),
+            msg,
             fragments: vec![Fragment {
                 full_text: b.span,
                 inlay_messages: vec![("here".to_owned(), b.span)],
@@ -174,4 +189,18 @@ fn main() {
     errs.extend(bad_enum_values::run(&defs, &resolver, &sources));
     */
     errs.iter().for_each(|e| sources.emit_err(e));
+
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    let mut class_defs = defs
+        .iter()
+        .filter_map(|d| match &d.kind {
+            DefKind::Class(_) => Some(d.id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    class_defs.sort_unstable_by_key(|&d| &defs.get_class(d).name);
+    for c in class_defs {
+        uc_middle::pretty::format_file(&defs, c, &mut handle).unwrap();
+    }
 }
