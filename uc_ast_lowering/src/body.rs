@@ -1234,7 +1234,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             assert_eq!(args.len(), 1, "nameof");
             // TODO: Cleanup expr
             let expr = self.lower_expr(args[0].as_ref().unwrap(), TypeExpectation::None)?;
-            let _ = match &self.body.get_expr(expr).kind {
+            let name = match &self.body.get_expr(expr).kind {
                 ExprKind::Value(ValueExprKind::DelegateCreation(_, d)) => {
                     &self.ctx.defs.get_func(*d).name
                 }
@@ -1246,7 +1246,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     });
                 }
             };
-            Ok(Some((ExprKind::Value(ValueExprKind::Lit(Literal::Name)), Ty::NAME)))
+            Ok(Some((ExprKind::Value(ValueExprKind::Lit(Literal::Name(name.clone()))), Ty::NAME)))
         } else if name == "vect" {
             assert_eq!(args.len(), 3, "vect");
             let arg_exprs = args
@@ -1398,7 +1398,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             ty = ty.instanciate_class();
                         }
                         if ty.is_object() {
-                            (Receiver::Expr(expr), ty.get_def().unwrap())
+                            (Receiver::Static(expr), ty.get_def().unwrap())
                         } else {
                             return Err(BodyError {
                                 kind: BodyErrorKind::NonObjectType { found: ty },
@@ -1430,7 +1430,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             ty = ty.instanciate_class();
                         }
                         if ty.is_object() {
-                            (Receiver::Expr(expr), ty.get_def().unwrap())
+                            (Receiver::Static(expr), ty.get_def().unwrap())
                         } else {
                             return Err(BodyError {
                                 kind: BodyErrorKind::NonObjectType { found: ty },
@@ -1674,7 +1674,12 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             match &def.kind {
                                 DefKind::Var(var) => {
                                     assert!(
-                                        matches!(recv, Receiver::StaticSelf | Receiver::Expr(_)),
+                                        matches!(
+                                            recv,
+                                            Receiver::StaticSelf
+                                                | Receiver::Static(_)
+                                                | Receiver::Expr(_)
+                                        ),
                                         "{} = {:?}",
                                         rhs,
                                         recv
@@ -1682,14 +1687,11 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                     let ty = if item == self.ctx.special_items.class_var.unwrap() {
                                         match recv {
                                             Receiver::StaticSelf => Ty::class_from(self.class_did),
-                                            Receiver::Expr(e) => {
-                                                let mut ty = self
+                                            Receiver::Expr(e) | Receiver::Static(e) => {
+                                                let ty = self
                                                     .body
                                                     .get_expr_ty(e)
                                                     .expect_ty("class specialization");
-                                                if ty.is_class() {
-                                                    ty = ty.instanciate_class()
-                                                }
                                                 if ty.is_object() {
                                                     Ty::class_from(ty.get_def().unwrap())
                                                 } else {
@@ -1846,7 +1848,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         self.lower_call_sig(&func.sig, args, expr.span, func.flags)?;
                     (
                         ExprKind::Value(ValueExprKind::DelegateCall(
-                            Receiver::Expr(access_expr),
+                            access_expr,
                             func_id,
                             lowered_args.into_boxed_slice(),
                         )),
@@ -1879,7 +1881,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                         .lower_call_sig(&func.sig, args, expr.span, func.flags)?;
                                     (
                                         ExprKind::Value(ValueExprKind::DelegateCall(
-                                            Receiver::Expr(access_expr),
+                                            access_expr,
                                             func_id,
                                             lowered_args.into_boxed_slice(),
                                         )),
@@ -2287,8 +2289,8 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 }
             }
             ast::Literal::Bool(b) => Ok((Literal::Bool(*b), Ty::BOOL)),
-            ast::Literal::Name(_) => Ok((Literal::Name, Ty::NAME)),
-            ast::Literal::String(_) => Ok((Literal::String, Ty::STRING)),
+            ast::Literal::Name(n) => Ok((Literal::Name(n.clone()), Ty::NAME)),
+            ast::Literal::String(s) => Ok((Literal::String(s.clone()), Ty::STRING)),
 
             ast::Literal::Int(i) => Ok(self.adjust_int(*i, expected_type)),
             ast::Literal::Float(f) => Ok((Literal::Float(*f), Ty::FLOAT)),
@@ -2322,8 +2324,8 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             Literal::Bool(_) => Ok((lit.clone(), Ty::BOOL)),
             Literal::Int(i) => Ok((lit.clone(), self.adjust_int(*i, ty_expec).1)),
             Literal::Float(_) => Ok((lit.clone(), Ty::FLOAT)),
-            Literal::Name => Ok((lit.clone(), Ty::NAME)),
-            Literal::String => Ok((lit.clone(), Ty::STRING)),
+            Literal::Name(_) => Ok((lit.clone(), Ty::NAME)),
+            Literal::String(_) => Ok((lit.clone(), Ty::STRING)),
             _ => unreachable!(),
         }
     }

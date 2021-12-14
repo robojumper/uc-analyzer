@@ -666,13 +666,13 @@ impl<'defs> LoweringContext<'defs> {
         }
 
         for (&func_id, &func_ref) in &backrefs.funcs {
-            let (mut ret_ty, args) = self.resolve_sig(func_id, &func_ref.sig);
+            let (ret_ty, args) = self.resolve_sig(func_id, &func_ref.sig);
             self.defs.get_func_mut(func_id).sig = FuncSig { ret_ty, args };
 
             if let Some(body) = &func_ref.body {
                 let locals = self.resolve_locals(func_id, body);
                 self.defs.get_func_mut(func_id).contents =
-                    Some(FuncContents { locals, statements: None });
+                    Some(FuncContents { locals, consts: Box::new([]), statements: None });
             }
         }
 
@@ -683,7 +683,7 @@ impl<'defs> LoweringContext<'defs> {
             if let Some(body) = &op_ref.body {
                 let locals = self.resolve_locals(op_id, body);
                 self.defs.get_op_mut(op_id).contents =
-                    Some(FuncContents { locals, statements: None });
+                    Some(FuncContents { locals, consts: Box::new([]), statements: None });
             }
         }
     }
@@ -820,7 +820,7 @@ impl<'defs> LoweringContext<'defs> {
         vars: &mut HashMap<DefId, (&'hir uc_ast::VarDef, usize)>,
     ) -> DefId {
         self.add_def(|this, struct_id| {
-            this.resolver.add_scoped_ty(class_id, struct_def.name.clone(), struct_id);
+            this.resolver.add_scoped_ty(class_id, struct_def.name.clone(), struct_id).unwrap();
 
             let var_ids = struct_def
                 .fields
@@ -885,11 +885,11 @@ impl<'defs> LoweringContext<'defs> {
                     uc_ast::Literal::Float(f) => Some(Literal::Float(*f)),
                     uc_ast::Literal::Int(i) => Some(Literal::Int(*i)),
                     uc_ast::Literal::Bool(b) => Some(Literal::Bool(*b)),
-                    uc_ast::Literal::Name(_) => Some(Literal::Name),
-                    uc_ast::Literal::String(_) => Some(Literal::String),
+                    uc_ast::Literal::Name(n) => Some(Literal::Name(n.clone())),
+                    uc_ast::Literal::String(s) => Some(Literal::String(s.clone())),
                     _ => unreachable!(),
                 },
-                uc_ast::ConstVal::ValueReference(l) => None,
+                uc_ast::ConstVal::ValueReference(_) => None,
             };
             (
                 DefKind::Const(Const { name: const_def.name.clone(), owner: owner_id, val }),
@@ -1045,9 +1045,17 @@ impl<'defs> LoweringContext<'defs> {
 
         for (&did, &def) in funcs.iter().chain(ops) {
             if let Some(body) = &def.body {
-                body.consts.iter().for_each(|const_def| {
-                    self.lower_const(did, const_def, consts);
-                });
+                let const_ids = body
+                    .consts
+                    .iter()
+                    .map(|const_def| self.lower_const(did, const_def, consts))
+                    .collect();
+                let def = self.defs.get_def_mut(did);
+                match &mut def.kind {
+                    DefKind::Operator(op) => op.contents.as_mut().unwrap().consts = const_ids,
+                    DefKind::Function(fun) => fun.contents.as_mut().unwrap().consts = const_ids,
+                    _ => unreachable!(),
+                }
             }
         }
 
@@ -1212,7 +1220,7 @@ pub fn lower(input: LoweringInput) -> (Defs, ResolverContext, Vec<BodyError>) {
         resolver: ResolverContext::default(),
     };
 
-    let mut errs = l_ctx.run(&input);
+    let errs = l_ctx.run(&input);
 
     let resolver = l_ctx.resolver;
     (defs, resolver, errs)

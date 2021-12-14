@@ -1,6 +1,7 @@
 use std::num::NonZeroU32;
 
 use uc_files::Span;
+use uc_name::Identifier;
 
 use crate::{ty::Ty, DefId};
 
@@ -45,12 +46,24 @@ impl Body {
         self.exprs.get(expr.0.get() as usize - 1).unwrap()
     }
 
+    pub fn get_stmt(&self, stmt: StmtId) -> &Statement {
+        self.statements.get(stmt.0.get() as usize - 1).unwrap()
+    }
+
+    pub fn get_block(&self, block: BlockId) -> &Block {
+        self.blocks.get(block.0.get() as usize - 1).unwrap()
+    }
+
     pub fn get_expr_ty(&self, expr: ExprId) -> ExprTy {
         self.get_expr(expr).ty
     }
 
     pub fn set_entry(&mut self, entry: BlockId) {
         self.entry_block = Some(entry);
+    }
+
+    pub fn get_entry(&self) -> BlockId {
+        self.entry_block.unwrap()
     }
 }
 
@@ -65,6 +78,12 @@ pub struct StmtId(NonZeroU32);
 
 #[derive(Copy, Clone, Debug)]
 pub struct IteratorId(NonZeroU32);
+
+impl std::fmt::Display for IteratorId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.get().fmt(f)
+    }
+}
 
 #[derive(Debug)]
 pub struct Block {
@@ -152,8 +171,8 @@ pub enum ValueExprKind {
     DelegateCreation(Receiver, DefId),
     /// Function call, with function, receiver, and args
     FuncCall(Receiver, DefId, Box<[Option<ExprId>]>),
-    /// Delegate call, with delegate var, receiver, and args
-    DelegateCall(Receiver, DefId, Box<[Option<ExprId>]>),
+    /// Delegate call, with access expression, var id, and args
+    DelegateCall(ExprId, DefId, Box<[Option<ExprId>]>),
     /// See [`DynArrayOpKind`] for details
     DynArrayIntrinsic(ExprId, DynArrayOpKind),
     /// HasNext / Next calls
@@ -211,8 +230,8 @@ pub enum Literal {
     Bool(bool),
     Int(i32),
     Float(f32),
-    Name,
-    String,
+    Name(Identifier),
+    String(Box<str>),
     Byte(u8),
     Object(DefId),
     Class(DefId),

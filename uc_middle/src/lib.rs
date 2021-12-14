@@ -401,6 +401,20 @@ impl Defs {
         }
     }
 
+    pub fn get_local(&self, def_id: DefId) -> &Local {
+        match &self.get_def(def_id).kind {
+            DefKind::Local(f) => f,
+            _ => panic!("expected local"),
+        }
+    }
+
+    pub fn get_local_mut(&mut self, def_id: DefId) -> &mut Local {
+        match &mut self.get_def_mut(def_id).kind {
+            DefKind::Local(f) => f,
+            _ => panic!("expected local"),
+        }
+    }
+
     pub fn format_ty(&self, ty: Ty) -> String {
         ty.format_ty_verbose(&|def_id| {
             let def = self.get_def(def_id);
@@ -569,5 +583,6 @@ pub struct Local {
 #[derive(Debug)]
 pub struct FuncContents {
     pub locals: Box<[DefId]>,
+    pub consts: Box<[DefId]>,
     pub statements: Option<Body>,
 }
