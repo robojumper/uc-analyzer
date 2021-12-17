@@ -6,7 +6,7 @@ use uc_analysis::ast::{
     ambiguous_new_template, ambiguous_ternary_op, dangling_else, misleading_indentation,
     missing_break, never_loop, uneffectful_stmt,
 };
-use uc_analysis::middle::{bad_enum_values, bad_type_name};
+use uc_analysis::middle::{bad_enum_values, bad_type_name, unreachable_code};
 use uc_ast::Hir;
 use uc_ast_lowering::{BodyError, BodyErrorKind, LoweringInput, LoweringInputPackage};
 use uc_files::{ErrorReport, FileId, Fragment, Sources};
@@ -188,8 +188,10 @@ fn main() {
     errs.extend(bad_type_name::run(&defs, &resolver, &sources));
     errs.extend(bad_enum_values::run(&defs, &resolver, &sources));
     */
+    errs.extend(unreachable_code::run(&defs, &sources));
     errs.iter().for_each(|e| sources.emit_err(e));
 
+    /*
     let stdout = io::stdout();
     let mut handle = stdout.lock();
     let mut class_defs = defs
@@ -203,4 +205,5 @@ fn main() {
     for c in class_defs {
         uc_middle::pretty::format_file(&defs, c, &mut handle).unwrap();
     }
+    */
 }
