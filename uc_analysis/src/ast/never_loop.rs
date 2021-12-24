@@ -4,7 +4,7 @@ use uc_ast::{
     visit::{self, Visitor},
     Block, Expr, ExprKind, Hir, Literal, Statement, StatementKind,
 };
-use uc_files::{ErrorReport, Fragment, Sources, Span};
+use uc_files::{ErrorCode, ErrorReport, Fragment, Level, Sources, Span};
 
 struct NeverLoopVisitor {
     errs: Vec<NeverLoop>,
@@ -22,7 +22,7 @@ pub fn run(hir: &Hir, _: &Sources) -> Vec<ErrorReport> {
         .errs
         .iter()
         .map(|err| ErrorReport {
-            code: "never-loop",
+            code: ErrorCode { msg: "never-loop", level: Level::Warning, priority: 3 },
             msg: "loop never runs twice".to_owned(),
             fragments: vec![Fragment {
                 full_text: err.loop_span,

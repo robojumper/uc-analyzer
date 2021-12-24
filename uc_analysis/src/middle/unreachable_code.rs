@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 
-use uc_files::{ErrorReport, Fragment, Sources, Span};
+use uc_files::{ErrorCode, ErrorReport, Fragment, Level, Sources, Span};
 use uc_middle::{
     body::{BlockId, Body, StatementKind, StmtId},
     DefKind, Defs,
@@ -67,7 +67,11 @@ pub fn run(defs: &Defs, _: &Sources) -> Vec<ErrorReport> {
             let stmt_b = stmts.get_stmt(e.unr_stmt).span.unwrap();
             let full_span = Span { start: stmt_a.start, end: stmt_b.end };
             ErrorReport {
-                code: "unreachable-statement",
+                code: ErrorCode {
+                    msg: "unreachable-statement",
+                    level: Level::Warning,
+                    priority: 5,
+                },
                 msg: "a statement will never be executed".to_owned(),
                 fragments: vec![Fragment {
                     full_text: full_span,
@@ -84,8 +88,8 @@ pub fn run(defs: &Defs, _: &Sources) -> Vec<ErrorReport> {
 
         if must_return && effect.guaranteed_div.is_none() {
             errs.push(ErrorReport {
-                code: "missing-return",
-                msg: "this function returns a type but not all paths return a value".to_owned(),
+                code: ErrorCode { msg: "missing-return", level: Level::Warning, priority: 5 },
+                msg: "this function has a return type but not all paths return a value".to_owned(),
                 fragments: vec![Fragment { full_text: span.unwrap(), inlay_messages: vec![] }],
             })
         }

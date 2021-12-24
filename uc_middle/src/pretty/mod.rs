@@ -1,10 +1,10 @@
-use std::{io, ops::RangeBounds, slice::SliceIndex};
+use std::io;
 
 use uc_def::{ArgFlags, FuncFlags};
 use uc_name::Identifier;
 
 use crate::{
-    body::{self, BlockId, Body, Expr, ExprId, Literal, Receiver, Statement, StmtId},
+    body::{self, BlockId, Body, ExprId, Literal, Receiver, StmtId},
     ty::Ty,
     ClassKind, Const, DefId, DefKind, Defs, Enum, FuncContents, FuncSig, Function, Operator, State,
     Struct, Var,

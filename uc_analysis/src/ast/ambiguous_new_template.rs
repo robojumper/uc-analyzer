@@ -2,7 +2,7 @@ use uc_ast::{
     visit::{self, Visitor},
     Context, Expr, ExprKind, Hir,
 };
-use uc_files::{ErrorReport, Fragment, Sources, Span};
+use uc_files::{ErrorCode, ErrorReport, Fragment, Level, Sources, Span};
 
 struct AmbigNewVisitor {
     errs: Vec<AmbigNew>,
@@ -17,7 +17,7 @@ pub fn run(hir: &Hir, _: &Sources) -> Vec<ErrorReport> {
         .errs
         .iter()
         .map(|err| ErrorReport {
-            code: "ambiguous-new",
+            code: ErrorCode { msg: "ambiguous-new", level: Level::Warning, priority: 3 },
             msg: "new with function call is ambiguous".to_owned(),
             fragments: vec![Fragment {
                 full_text: err.new_expr,
@@ -44,12 +44,11 @@ impl Visitor for AmbigNewVisitor {
         if let ExprKind::NewExpr { cls, .. } = &expr.kind {
             if !cls.paren {
                 if let ExprKind::FuncCallExpr { lhs, .. } = &cls.kind {
-                    if let Context::Expr(Expr { kind, .. }) = &**lhs {
-                        if let ExprKind::FieldExpr { rhs, .. } = kind {
-                            if rhs != "class" {
-                                self.errs
-                                    .push(AmbigNew { new_expr: expr.span, cls_expr: cls.span });
-                            }
+                    if let Context::Expr(Expr { kind: ExprKind::FieldExpr { rhs, .. }, .. }) =
+                        &**lhs
+                    {
+                        if rhs != "class" {
+                            self.errs.push(AmbigNew { new_expr: expr.span, cls_expr: cls.span });
                         }
                     }
                 }

@@ -8,11 +8,12 @@ use uc_analysis::ast::{
 };
 use uc_analysis::middle::{bad_enum_values, bad_type_name, unreachable_code};
 use uc_ast::Hir;
-use uc_ast_lowering::{BodyError, BodyErrorKind, LoweringInput, LoweringInputPackage};
-use uc_files::{ErrorReport, FileId, Fragment, Sources};
-use uc_middle::DefKind;
+use uc_ast_lowering::{BodyErrorKind, IntEnumCorrespondence, LoweringInput, LoweringInputPackage};
+use uc_files::{ErrorCode, ErrorReport, FileId, Fragment, Level, Sources};
 use uc_name::Identifier;
 use uc_parser::{lexer, parser};
+
+use structopt::StructOpt;
 
 struct Package {
     name: Identifier,
@@ -20,9 +21,47 @@ struct Package {
     hirs: Vec<Hir>,
 }
 
+#[derive(StructOpt, Debug)]
+#[structopt(name = "uc_analyzer")]
+struct Opt {
+    /// The Src folder
+    #[structopt(long)]
+    path: PathBuf,
+
+    /// The PreprocessedFiles folder containing
+    /// macro expansion results. Defaults to
+    /// <path>/../../XComGame/PreProcessedFiles
+    #[structopt(long)]
+    expanded: Option<PathBuf>,
+
+    /// Whether to emit lints for base game files.
+    #[structopt(long)]
+    ignore_base: bool,
+}
+
+const BASE_GAME_PACKAGES: &[&str] = &[
+    "AkAudio",
+    "Core",
+    "DLC_1",
+    "DLC_2",
+    "DLC_3",
+    "Engine",
+    "GameFramework",
+    "GfxUI",
+    "GfxUIEditor",
+    "IpDrv",
+    "OnlineSubsystemSteamworks",
+    "TLE",
+    "UnrealEd",
+    "XComEditor",
+    "XComGame",
+];
+
 fn main() {
-    let dir = std::env::args().nth(1).map(PathBuf::from).expect("missing directory");
-    let expanded_dir = std::env::args().nth(2).map(PathBuf::from).unwrap_or_else(|| {
+    let args = Opt::from_args();
+
+    let dir = args.path;
+    let expanded_dir = args.expanded.unwrap_or_else(|| {
         let mut exp = dir.clone(); // Src
         exp.pop(); // Development
         exp.pop(); // SDK
@@ -42,15 +81,13 @@ fn main() {
             continue;
         }
 
-        let mut package = Package {
-            name: package_dir
-                .file_name()
-                .to_str()
-                .and_then(|n| Identifier::from_str(n).ok())
-                .expect("non-ascii package name"),
-            files: vec![],
-            hirs: vec![],
-        };
+        let package_name = package_dir
+            .file_name()
+            .to_str()
+            .and_then(|n| Identifier::from_str(n).ok())
+            .expect("non-ascii package name");
+
+        let mut package = Package { name: package_name.clone(), files: vec![], hirs: vec![] };
 
         let classes = {
             let mut path = package_dir.path();
@@ -86,6 +123,7 @@ fn main() {
             let id = sources
                 .add_file(
                     path.file_stem().and_then(|n| n.to_str()).map(|n| n.to_owned()).unwrap(),
+                    package_name.as_ref().to_owned(),
                     &contents,
                     path,
                 )
@@ -96,18 +134,20 @@ fn main() {
         packages.push(package);
     }
 
+    let mut errs = vec![];
+
     for p in &mut packages {
         for &f in &p.files {
             let lexer = lexer::Lexer::new(&sources, f);
-            let (hir, errs) = parser::parse(lexer);
-            if !errs.is_empty() {
-                for err in &errs {
+            let (hir, p_errs) = parser::parse(lexer);
+            if !p_errs.is_empty() {
+                for err in &p_errs {
                     let highlight = match err.err.expected_token {
                         Some(e) => format!("expected {:?}", e),
                         None => "this token".to_owned(),
                     };
                     let rep = ErrorReport {
-                        code: "parser-error",
+                        code: ErrorCode { msg: "parser-error", level: Level::Error, priority: 1 },
                         msg: err.err.error_message.to_owned(),
                         fragments: vec![Fragment {
                             full_text: err.err.bad_token.as_ref().unwrap().span,
@@ -119,11 +159,8 @@ fn main() {
                     };
                     sources.emit_err(&rep);
                 }
-                panic!()
             }
 
-            let mut errs = vec![];
-            /*
             errs.extend(ambiguous_new_template::run(&hir, &sources));
             errs.extend(ambiguous_ternary_op::run(&hir, &sources));
             errs.extend(dangling_else::run(&hir, &sources));
@@ -131,14 +168,7 @@ fn main() {
             errs.extend(missing_break::run(&hir, &sources));
             errs.extend(never_loop::run(&hir, &sources));
             errs.extend(uneffectful_stmt::run(&hir, &sources));
-            */
-            errs.iter().for_each(|e| sources.emit_err(e));
 
-            /*
-            let stdout = io::stdout();
-            let mut handle = stdout.lock();
-            uc_ast::pretty::format_hir(&hir, &mut handle).unwrap();
-            */
             p.hirs.push(hir);
         }
     }
@@ -158,52 +188,75 @@ fn main() {
     let (defs, resolver, body_errs) = uc_ast_lowering::lower(input);
 
     body_errs.iter().for_each(|b| {
-        let msg = match &b.kind {
-            BodyErrorKind::TyMismatch { expected, found } => format!(
-                "type mismatch: expected {}, found {}",
-                defs.format_ty(*expected),
-                defs.format_ty(*found)
+        let (msg, hint) = match &b.kind {
+            BodyErrorKind::EnumIntValue { expected, found, corresponding_value } => {
+                let hint = match corresponding_value {
+                    IntEnumCorrespondence::Variant(num, var) => {
+                        let var = defs.get_variant(*var);
+                        format!("{} corresponds to {}", num, var.name)
+                    }
+                    IntEnumCorrespondence::NoVariant(num) => {
+                        format!("{} does not correspond to an enum variant", num)
+                    }
+                    IntEnumCorrespondence::ComplexExpression => {
+                        "this expression may or may not correspond to an enum variant".to_owned()
+                    }
+                };
+                (
+                    format!(
+                        "type mismatch: expected {}, found {}",
+                        defs.format_ty(*expected),
+                        defs.format_ty(*found)
+                    ),
+                    hint,
+                )
+            }
+            BodyErrorKind::TyMismatch { expected, found } => (
+                format!(
+                    "type mismatch: expected {}, found {}",
+                    defs.format_ty(*expected),
+                    defs.format_ty(*found)
+                ),
+                "here".to_owned(),
             ),
-            BodyErrorKind::MissingCast { to, from } => {
-                format!("missing cast from {} to {}", defs.format_ty(*from), defs.format_ty(*to))
-            }
-            BodyErrorKind::InvalidCast { to, from } => {
-                format!("cannot cast from {} to {}", defs.format_ty(*from), defs.format_ty(*to))
-            }
-            x => format!("{:?}", x),
+            BodyErrorKind::MissingCast { to, from } => (
+                format!("missing cast from {} to {}", defs.format_ty(*from), defs.format_ty(*to)),
+                "here".to_owned(),
+            ),
+            BodyErrorKind::InvalidCast { to, from } => (
+                format!("cannot cast from {} to {}", defs.format_ty(*from), defs.format_ty(*to)),
+                "here".to_owned(),
+            ),
+            x => (format!("{:?}", x), "here".to_owned()),
         };
         let err = ErrorReport {
-            code: "body-lowering-error",
+            code: ErrorCode { msg: "body-lowering-error", level: Level::Error, priority: 2 },
             msg,
-            fragments: vec![Fragment {
-                full_text: b.span,
-                inlay_messages: vec![("here".to_owned(), b.span)],
-            }],
+            fragments: vec![Fragment { full_text: b.span, inlay_messages: vec![(hint, b.span)] }],
         };
-        sources.emit_err(&err);
+        errs.push(err);
     });
 
-    let mut errs = vec![];
-    /*
     errs.extend(bad_type_name::run(&defs, &resolver, &sources));
     errs.extend(bad_enum_values::run(&defs, &resolver, &sources));
-    */
-    errs.extend(unreachable_code::run(&defs, &sources));
-    errs.iter().for_each(|e| sources.emit_err(e));
 
-    /*
-    let stdout = io::stdout();
-    let mut handle = stdout.lock();
-    let mut class_defs = defs
-        .iter()
-        .filter_map(|d| match &d.kind {
-            DefKind::Class(_) => Some(d.id),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    class_defs.sort_unstable_by_key(|&d| &defs.get_class(d).name);
-    for c in class_defs {
-        uc_middle::pretty::format_file(&defs, c, &mut handle).unwrap();
+    errs.extend(unreachable_code::run(&defs, &sources));
+
+    if args.ignore_base {
+        errs.retain(|e| {
+            e.fragments.iter().any(|fr| {
+                let fid_a = sources.lookup_file(fr.full_text.start).expect("bad error message");
+                let pack = sources.file_package(fid_a);
+                !BASE_GAME_PACKAGES.iter().any(|&p| p.eq_ignore_ascii_case(pack))
+            })
+        });
     }
-    */
+
+    errs.sort_by_cached_key(|e| {
+        let fid_a = sources.lookup_file(e.fragments[0].full_text.start).expect("bad error message");
+        sources.file_name(fid_a)
+    });
+    errs.sort_by_key(|e| e.code.priority);
+
+    errs.iter().for_each(|e| sources.emit_err(e));
 }

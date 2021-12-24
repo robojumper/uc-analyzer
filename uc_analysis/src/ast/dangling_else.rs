@@ -2,7 +2,7 @@ use uc_ast::{
     visit::{self, Visitor},
     Block, Hir, Statement, StatementKind,
 };
-use uc_files::{ErrorReport, Fragment, Sources, Span};
+use uc_files::{ErrorCode, ErrorReport, Fragment, Level, Sources, Span};
 
 struct DanglingElseVisitor {
     errs: Vec<DanglingElse>,
@@ -19,7 +19,7 @@ pub fn run(hir: &Hir, _: &Sources) -> Vec<ErrorReport> {
         .errs
         .iter()
         .map(|err| ErrorReport {
-            code: "dangling-else",
+            code: ErrorCode { msg: "dangling-else", level: Level::Warning, priority: 3 },
             msg: "if if else is ambiguous".to_owned(),
             fragments: vec![Fragment {
                 full_text: err.whole_thing,

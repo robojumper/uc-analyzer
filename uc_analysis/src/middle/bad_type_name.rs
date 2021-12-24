@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use uc_ast_lowering::resolver::ResolverContext;
-use uc_files::{ErrorReport, Fragment, Sources};
+use uc_files::{ErrorCode, ErrorReport, Fragment, Level, Sources};
 use uc_middle::Defs;
 use uc_parser::{parser, Keyword};
 
@@ -29,7 +29,11 @@ pub fn run(defs: &Defs, resolver: &ResolverContext, _: &Sources) -> Vec<ErrorRep
             } else {
                 format!("{} have the same name and can't always be disambiguated", num.0)
             };
-            errs.push(ErrorReport { code: "type-name-conflict", msg, fragments })
+            errs.push(ErrorReport {
+                code: ErrorCode { msg: "type-name-conflict", level: Level::Warning, priority: 4 },
+                msg,
+                fragments,
+            })
         }
 
         for &def_id in ids {
@@ -37,7 +41,11 @@ pub fn run(defs: &Defs, resolver: &ResolverContext, _: &Sources) -> Vec<ErrorRep
                 if let Some(span) = defs.try_get_span(def_id) {
                     if parser::modifiers::VAR_MODIFIERS.contains(kw) {
                         errs.push(ErrorReport {
-                            code: "unnameable-type",
+                            code: ErrorCode {
+                                msg: "unnameable-type",
+                                level: Level::Warning,
+                                priority: 4,
+                            },
                             msg: "type name is var modifier, so it can't ever be stored in a var"
                                 .to_owned(),
                             fragments: vec![Fragment {
@@ -49,7 +57,7 @@ pub fn run(defs: &Defs, resolver: &ResolverContext, _: &Sources) -> Vec<ErrorRep
 
                     if parser::modifiers::FUNC_MODIFIERS.contains(kw) {
                         errs.push(ErrorReport {
-                            code: "unnameable-type",
+                            code: ErrorCode { msg: "unnameable-type", level: Level::Warning, priority: 4 },
                             msg: "type name is func modifier, so it can't ever be returned from a func".to_owned(),
                             fragments: vec![Fragment { full_text: span, inlay_messages: vec![("type declared here".to_owned(), span)] }],
                         })

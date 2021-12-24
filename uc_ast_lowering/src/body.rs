@@ -5,9 +5,9 @@ use uc_def::{ArgFlags, FuncFlags, Op};
 use uc_files::Span;
 use uc_middle::{
     body::{
-        Block, BlockId, Body, DynArrayOpKind, Expr, ExprId, ExprKind, ExprTy, ForeachOpKind,
-        Literal, LoopDesugaring, PlaceExprKind, Receiver, Statement, StatementKind, StmtId,
-        ValueExprKind,
+        interp, Block, BlockId, Body, DynArrayOpKind, Expr, ExprId, ExprKind, ExprTy,
+        ForeachOpKind, Literal, LoopDesugaring, PlaceExprKind, Receiver, Statement, StatementKind,
+        StmtId, ValueExprKind,
     },
     ty::{self, Ty},
     ClassKind, DefId, DefKind, FuncSig, ScopeWalkKind,
@@ -23,7 +23,6 @@ struct FuncLowerer<'hir, 'a: 'hir> {
     unqualified_super_scope: Option<DefId>,
     ret_ty: Option<Ty>,
     class_did: DefId,
-    class_ty: Ty,
     self_ty: Option<Ty>,
 }
 
@@ -51,6 +50,13 @@ enum TypeExpectation {
 }
 
 #[derive(Debug)]
+pub enum IntEnumCorrespondence {
+    Variant(i32, DefId),
+    NoVariant(i32),
+    ComplexExpression,
+}
+
+#[derive(Debug)]
 pub enum BodyErrorKind {
     /// An expression evaluating to no type at all was found where a type was expected.
     VoidType { expected: Option<Ty> },
@@ -62,6 +68,8 @@ pub enum BodyErrorKind {
     NonObjectType { found: Ty },
     /// An incompatible type was found.
     TyMismatch { expected: Ty, found: Ty },
+    /// An enum was expected, but we found an integer and disallowed the explicit conversiom
+    EnumIntValue { expected: Ty, found: Ty, corresponding_value: IntEnumCorrespondence },
     /// A compatible type that requires an explicit cast was found.
     MissingCast { to: Ty, from: Ty },
     /// An invalid cast was found
@@ -162,7 +170,6 @@ impl<'hir> LoweringContext<'hir> {
             body: Body::new(),
             body_scope,
             ret_ty,
-            class_ty,
             class_did,
             unqualified_super_scope,
             self_ty,
@@ -753,14 +760,20 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                     let func = self.ctx.defs.get_func(ty.get_def().unwrap());
                     assert!(func.sig.ret_ty.unwrap().is_int());
                     assert_eq!(func.sig.args.len(), 2);
-                    assert!(
-                        self.ty_match(self.ctx.defs.get_arg(func.sig.args[0]).ty, inner_ty)
-                            .is_some()
-                    );
-                    assert!(
-                        self.ty_match(self.ctx.defs.get_arg(func.sig.args[1]).ty, inner_ty)
-                            .is_some()
-                    );
+
+                    if self.ty_match(self.ctx.defs.get_arg(func.sig.args[0]).ty, inner_ty).is_none()
+                        || self
+                            .ty_match(self.ctx.defs.get_arg(func.sig.args[1]).ty, inner_ty)
+                            .is_none()
+                    {
+                        return Err(BodyError {
+                            kind: BodyErrorKind::NotYetImplemented(
+                                "some weird sorting relationship",
+                            ),
+                            span,
+                        });
+                    }
+
                     Ok((
                         ExprKind::Value(ValueExprKind::DynArrayIntrinsic(
                             receiver,
@@ -1146,7 +1159,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         ctx: &'hir ast::Context,
         name: &Identifier,
         ty_expec: TypeExpectation,
-        span: Span,
+        _span: Span,
     ) -> Result<Option<(ExprKind, Ty)>, BodyError> {
         let lookup_scope = match ctx {
             ast::Context::Bare => self.body_scope,
@@ -1906,7 +1919,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         ContextResolution::Array(arr_expr) => {
                             self.lower_dyn_array_call(arr_expr, name, args, expr.span)?
                         }
-                        ContextResolution::Enum(enum_id) => {
+                        ContextResolution::Enum(_) => {
                             todo!("error: can't call enum")
                         }
                     }
@@ -2020,7 +2033,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
     fn adjust_expr(
         &mut self,
         kind: ExprKind,
-        ty: ExprTy,
+        expr_ty: ExprTy,
         ty_expec: TypeExpectation,
         span: Span,
     ) -> Result<(ExprKind, ExprTy), BodyError> {
@@ -2030,9 +2043,9 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
             }
 
             match expected_ty {
-                None => Ok((kind, ty)),
+                None => Ok((kind, expr_ty)),
                 Some(expected_ty) => {
-                    let got_non_void = ty.ty_or(BodyError {
+                    let got_non_void = expr_ty.ty_or(BodyError {
                         kind: BodyErrorKind::VoidType { expected: Some(expected_ty) },
                         span,
                     })?;
@@ -2043,7 +2056,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                         (Some(0), _) | (Some(_), false) => {
                             // Exact match -- mutability doesn't matter.
                             // Inexact match -- only for const out
-                            Ok((kind, ty))
+                            Ok((kind, expr_ty))
                         }
                         (Some(_), true) | (None, _) => {
                             // Generalization but mutable -- error
@@ -2062,16 +2075,16 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
         } else if let TypeExpectation::RequiredTy(expected_ty)
         | TypeExpectation::CoerceToTy(expected_ty) = ty_expec
         {
-            let got_non_void = ty.ty_or(BodyError {
+            let got_non_void = expr_ty.ty_or(BodyError {
                 kind: BodyErrorKind::VoidType { expected: Some(expected_ty) },
                 span,
             })?;
             if self.ty_match(expected_ty, got_non_void).is_some() {
-                Ok((kind, ty))
+                Ok((kind, expr_ty))
             } else if self.ty_match(got_non_void, expected_ty).is_some()
                 && matches!(ty_expec, TypeExpectation::CoerceToTy(_))
             {
-                let inner_expr = self.body.add_expr(Expr { ty, kind, span: Some(span) });
+                let inner_expr = self.body.add_expr(Expr { ty: expr_ty, kind, span: Some(span) });
                 Ok((
                     ExprKind::Value(ValueExprKind::CastExpr(expected_ty, inner_expr, false)),
                     ExprTy::Ty(expected_ty),
@@ -2083,7 +2096,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             && self.allow_special_cast(expected_ty, got_non_void)
                         {
                             let inner_expr =
-                                self.body.add_expr(Expr { ty, kind, span: Some(span) });
+                                self.body.add_expr(Expr { ty: expr_ty, kind, span: Some(span) });
                             Ok((
                                 ExprKind::Value(ValueExprKind::CastExpr(
                                     expected_ty,
@@ -2102,10 +2115,10 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                             })
                         }
                     }
-                    ty::ConversionClassification::Allowed { auto, truncation } => {
+                    ty::ConversionClassification::Allowed { auto, truncation: _ } => {
+                        let inner_expr =
+                            self.body.add_expr(Expr { ty: expr_ty, kind, span: Some(span) });
                         if auto || matches!(ty_expec, TypeExpectation::CoerceToTy(_)) {
-                            let inner_expr =
-                                self.body.add_expr(Expr { ty, kind, span: Some(span) });
                             Ok((
                                 ExprKind::Value(ValueExprKind::CastExpr(
                                     expected_ty,
@@ -2114,6 +2127,33 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                                 )),
                                 ExprTy::Ty(expected_ty),
                             ))
+                        } else if expected_ty.is_byte()
+                            && expected_ty.get_def().is_some()
+                            && (got_non_void.is_byte() || got_non_void.is_int())
+                        {
+                            let corr = match interp::try_interp_integer_expr(
+                                self.ctx.defs,
+                                &self.body,
+                                inner_expr,
+                            ) {
+                                Some(v) => {
+                                    let enum_def =
+                                        self.ctx.defs.get_enum(expected_ty.get_def().unwrap());
+                                    match enum_def.variants.get(v as usize) {
+                                        Some(var) => IntEnumCorrespondence::Variant(v, *var),
+                                        None => IntEnumCorrespondence::NoVariant(v),
+                                    }
+                                }
+                                None => IntEnumCorrespondence::ComplexExpression,
+                            };
+                            Err(BodyError {
+                                kind: BodyErrorKind::EnumIntValue {
+                                    expected: expected_ty,
+                                    found: got_non_void,
+                                    corresponding_value: corr,
+                                },
+                                span,
+                            })
                         } else {
                             Err(BodyError {
                                 kind: BodyErrorKind::MissingCast {
@@ -2127,7 +2167,7 @@ impl<'hir, 'a> FuncLowerer<'hir, 'a> {
                 }
             }
         } else {
-            Ok((kind, ty))
+            Ok((kind, expr_ty))
         }
     }
 

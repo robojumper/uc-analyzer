@@ -52,13 +52,6 @@ fn new_op() {
 }
 
 #[test]
-fn delegate_call() {
-    let text = "(self.SomeDelegateProperty)()";
-    let pretty = "(self.SomeDelegateProperty)()";
-    assert_parse_pretty(text, pretty);
-}
-
-#[test]
 fn chained_func_call() {
     let text = "self.SomeFunc(, abc)";
     let pretty = "self.SomeFunc(, abc)";
@@ -75,7 +68,12 @@ fn free_func_call() {
 fn assert_parse_pretty(text: &str, pretty: &str) {
     let mut sources = Sources::new();
     let id = sources
-        .add_file("TestFile".to_owned(), text.as_bytes(), PathBuf::from("<anonymous>"))
+        .add_file(
+            "TestFile".to_owned(),
+            "TestPackage".to_owned(),
+            text.as_bytes(),
+            PathBuf::from("<anonymous>"),
+        )
         .unwrap();
     let lex = Lexer::new(&sources, id);
     let mut p = Parser::new(lex);

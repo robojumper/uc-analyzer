@@ -1,9 +1,9 @@
 use uc_ast::{
     uc_def::Op,
     visit::{self, Visitor},
-    Context, Expr, ExprKind, Hir,
+    Expr, ExprKind, Hir,
 };
-use uc_files::{ErrorReport, Fragment, Sources, Span};
+use uc_files::{ErrorCode, ErrorReport, Fragment, Level, Sources, Span};
 
 struct AmbigTernVisitor {
     errs: Vec<AmbigTern>,
@@ -18,7 +18,7 @@ pub fn run(hir: &Hir, _: &Sources) -> Vec<ErrorReport> {
         .errs
         .iter()
         .map(|err| ErrorReport {
-            code: "ambiguous-ternary-op",
+            code: ErrorCode { msg: "ambiguous-ternary-op", level: Level::Warning, priority: 3 },
             msg: "this ternary operator has dangerous ambiguous syntax".to_owned(),
             fragments: vec![Fragment {
                 full_text: err.whole_expr,

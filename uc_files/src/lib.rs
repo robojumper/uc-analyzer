@@ -38,6 +38,7 @@ pub struct Sources {
 #[derive(Debug)]
 struct SourceFileMetadata {
     name: String,
+    package: String,
     _path: PathBuf,
     span: Span,
     line_heads: Vec<BytePos>,
@@ -56,8 +57,22 @@ pub enum InputError {
     Utf16UnpairedSurrogate,
 }
 
+#[derive(Clone, Copy)]
+pub enum Level {
+    Debug,
+    Warning,
+    Error,
+}
+
+#[derive(Clone, Copy)]
+pub struct ErrorCode {
+    pub msg: &'static str,
+    pub priority: i32,
+    pub level: Level,
+}
+
 pub struct ErrorReport {
-    pub code: &'static str,
+    pub code: ErrorCode,
     pub msg: String,
     pub fragments: Vec<Fragment>,
 }
@@ -86,6 +101,7 @@ impl Sources {
     pub fn add_file(
         &mut self,
         name: String,
+        package: String,
         data: &[u8],
         path: PathBuf,
     ) -> Result<FileId, InputError> {
@@ -113,6 +129,7 @@ impl Sources {
             .collect();
         self.metadata.push(SourceFileMetadata {
             name: name.clone(),
+            package,
             _path: path,
             span,
             line_heads,
@@ -155,6 +172,11 @@ impl Sources {
     #[inline]
     pub fn file_name(&self, f_id: FileId) -> &str {
         &self.metadata[f_id.0 as usize].name
+    }
+
+    #[inline]
+    pub fn file_package(&self, f_id: FileId) -> &str {
+        &self.metadata[f_id.0 as usize].package
     }
 
     #[inline]
@@ -218,10 +240,15 @@ impl Sources {
                 fold: false,
             })
             .collect();
+        let annotation_type = match err.code.level {
+            Level::Debug => AnnotationType::Info,
+            Level::Warning => AnnotationType::Warning,
+            Level::Error => AnnotationType::Error,
+        };
         let snippet = Snippet {
             title: Some(Annotation {
-                annotation_type: AnnotationType::Warning,
-                id: Some(err.code),
+                annotation_type,
+                id: Some(err.code.msg),
                 label: Some(&err.msg),
             }),
             footer: vec![],

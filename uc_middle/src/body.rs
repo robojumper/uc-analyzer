@@ -5,6 +5,8 @@ use uc_name::Identifier;
 
 use crate::{ty::Ty, DefId};
 
+pub mod interp;
+
 #[derive(Debug, Default)]
 pub struct Body {
     entry_block: Option<BlockId>,

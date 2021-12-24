@@ -18,7 +18,7 @@
 
 use std::{collections::HashMap, str::FromStr};
 
-pub use body::{BodyError, BodyErrorKind};
+pub use body::{BodyError, BodyErrorKind, IntEnumCorrespondence};
 use resolver::ResolverContext;
 use uc_ast::{DimCount, Hir};
 use uc_def::{ArgFlags, ClassFlags, FuncFlags, StructFlags, VarFlags};

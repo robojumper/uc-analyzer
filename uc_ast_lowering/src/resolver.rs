@@ -238,7 +238,6 @@ impl ResolverContext {
         match defs.walk_scopes(scope, kind, |def_id| match self.scoped_states.get(&def_id) {
             Some(items) => match items.get(name) {
                 Some(&d) => ControlFlow::Break(d),
-                Some(_) => ControlFlow::Continue(()),
                 None => ControlFlow::Continue(()),
             },
             None => ControlFlow::Continue(()),
